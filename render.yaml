@@ -1,0 +1,41 @@
+# Blueprint de Render: un solo servicio web Node que sirve la API (/api/v1) y la interfaz React (web/dist).
+# Los valores marcados sync: false NO están en el repositorio: Render los pide al crear el Blueprint
+# y se guardan cifrados en su panel (Environment). Ver docs/despliegue-render.md.
+services:
+  - type: web
+    name: apprestopciones
+    runtime: node
+    plan: free
+    # devDependencies (Babel, Vite) son necesarias para compilar; por eso --include=dev.
+    buildCommand: npm ci --include=dev && npm run build && npm --prefix web ci --include=dev && npm --prefix web run build
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: HOST
+        value: 0.0.0.0          # escuchar en todas las interfaces (Render enruta el tráfico al PORT que asigna)
+      - key: API_URL
+        value: /api/v1
+      - key: SESSION_TTL_SECONDS
+        value: "3600"
+      - key: ALPACA_DATA_FEED
+        value: iex
+      - key: DATABASE
+        value: db_opciones
+      # ---- Secretos: se capturan en el panel de Render, nunca en Git ----
+      - key: CONNECTION_STRING   # MongoDB Atlas (mongodb+srv://...)
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: ALPACA_KEY_ID       # claves Trading API PAPER (empiezan con PK)
+        sync: false
+      - key: ALPACA_SECRET_KEY
+        sync: false
+      - key: SEC_USER_AGENT      # "AppRESTOpciones tu-correo"
+        sync: false
+      - key: AUTH_USERS_JSON     # salida de: npm run exportar:usuarios
+        sync: false

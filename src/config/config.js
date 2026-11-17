@@ -10,6 +10,8 @@ export default {
   SUPABASE_URL: process.env.SUPABASE_URL || '',
   SUPABASE_SECRET_KEY: process.env.SUPABASE_SECRET_KEY || '',
   AUTH_USERS_FILE: process.env.AUTH_USERS_FILE || './private/users.json',
+  // En la nube (Render) no existe private/users.json: los usuarios pueden venir como JSON en una variable de entorno.
+  AUTH_USERS_JSON: process.env.AUTH_USERS_JSON || '',
   SESSION_TTL_SECONDS: Number(process.env.SESSION_TTL_SECONDS || 3600),
   CORS_ORIGINS: (process.env.CORS_ORIGINS || '').split(',').filter(Boolean),
 };

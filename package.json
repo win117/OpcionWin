@@ -19,7 +19,8 @@
     "backup": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/backup.ps1 -Etiqueta",
     "smoke:real": "npm run build && node scripts/smoke-real.cjs",
     "smoke:orden": "npm run build && node scripts/smoke-orden-paper.cjs",
-    "smoke:ejecucion": "npm run build && node scripts/smoke-orden-ejecucion.cjs"
+    "smoke:ejecucion": "npm run build && node scripts/smoke-orden-ejecucion.cjs",
+    "exportar:usuarios": "node scripts/exportar-usuarios.cjs"
   },
   "keywords": [],
   "author": "",
@@ -49,5 +50,8 @@
       "src"
     ],
     "ext": "js,json"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

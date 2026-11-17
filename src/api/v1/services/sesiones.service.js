@@ -7,9 +7,15 @@ import { repository } from '../../../repositories';
 import { object, validated } from './crud.service';
 const scrypt = promisify(scryptCallback);
 const hash = token => createHash('sha256').update(token).digest('hex');
-export async function fileUsers() {
-  try { return JSON.parse(await readFile(config.AUTH_USERS_FILE, 'utf8')); }
-  catch { throw boom.serverUnavailable('Configura usuarios con scripts/create-user.cjs.'); }
+// Usuarios: AUTH_USERS_JSON (variable de entorno, despliegue) tiene prioridad sobre AUTH_USERS_FILE (local).
+export function parseUsers(text) {
+  const users = JSON.parse(text);
+  if (!Array.isArray(users) || users.some(u => !u || typeof u.email !== 'string' || typeof u.salt !== 'string' || typeof u.passwordHash !== 'string')) throw new Error('Formato de usuarios inválido.');
+  return users;
+}
+export async function fileUsers(settings = config) {
+  try { return parseUsers(settings.AUTH_USERS_JSON || await readFile(settings.AUTH_USERS_FILE, 'utf8')); }
+  catch { throw boom.serverUnavailable('Configura usuarios con scripts/create-user.cjs (local) o la variable AUTH_USERS_JSON (despliegue).'); }
 }
 export function createSessionService(factory = repository, users = fileUsers) {
   return {

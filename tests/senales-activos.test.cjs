@@ -233,3 +233,11 @@ test('parametros: noticias configurable, intervalo solo 1Day; sincronización ac
   assert.equal(s.diasVencimientoMax, 90);
   await assert.rejects(validated('sincronizaciones', { usuarioId: 'u1', proveedor: 'alpaca', recurso: 'contratos', simbolos: ['AAPL'], diasVencimientoMin: 90, diasVencimientoMax: 20 }));
 });
+
+test('usuarios: AUTH_USERS_JSON tiene prioridad sobre el archivo y se valida el formato', async () => {
+  const { fileUsers, parseUsers } = require('../dist/api/v1/services/sesiones.service');
+  const u = [{ id: 'u1', email: 'a@example.com', salt: 's', passwordHash: 'h' }];
+  assert.deepEqual(await fileUsers({ AUTH_USERS_JSON: JSON.stringify(u), AUTH_USERS_FILE: './no-existe.json' }), u);
+  await assert.rejects(fileUsers({ AUTH_USERS_JSON: '', AUTH_USERS_FILE: './no-existe.json' }), /AUTH_USERS_JSON/);
+  assert.throws(() => parseUsers('{"email":"x"}'), /inválido/);
+});
