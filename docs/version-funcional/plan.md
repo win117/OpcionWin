@@ -13,7 +13,7 @@ Objetivo: que la plataforma **analice** (5 cores + confluencia + selección), **
 | 4 | Orquestación: cola de trabajos, sincronización, ejecución de cores, selección, confluencia | principal | Hecho (prueba E2E) |
 | 5 | Órdenes paper: envío, cancelación, posiciones | principal | Hecho (falta prueba con claves reales) |
 | 6 | Integración Express ↔ web/dist, OpenAPI actualizado | principal | Hecho |
-| 7 | Verificación real con claves (usuario) y documentación final | principal + usuario | Pendiente |
+| 7 | Verificación real con claves (usuario) y documentación final | principal + usuario | Hecho (MongoDB y Supabase; falta orden paper real) |
 
 ## Requisitos del usuario para verificar en vivo
 1. Completar en `.env`: `SEC_USER_AGENT="AppRESTOpciones tu-correo"`, `ALPACA_KEY_ID`, `ALPACA_SECRET_KEY` (cuenta paper).
@@ -33,6 +33,12 @@ ejecutar cores → confluencia por estrategia → selección (3 modos) → confi
   Listas CRUD ordenadas por `createdAt` descendente (antes por UUID aleatorio). Verificación de conexión devuelve objeto plano.
   Claves Alpaca del usuario devuelven 401: empiezan con `CK` (Broker API), se requieren claves Trading API paper (`PK`).
   Respaldo `backups/02-frontend-integrado-*.zip`.
+- 2026-11-16: Etapa 7 (verificación real). Claves Alpaca paper (PK) OK: cuenta ACTIVE, nivel de opciones 3.
+  `npm run smoke:real -- mongodb AAPL --institucional` y `-- supabase MSFT`: flujo completo con datos reales y limpieza total.
+  Corregido con datos reales: insumos opcionales `'opciones?'` no se cargaban (IV ignorada); IV promedio solo ±5 % del dinero;
+  escrituras en bloque `upsertMany` (velas 54 s → 3 s, contratos 242 s → 7 s); contratos ±25 % del precio y un snapshot vigente por contrato;
+  Supabase 201 sin cuerpo con `return=minimal` (cortaba velas a 100); cotización IEX cruzada (ask < bid) se guarda sin bid/ask; nombre SEC para 13F.
+  Respaldo `backups/03-verificacion-real-*.zip`.
 
 ## Cómo ejecutar
 - Desarrollo: `npm.cmd run dev` (API :PORT) y en otra terminal `npm.cmd run dev:web` (Vite con proxy).
@@ -50,3 +56,6 @@ ejecutar cores → confluencia por estrategia → selección (3 modos) → confi
 - Ajuste IV ±15 del Iron Condor heurístico (ADR-002).
 - 13F por nombre de emisor puede fallar; agregar campo CUSIP a Empresa mejoraría la coincidencia.
 - Tablas 13F grandes (BlackRock ~23 MB) hacen lenta la sincronización institucional.
+- **Desacuerdo entre cores ≠ neutralidad.** Si técnico es muy bajista y fundamental muy alcista, el sesgo combinado ≈ 0 y el Iron Condor sale favorecido. Propuesta: reducir compatibilidad o confianza según la dispersión de sesgos entre cores.
+- **Snapshots sin historial.** Solo se conserva el último por contrato; un IV Rank requeriría histórico de IV.
+- **Noticias casi neutras** con el léxico propio (MSFT 0.00 con 8 positivas / 3 negativas); calibrar léxico o pesos.
