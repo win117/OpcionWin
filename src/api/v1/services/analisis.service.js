@@ -1,0 +1,219 @@
+// Orquestación del análisis (ADR-001/002): carga datos guardados → core puro → registro trazable.
+import boom from '@hapi/boom';
+import { repository } from '../../../repositories';
+import { cores, confluencia, estrategias as estrategiasCore } from '../../../cores';
+import { CORES, ESTRATEGIAS } from '../models/shared';
+import { todos, obtener, crear } from './registros';
+import { iniciarTrabajo } from './trabajos.service';
+
+const fecha = d => new Date(d).getTime();
+const NOMBRES = {
+  LONG_CALL: ['Long Call', 'Compra de un call: ganancia si el subyacente sube por encima del strike más la prima; pérdida máxima = prima pagada.'],
+  LONG_PUT: ['Long Put', 'Compra de un put: ganancia si el subyacente baja por debajo del strike menos la prima; pérdida máxima = prima pagada.'],
+  IRON_CONDOR: ['Iron Condor', 'Venta de un put spread y un call spread fuera del dinero con el mismo vencimiento: crédito neto, ganancia si el precio permanece en rango.'],
+};
+
+function metricasValidas(lista = []) {
+  return lista.filter(m => m && m.nombre && Number.isFinite(m.valor))
+    .map(m => ({ nombre: String(m.nombre), valor: m.valor, unidad: m.unidad || 'indice', ...(m.periodo ? { periodo: String(m.periodo) } : {}) }));
+}
+const metrica = (registro, nombre) => registro.metricas?.find(m => m.nombre === nombre)?.valor;
+
+function ultimaFuente(registros, tipo) {
+  const conFuente = registros.filter(r => r.fuente?.fechaDato);
+  if (!conFuente.length) return [];
+  const ultima = conFuente.reduce((a, b) => fecha(a.fuente.fechaDato) >= fecha(b.fuente.fechaDato) ? a : b).fuente;
+  return [{ proveedor: ultima.proveedor, fechaDato: ultima.fechaDato, ...(ultima.feed ? { feed: ultima.feed } : {}), referencia: tipo }];
+}
+
+export function createAnalisis({ cola, factory = repository }) {
+  async function insumos(ctx, empresa, requiere, parametros = {}) {
+    const input = { simbolo: empresa.simbolo, velas: [], fundamentales: [], reportes: [], noticias: [], opciones: [] };
+    const fuentes = [];
+    const necesita = k => requiere.includes(k);
+    if (necesita('velas')) {
+      const intervalo = parametros.intervalo || '1Day';
+      const velas = (await todos('datos-mercado', ctx, { empresaId: empresa._id, tipo: 'vela' }, factory))
+        .filter(v => (v.intervalo || '1Day') === intervalo).sort((a, b) => fecha(a.fuente.fechaDato) - fecha(b.fuente.fechaDato));
+      input.velas = velas.map(v => ({ fecha: new Date(v.fuente.fechaDato).toISOString(), apertura: v.apertura, maximo: v.maximo, minimo: v.minimo, cierre: v.cierre, volumen: v.volumen }));
+      fuentes.push(...ultimaFuente(velas, 'velas'));
+    }
+    if (necesita('fundamentales')) {
+      const f = await todos('fundamentales', ctx, { empresaId: empresa._id }, factory);
+      input.fundamentales = f.map(({ periodoInicio, periodoFin, forma, metricas }) => ({ periodoInicio, periodoFin, forma, metricas }));
+      fuentes.push(...ultimaFuente(f, 'fundamentales'));
+    }
+    if (necesita('reportes')) {
+      const r = await todos('institucional', ctx, { empresaId: empresa._id }, factory);
+      input.reportes = r.map(({ fechaCorte, fechaPublicacion, tenencias }) => ({ fechaCorte, fechaPublicacion, tenencias }));
+      fuentes.push(...ultimaFuente(r, 'institucional'));
+    }
+    if (necesita('noticias')) {
+      const n = (await todos('noticias', ctx, undefined, factory)).filter(x => x.simbolos?.includes(empresa.simbolo));
+      input.noticias = n.map(({ titulo, resumen, publicadaEn, proveedor }) => ({ titulo, resumen, publicadaEn, proveedor }));
+      if (n.length) fuentes.push({ proveedor: n[0].proveedor, fechaDato: n.reduce((a, b) => fecha(a.publicadaEn) >= fecha(b.publicadaEn) ? a : b).publicadaEn, referencia: 'noticias' });
+    }
+    if (necesita('opciones')) {
+      const contratos = new Map((await todos('contratos', ctx, { empresaId: empresa._id }, factory)).map(c => [c._id, c]));
+      const ultimos = new Map();
+      for (const s of await todos('datos-mercado', ctx, { empresaId: empresa._id, tipo: 'snapshot_opcion' }, factory)) {
+        const prev = ultimos.get(s.contratoId);
+        if (!prev || fecha(s.fuente.fechaDato) > fecha(prev.fuente.fechaDato)) ultimos.set(s.contratoId, s);
+      }
+      input.opciones = [...ultimos.values()].filter(s => contratos.has(s.contratoId)).map(s => {
+        const c = contratos.get(s.contratoId);
+        return { tipo: c.tipo, strike: c.strike, vencimiento: c.vencimiento, bid: s.bid, ask: s.ask, volatilidadImplicita: s.volatilidadImplicita, griegas: s.griegas };
+      });
+      fuentes.push(...ultimaFuente([...ultimos.values()], 'opciones'));
+    }
+    return { input, fuentes };
+  }
+
+  // Ejecuta un core y devuelve datos + cambios listos para la Evaluacion.
+  async function calcular(ctx, core, empresa, perfil, parametrosExtra = {}) {
+    const modulo = cores[core];
+    const parametros = { ...(perfil?.parametros || {}), ...parametrosExtra };
+    const reglas = (perfil?.reglas || []).filter(r => r.core === core && r.activo !== false);
+    const datos = { core, empresaId: empresa._id, ...(perfil ? { perfilId: perfil._id } : {}), versionAlgoritmo: modulo.VERSION, parametros, reglasAplicadas: reglas };
+    const { input, fuentes } = await insumos(ctx, empresa, modulo.REQUIERE || [], parametros);
+    const r = modulo.evaluar({ ...input, fechaReferencia: new Date().toISOString(), parametros, reglas });
+    const cambios = {
+      ...(r.puntaje != null ? { puntaje: r.puntaje } : {}), cobertura: r.cobertura ?? 0,
+      metricas: metricasValidas(r.metricas), motivos: (r.motivos || []).map(String).slice(0, 50),
+      datosFaltantes: (r.datosFaltantes || []).map(String).slice(0, 50), fuentes,
+    };
+    return { datos, cambios };
+  }
+
+  async function asegurarEstrategias(ctx) {
+    const existentes = await todos('estrategias', ctx, undefined, factory);
+    const mapa = new Map(existentes.map(e => [e.codigo, e]));
+    for (const codigo of ESTRATEGIAS) if (!mapa.has(codigo)) {
+      mapa.set(codigo, await crear('estrategias', ctx, { codigo, nombre: NOMBRES[codigo][0], descripcion: NOMBRES[codigo][1], activo: true }, factory));
+    }
+    return mapa;
+  }
+
+  function combinar(estrategia, evaluaciones, coresSeleccionados, ponderaciones) {
+    const indicadores = evaluaciones.find(e => e.core === 'indicadores');
+    const volatilidad = indicadores ? { ivActual: metrica(indicadores, 'iv_promedio'), hv20: metrica(indicadores, 'hv_20') } : undefined;
+    return confluencia.evaluar({
+      estrategia,
+      evaluaciones: evaluaciones.map(e => ({ core: e.core, sesgo: metrica(e, 'sesgo') ?? null, confianza: metrica(e, 'confianza') ?? 0, puntaje: e.puntaje ?? null, cobertura: e.cobertura ?? 0 })),
+      ponderaciones: ponderaciones?.length ? ponderaciones : coresSeleccionados.map(core => ({ core, peso: 1 })),
+      coresSeleccionados, volatilidad,
+    });
+  }
+  const datosConfluencia = (r, coresSeleccionados) => ({
+    versionAlgoritmo: confluencia.VERSION, cobertura: r.cobertura ?? 0, motivos: (r.motivos || []).map(String).slice(0, 50),
+    ...(r.puntaje != null && r.sesgoCombinado != null ? { puntaje: r.puntaje } : {}),
+    ponderaciones: (r.ponderacionesEfectivas || []).filter(p => coresSeleccionados.includes(p.core) && Number.isFinite(p.peso)),
+  });
+
+  return {
+    asegurarEstrategias,
+    async ejecutarCore(ctx, core, body = {}) {
+      if (!CORES.includes(core)) throw boom.notFound('Core desconocido.');
+      const empresa = await obtener('empresas', ctx, body.empresaId, factory);
+      const perfil = body.perfilId ? await obtener('perfiles-analisis', ctx, body.perfilId, factory) : null;
+      const previo = await calcularDatosIniciales(core, empresa, perfil, body.parametros);
+      return iniciarTrabajo({ name: 'evaluaciones', ctx, factory, cola, datos: previo,
+        ejecutar: async () => (await calcular(ctx, core, empresa, perfil, body.parametros)).cambios });
+    },
+
+    async ejecutarConfluencia(ctx, body = {}) {
+      const estrategia = await obtener('estrategias', ctx, body.estrategiaId, factory);
+      await obtener('empresas', ctx, body.empresaId, factory);
+      const datos = { empresaId: body.empresaId, estrategiaId: body.estrategiaId, evaluacionesIds: body.evaluacionesIds,
+        coresSeleccionados: body.coresSeleccionados, versionAlgoritmo: confluencia.VERSION, ponderaciones: body.ponderaciones || [] };
+      return iniciarTrabajo({ name: 'confluencias', ctx, factory, cola, datos, ejecutar: async () => {
+        const evaluaciones = [];
+        for (const id of body.evaluacionesIds) {
+          const e = await obtener('evaluaciones', ctx, id, factory);
+          if (e.empresaId !== body.empresaId) throw boom.badRequest('La evaluación ' + id + ' pertenece a otra empresa.');
+          if (e.estado !== 'completada') throw boom.badRequest('La evaluación ' + id + ' no está completada.');
+          if (body.coresSeleccionados.includes(e.core)) evaluaciones.push(e);
+        }
+        return datosConfluencia(combinar(estrategia.codigo, evaluaciones, body.coresSeleccionados, body.ponderaciones), body.coresSeleccionados);
+      } });
+    },
+
+    async ejecutarSeleccion(ctx, body = {}) {
+      const perfil = body.perfilId ? await obtener('perfiles-analisis', ctx, body.perfilId, factory) : null;
+      const campos = ['modo', 'empresaId', 'estrategiaId', 'empresasCandidatas', 'estrategiasCandidatas', 'coresSeleccionados', 'perfilId', 'filtros'];
+      const datos = Object.fromEntries(campos.filter(k => body[k] !== undefined).map(k => [k, body[k]]));
+      return iniciarTrabajo({ name: 'selecciones', ctx, factory, cola, datos, ejecutar: async registro => {
+        const catalogo = await asegurarEstrategias(ctx);
+        const porId = new Map([...catalogo.values()].map(e => [e._id, e]));
+        let codigos = registro.estrategiasCandidatas?.length ? registro.estrategiasCandidatas : ESTRATEGIAS;
+        if (registro.modo !== 'empresa') {
+          const e = porId.get(registro.estrategiaId) || await obtener('estrategias', ctx, registro.estrategiaId, factory);
+          codigos = [e.codigo];
+        }
+        let empresas;
+        if (registro.modo === 'estrategia') {
+          empresas = registro.empresasCandidatas?.length
+            ? await Promise.all(registro.empresasCandidatas.map(id => obtener('empresas', ctx, id, factory)))
+            : (await todos('empresas', ctx, undefined, factory)).filter(e => e.activo !== false).slice(0, 25);
+        } else empresas = [await obtener('empresas', ctx, registro.empresaId, factory)];
+
+        const resultados = [];
+        for (const empresa of empresas) {
+          const evaluaciones = [];
+          for (const core of registro.coresSeleccionados) {
+            const { datos, cambios } = await calcular(ctx, core, empresa, perfil, registro.filtros || {});
+            evaluaciones.push(await crear('evaluaciones', ctx, { ...datos, ...cambios, estado: 'completada', finalizadaEn: new Date() }, factory));
+          }
+          for (const codigo of codigos) {
+            const estrategia = catalogo.get(codigo);
+            const r = combinar(codigo, evaluaciones, registro.coresSeleccionados);
+            const conf = await crear('confluencias', ctx, { empresaId: empresa._id, estrategiaId: estrategia._id,
+              evaluacionesIds: evaluaciones.map(e => e._id), coresSeleccionados: registro.coresSeleccionados, estado: 'completada',
+              ...datosConfluencia(r, registro.coresSeleccionados) }, factory);
+            resultados.push({ empresaId: empresa._id, estrategiaId: estrategia._id, confluenciaId: conf._id,
+              puntaje: r.sesgoCombinado == null ? 0 : r.puntaje, cobertura: r.sesgoCombinado == null ? 0 : (r.cobertura ?? 0),
+              motivos: (r.sesgoCombinado == null ? ['Sin datos suficientes para calcular compatibilidad.'] : []).concat((r.motivos || []).map(String)).slice(0, 8) });
+          }
+        }
+        resultados.sort((a, b) => b.puntaje - a.puntaje || b.cobertura - a.cobertura);
+        return { resultados };
+      } });
+    },
+
+    async evaluarConfiguracion(ctx, id, body = {}) {
+      const config = await obtener('configuraciones', ctx, id, factory);
+      const estrategia = await obtener('estrategias', ctx, config.estrategiaId, factory);
+      const datos = { core: 'configuracion', configuracionId: config._id, empresaId: config.empresaId, versionAlgoritmo: estrategiasCore.VERSION, parametros: config.parametros || {} };
+      return iniciarTrabajo({ name: 'evaluaciones', ctx, factory, cola, datos, ejecutar: async () => {
+        const snaps = await todos('datos-mercado', ctx, { empresaId: config.empresaId, tipo: 'snapshot_opcion' }, factory);
+        const fuentes = [];
+        const componentes = [];
+        for (const c of config.componentes || []) {
+          const contrato = await obtener('contratos', ctx, c.contratoId, factory);
+          const s = snaps.filter(x => x.contratoId === contrato._id).sort((a, b) => fecha(b.fuente.fechaDato) - fecha(a.fuente.fechaDato))[0];
+          const precio = s && s.bid != null && s.ask != null ? (s.bid + s.ask) / 2 : s?.ultimo;
+          if (s) fuentes.push(...ultimaFuente([s], contrato.contratoExternoId));
+          componentes.push({ tipo: contrato.tipo, strike: contrato.strike, vencimiento: contrato.vencimiento, accion: c.accion, cantidad: c.cantidad, ...(precio != null ? { precio } : {}) });
+        }
+        let precioSubyacente = Number.isFinite(body.precioSubyacente) ? body.precioSubyacente : undefined;
+        if (precioSubyacente === undefined) {
+          const velas = await todos('datos-mercado', ctx, { empresaId: config.empresaId, tipo: 'vela' }, factory);
+          const ultima = velas.sort((a, b) => fecha(b.fuente.fechaDato) - fecha(a.fuente.fechaDato))[0];
+          precioSubyacente = ultima?.cierre;
+        }
+        const r = estrategiasCore.evaluarConfiguracion({ estrategia: estrategia.codigo, componentes, precioSubyacente, multiplicador: 100 });
+        const conPrecio = componentes.filter(c => c.precio != null).length;
+        return { metricas: metricasValidas(r.metricas), motivos: [...(r.errores || []), ...(r.motivos || [])].map(String).slice(0, 50),
+          cobertura: componentes.length ? conPrecio / componentes.length : 0,
+          datosFaltantes: componentes.length > conPrecio ? ['precio de ' + (componentes.length - conPrecio) + ' componente(s)'] : [], fuentes };
+      } });
+    },
+  };
+}
+
+// Datos guardados al crear la evaluación (antes de calcular), para que el registro sea trazable desde el inicio.
+async function calcularDatosIniciales(core, empresa, perfil, parametrosExtra = {}) {
+  return { core, empresaId: empresa._id, ...(perfil ? { perfilId: perfil._id } : {}), versionAlgoritmo: cores[core].VERSION,
+    parametros: { ...(perfil?.parametros || {}), ...parametrosExtra },
+    reglasAplicadas: (perfil?.reglas || []).filter(r => r.core === core && r.activo !== false) };
+}

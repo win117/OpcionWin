@@ -24,11 +24,15 @@ import ordenes from './ordenes.routes';
 import posiciones from './posiciones.routes';
 import sincronizaciones from './sincronizaciones.routes';
 import auditoria from './auditoria.routes';
-export default function routeAPI(app, { factory = repository, auth = createSessionService(factory) } = {}) {
+import acciones from './acciones.routes';
+import { createIntegrations } from '../../../integrations';
+import { colaGlobal } from '../../../jobs/cola';
+export default function routeAPI(app, { factory = repository, auth = createSessionService(factory), integraciones = createIntegrations(process.env), cola = colaGlobal } = {}) {
   const router=Router();
   router.use('/sesiones',sesiones({auth}));
   const secured=Router();
   secured.use(authenticate(auth));
+  secured.use(acciones({factory,integraciones,cola}));
   secured.use('/empresas',empresas({factory}));
   secured.use('/estrategias',estrategias({factory}));
   secured.use('/configuraciones',configuraciones({factory}));
@@ -47,7 +51,7 @@ export default function routeAPI(app, { factory = repository, auth = createSessi
   secured.use('/posiciones',posiciones({factory}));
   secured.use('/sincronizaciones',sincronizaciones({factory}));
   secured.use('/auditoria',auditoria({factory}));
-  secured.use('/mercado',mercado({factory}));
+  secured.use('/mercado',mercado({factory,integraciones}));
   secured.use('/cores',cores({factory}));
   router.use(secured);
   app.use(config.API_URL,router);

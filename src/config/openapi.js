@@ -32,5 +32,20 @@ export function openapi() {
   paths['/mercado/opciones/{contratoId}/snapshot']={get:operation('Consultar snapshot almacenado',[id('contratoId')])};
   paths['/cores/{core}/evaluaciones']={get:operation('Consultar evaluaciones guardadas',[id('core')])};
   paths['/cores/{core}/evaluaciones/{id}']={get:operation('Consultar evaluación guardada',[id('core'),id('id')])};
-  return {openapi:'3.0.3',info:{title:'Proyecto de opciones - CRUD',version:'1.0.0',description:'CRUD dual MongoDB/PostgreSQL. Los registros de órdenes, análisis y sincronización son locales; no realizan operaciones externas.'},servers:[{url:config.API_URL}],components:{securitySchemes:{bearerAuth:{type:'http',scheme:'bearer',description:'Token opaco devuelto por POST /sesiones'}}},paths};
+  // Acciones de la versión funcional (docs/version-funcional/contratos.md §5).
+  const job=(summary,params=[])=>({...operation(summary,params,true),responses:{202:{description:'Trabajo aceptado: consultar el registro hasta completada|fallida'},400:{description:'Datos inválidos'},401:{description:'Sesión inválida'}}});
+  paths['/cores/{core}/evaluaciones'].post=job('Ejecutar el core sobre datos sincronizados: {empresaId, perfilId?, parametros?}',[id('core')]);
+  paths['/integraciones/estado']={get:operation('Estado de configuración de proveedores (sin revelar claves)')};
+  paths['/sincronizaciones/ejecuciones']={post:job('Sincronizar desde proveedor: {recurso, simbolos[], desde?, hasta?, conexionId?}')};
+  paths['/selecciones/ejecuciones']={post:job('Ejecutar selección (empresa | estrategia | empresa_estrategia)')};
+  paths['/confluencias/ejecuciones']={post:job('Combinar evaluaciones completadas para una estrategia')};
+  paths['/configuraciones/{id}/evaluaciones']={post:job('Validar estructura y calcular payoff de la configuración',[id('id')])};
+  paths['/estrategias/catalogo-base']={post:operation('Crear el catálogo LONG_CALL, LONG_PUT, IRON_CONDOR si falta')};
+  paths['/mercado/cotizaciones/{simbolo}/en-vivo']={get:operation('Cotización directa del proveedor (no se guarda)',[id('simbolo')])};
+  paths['/mercado/opciones/cadena/{simbolo}']={get:operation('Cadena de opciones con IV y griegas del proveedor (?vencimiento&tipo)',[id('simbolo')])};
+  const key={name:'Idempotency-Key',in:'header',required:true,schema:{type:'string'}};
+  paths['/ordenes/{id}/envio']={post:{...operation('Enviar orden a Alpaca PAPER (idempotente)',[id('id'),key]),responses:{200:ok,400:{description:'Falta Idempotency-Key'},403:{description:'Entorno no paper'},409:{description:'Key distinta o estado inválido'}}}};
+  paths['/ordenes/{id}/cancelacion']={post:operation('Cancelar orden (local o en Alpaca paper)',[id('id')])};
+  paths['/conexiones-broker/{id}/verificacion']={post:operation('Verificar cuenta paper y activar conexión',[id('id')])};
+  return {openapi:'3.0.3',info:{title:'Plataforma de análisis de opciones',version:'2.0.0',description:'CRUD dual MongoDB/PostgreSQL + sincronización con Alpaca/SEC, cinco cores, confluencia, selección y órdenes en Alpaca paper.'},servers:[{url:config.API_URL}],components:{securitySchemes:{bearerAuth:{type:'http',scheme:'bearer',description:'Token opaco devuelto por POST /sesiones'}}},paths};
 }

@@ -14,7 +14,10 @@ function memoryFactory() {
       }
     };
     return {
-      async list({offset=0,limit=50}={}) { return [...store.values()].slice(offset,offset+limit).map(clone); },
+      async list({offset=0,limit=50,filtro}={}) {
+        const f=Object.entries(filtro||{});
+        return [...store.values()].filter(r=>f.every(([k,v])=>String(r.document[k])===v)).slice(offset,offset+limit).map(clone);
+      },
       async get(id) { return clone(store.get(id)); },
       async create(doc) {
         if (store.has(doc._id)) throw boom.conflict();

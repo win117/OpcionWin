@@ -3,6 +3,8 @@ import morgan from 'morgan';
 import cors from 'cors';
 import boom from '@hapi/boom';
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import swaggerUi from 'swagger-ui-express';
 import config from './config/config';
 import routeAPI from './api/v1/routes';
@@ -22,6 +24,12 @@ export function createApp(options = {}) {
   app.get(config.API_URL+'/openapi.json',(_req,res)=>res.json(openapi()));
   app.use(config.API_URL+'/api-docs',swaggerUi.serve,swaggerUi.setup(openapi()));
   routeAPI(app,options);
+  // Frontend compilado (ADR-007): web/dist en la raíz del proyecto, con respaldo SPA.
+  const web = options.webDir ?? path.resolve(__dirname, '..', 'web', 'dist');
+  if (web && existsSync(path.join(web, 'index.html'))) {
+    app.use(express.static(web, { index: false, maxAge: '1h' }));
+    app.get(/^\/(?!api\/|health$).*/, (_req, res) => res.sendFile(path.join(web, 'index.html')));
+  }
   app.use((_req,_res,next)=>next(boom.notFound('Ruta no encontrada.')));
   app.use((error,req,res,next)=>{
     if(res.headersSent) return next(error);
@@ -30,6 +38,10 @@ export function createApp(options = {}) {
     else if(error.type==='entity.too.large') handled=boom.entityTooLarge('El cuerpo supera 1 MB.');
     else if(['ValidationError','StrictModeError','CastError'].includes(error.name)) handled=boom.badRequest(error.message);
     else if(error.code===11000 || error.code==='23505') handled=boom.conflict('Registro duplicado.');
+    else if(error.name==='IntegrationError') {
+      const status={SIN_CREDENCIALES:503,LIMITE:429,NO_ENCONTRADO:404,NO_IMPLEMENTADO:501,PROVEEDOR:502,RED:502}[error.codigo]||502;
+      handled=new boom.Boom('['+(error.proveedor||'proveedor')+'] '+(error.mensaje||'Error del proveedor externo.'),{statusCode:status});
+    }
     if(!boom.isBoom(handled)) handled=boom.internal();
     const {output}=handled;
     res.set(output.headers).status(output.statusCode).json({success:false,message:output.payload.message,error:output.payload.error,requestId:req.requestId});

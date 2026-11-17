@@ -1,6 +1,6 @@
 import boom from '@hapi/boom';
 import { connectMongo } from '../../config/database.config';
-import { resource } from '../resources';
+import { resource, filtroSeguro } from '../resources';
 export function mongoRepository(name, owner, connect = connectMongo) {
   const table = resource(name).table;
   const collection = async () => {
@@ -8,8 +8,11 @@ export function mongoRepository(name, owner, connect = connectMongo) {
     catch { throw boom.serverUnavailable('MongoDB no está disponible.'); }
   };
   return {
-    async list({ offset = 0, limit = 50 } = {}) {
-      return (await collection()).find({ owner_id: owner }).sort({ _id: 1 }).skip(offset).limit(limit).toArray();
+    // filtro: igualdad sobre campos de primer nivel del documento (claves validadas en filtroSeguro).
+    async list({ offset = 0, limit = 50, filtro } = {}) {
+      const query = { owner_id: owner };
+      for (const [k, v] of filtroSeguro(filtro)) query['document.' + k] = v;
+      return (await collection()).find(query).sort({ _id: 1 }).skip(offset).limit(limit).toArray();
     },
     async get(id) { return (await collection()).findOne({ _id: id, owner_id: owner }); },
     async create(document) {

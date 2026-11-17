@@ -8,3 +8,5 @@ output/
 *.log
 private/
 
+web/node_modules/
+web/dist/

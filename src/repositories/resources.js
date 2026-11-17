@@ -20,6 +20,14 @@ export const resources = {
   'sincronizaciones': { Model: models.Sincronizacion, table: 'api_sincronizaciones' },
   'auditoria': { Model: models.EventoAuditoria, table: 'api_auditoria' },
 };
+// Filtros de igualdad de repositorio: solo claves alfanuméricas y valores string.
+export function filtroSeguro(filtro) {
+  if (!filtro) return [];
+  return Object.entries(filtro).map(([k, v]) => {
+    if (!/^[a-zA-Z][a-zA-Z0-9]{0,40}$/.test(k) || typeof v !== 'string') throw new Error('Filtro de repositorio inválido');
+    return [k, v];
+  });
+}
 export function resource(name) {
   if (!Object.hasOwn(resources, name)) throw new Error('Recurso interno desconocido');
   return resources[name];
