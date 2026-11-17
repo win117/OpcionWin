@@ -39,7 +39,7 @@ export function createApp(options = {}) {
     else if(['ValidationError','StrictModeError','CastError'].includes(error.name)) handled=boom.badRequest(error.message);
     else if(error.code===11000 || error.code==='23505') handled=boom.conflict('Registro duplicado.');
     else if(error.name==='IntegrationError') {
-      const status={SIN_CREDENCIALES:503,LIMITE:429,NO_ENCONTRADO:404,NO_IMPLEMENTADO:501,PROVEEDOR:502,RED:502}[error.codigo]||502;
+      const status={SIN_CREDENCIALES:503,LIMITE:429,NO_ENCONTRADO:404,NO_IMPLEMENTADO:501,VALIDACION:400,NO_PERMITIDO:403,PROVEEDOR:502,RED:502}[error.codigo]||502;
       handled=new boom.Boom('['+(error.proveedor||'proveedor')+'] '+(error.mensaje||'Error del proveedor externo.'),{statusCode:status});
     }
     if(!boom.isBoom(handled)) handled=boom.internal();
