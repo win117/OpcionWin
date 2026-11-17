@@ -39,6 +39,11 @@ ejecutar cores → confluencia por estrategia → selección (3 modos) → confi
   escrituras en bloque `upsertMany` (velas 54 s → 3 s, contratos 242 s → 7 s); contratos ±25 % del precio y un snapshot vigente por contrato;
   Supabase 201 sin cuerpo con `return=minimal` (cortaba velas a 100); cotización IEX cruzada (ask < bid) se guarda sin bid/ask; nombre SEC para 13F.
   Respaldo `backups/03-verificacion-real-*.zip`.
+- 2026-11-17: Interfaz de un clic. Página `/analizar/:simbolo` (y buscador en el Panel): sincroniza empresa → históricos, cotización,
+  noticias, fundamentales, contratos (13F opcional) en paralelo → 5 cores → selección, con progreso por paso; luego muestra resumen
+  guardado (precio, velas, recomendación, tarjetas por core, noticias). El core institucional se omite si no hay 13F.
+  Corregido: el gráfico de Mercado mostraba las 100 velas más antiguas de 300 (`slice(0,100)` sobre serie ascendente).
+  Verificado con NVDA real en ~17 s (sin 13F). Respaldo `backups/04-interfaz-analizar-*.zip`.
 
 ## Cómo ejecutar
 - Desarrollo: `npm.cmd run dev` (API :PORT) y en otra terminal `npm.cmd run dev:web` (Vite con proxy).

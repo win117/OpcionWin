@@ -8,7 +8,7 @@ import { useAsync } from '../../hooks/useAsync';
 import { mercado } from '../../api/resources';
 import { fmtCompact, fmtMoney, fmtPct, fmtDate } from '../../utils/format';
 
-const MAX_VELAS = 100;
+const MAX_VELAS = 300;
 
 /** Datos-mercado tipo vela → velas para lightweight-charts (ascendentes, sin tiempos repetidos). */
 export function toCandles(rows) {
@@ -32,7 +32,7 @@ export default function GraficoTab({ simbolo }) {
   const activo = intervalo || intervalos[0] || '';
   const velas = useMemo(() => {
     const filtered = activo ? rows.filter(r => r.intervalo === activo) : rows;
-    return toCandles(filtered.slice(0, MAX_VELAS));
+    return toCandles(filtered.slice(-MAX_VELAS));
   }, [rows, activo]);
   const last = velas.at(-1), prev = velas.at(-2);
   const intradia = /min|hour|^\d+[mh]$/i.test(activo);

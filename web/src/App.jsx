@@ -3,6 +3,7 @@ import { useAuth } from './context/AuthContext';
 import { Layout } from './components/Layout';
 import Login from './pages/Login';
 import Panel from './pages/Panel';
+import Analizar from './pages/Analizar';
 import Empresas from './pages/Empresas';
 import Estrategias from './pages/Estrategias';
 import Mercado from './pages/Mercado';
@@ -28,6 +29,8 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route element={<RequireAuth><Layout /></RequireAuth>}>
         <Route index element={<Panel />} />
+        <Route path="analizar" element={<Analizar />} />
+        <Route path="analizar/:simbolo" element={<Analizar />} />
         <Route path="empresas" element={<Empresas />} />
         <Route path="estrategias" element={<Estrategias />} />
         <Route path="mercado" element={<Mercado />} />

@@ -5,6 +5,7 @@ import { IntegrationStatus, useIntegraciones } from './IntegrationStatus';
 
 const NAV = [
   { to: '/', label: 'Panel', end: true },
+  { to: '/analizar', label: 'Analizar símbolo' },
   { group: 'Catálogos' },
   { to: '/empresas', label: 'Empresas' },
   { to: '/estrategias', label: 'Estrategias' },
