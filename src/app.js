@@ -28,7 +28,7 @@ export function createApp(options = {}) {
   const web = options.webDir ?? path.resolve(__dirname, '..', 'web', 'dist');
   if (web && existsSync(path.join(web, 'index.html'))) {
     app.use(express.static(web, { index: false, maxAge: '1h' }));
-    app.get(/^\/(?!api\/|health$).*/, (_req, res) => res.sendFile(path.join(web, 'index.html')));
+    app.get(/^\/(?!api\/|health$|assets\/).*/, (_req, res) => res.sendFile(path.join(web, 'index.html')));
   }
   app.use((_req,_res,next)=>next(boom.notFound('Ruta no encontrada.')));
   app.use((error,req,res,next)=>{
