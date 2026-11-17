@@ -20,7 +20,7 @@ export default (factory, integraciones) => {
   // Serie ordenada por fecha (las más recientes), lista para gráficos de velas.
   const serie = tipo => handle(async (req, res) => {
     const empresa = await empresaPorSimbolo(req.context, req.params.simbolo, factory).catch(() => { throw boom.notFound('Empresa no registrada.'); });
-    const n = limite(req.query.limit, tipo === 'vela' ? 300 : 20, 1000);
+    const n = limite(req.query.limit, tipo === 'vela' ? 300 : 20, 10000);
     const intervalo = req.query.intervalo || '1Day';
     const items = (await todos('datos-mercado', req.context, { empresaId: empresa._id, tipo }, factory))
       .filter(v => tipo !== 'vela' || (v.intervalo || '1Day') === intervalo)

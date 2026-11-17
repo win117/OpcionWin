@@ -29,24 +29,24 @@ function AnalizarRapido({ empresas: lista }) {
   const submit = e => {
     e.preventDefault();
     const sym = texto.trim().toUpperCase();
-    if (sym) navigate('/analizar/' + sym, { state: { ejecutar: true } });
+    if (sym) navigate('/analizar?q=' + encodeURIComponent(sym));
   };
   return (
     <section className="card">
       <div className="card__header">
         <div>
-          <h2>Analizar un símbolo</h2>
-          <p className="muted">Un clic: datos reales de Alpaca y SEC, los 5 cores y la estrategia más compatible.</p>
+          <h2>Buscar empresa</h2>
+          <p className="muted">Busca por símbolo o nombre, revisa sus datos y analízala con los cores que elijas.</p>
         </div>
       </div>
       <form className="search" onSubmit={submit}>
         <label className="sr-only" htmlFor="panel-simbolo">Símbolo</label>
         <input id="panel-simbolo" className="search__input" value={texto} onChange={e => setTexto(e.target.value.toUpperCase())} placeholder="AAPL, MSFT, NVDA…" autoComplete="off" />
-        <button type="submit" className="btn btn--primary" disabled={!texto.trim()}>Analizar</button>
+        <button type="submit" className="btn btn--primary" disabled={!texto.trim()}>Buscar</button>
       </form>
       {lista.length > 0 && (
-        <div className="chips" aria-label="Ver análisis guardado">
-          <span className="muted small">Ver análisis guardado:</span>
+        <div className="chips" aria-label="Empresas registradas">
+          <span className="muted small">Empresas registradas:</span>
           {lista.map(e => <Link key={e._id} to={'/analizar/' + e.simbolo} className="chip">{e.simbolo}</Link>)}
         </div>
       )}
@@ -74,7 +74,7 @@ export default function Panel() {
 
   return (
     <>
-      <PageHeader title="Panel" subtitle="Resumen de tu espacio de análisis" />
+      <PageHeader title="Resumen" subtitle="Resumen de tu espacio de análisis" />
       <AnalizarRapido empresas={cEmpresas.data?.items || []} />
       <div className="grid grid--stats">
         <Count label="Empresas" state={cEmpresas} to="/empresas" />

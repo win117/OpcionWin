@@ -17,11 +17,18 @@ export default function ConfigAnalisis({ config, onChange, catalogo, corriendo, 
   const setCore = (core, cambios) => onChange({ ...config, cores: { ...config.cores, [core]: { ...config.cores[core], ...cambios } } });
   const setExcl = (core, lista) => onChange({ ...config, excluidas: { ...config.excluidas, [core]: lista } });
   const seleccionados = CORES.filter(c => config.cores[c].on && config.cores[c].peso > 0);
+  let totalM = 0; let marcadasM = 0;
+  for (const core of seleccionados) {
+    const senales = catalogo?.find(x => x.core === core)?.senales || [];
+    const ex = new Set(config.excluidas[core] || []);
+    totalM += senales.length; marcadasM += senales.filter(s => !ex.has(s.nombre)).length;
+  }
+  const resumen = `${seleccionados.length} ${seleccionados.length === 1 ? 'core' : 'cores'}` + (totalM ? ` · ${marcadasM} de ${totalM} métricas` : '');
 
   return (
-    <section className="card" aria-labelledby="cfg-titulo">
+    <section className="card cfg-card" aria-labelledby="cfg-titulo">
       <div className="card__header">
-        <div><h2 id="cfg-titulo">Configurar análisis</h2><p className="muted small">Elige los cores, su peso (0–5) y las señales que entran al cálculo.</p></div>
+        <div><h2 id="cfg-titulo">Configurar análisis</h2><p className="muted small">Elige los cores, su peso (0–5) y las métricas que entran al cálculo.</p></div>
       </div>
       <ul className="cfg-cores">
         {CORES.map(core => {
@@ -46,7 +53,7 @@ export default function ConfigAnalisis({ config, onChange, catalogo, corriendo, 
                 </label>
                 {c.on && senales.length > 0 && (
                   <button type="button" className="btn btn--sm btn--ghost" aria-expanded={!!abierto} onClick={() => setAbiertos(a => ({ ...a, [core]: !a[core] }))}>
-                    Señales {marcadas}/{senales.length} {abierto ? '▲' : '▼'}
+                    Métricas {marcadas}/{senales.length} {abierto ? '▲' : '▼'}
                   </button>
                 )}
               </div>
@@ -78,11 +85,12 @@ export default function ConfigAnalisis({ config, onChange, catalogo, corriendo, 
         <label className="check"><input type="checkbox" checked={config.sincronizar} onChange={e => onChange({ ...config, sincronizar: e.target.checked })} disabled={corriendo} /><span>Sincronizar datos antes de analizar</span></label>
         <label className="check"><input type="checkbox" checked={config.institucional} onChange={e => onChange({ ...config, institucional: e.target.checked })} disabled={corriendo || !config.sincronizar} /><span>Incluir 13F institucional <small className="muted">(lento: 1–3 min)</small></span></label>
       </div>
-      <div>
-        <button type="button" className="btn btn--primary" onClick={onAnalizar} disabled={corriendo || !seleccionados.length}>
-          {corriendo ? 'Analizando…' : 'Analizar con esta configuración'}
+      <div className="cfg-accion">
+        <p className="cfg-resumen" aria-live="polite">{resumen}</p>
+        <button type="button" className="btn btn--primary btn--lg" onClick={onAnalizar} disabled={corriendo || !seleccionados.length}>
+          {corriendo ? 'Analizando…' : 'Analizar'}
         </button>
-        {!seleccionados.length && <span className="muted small"> Selecciona al menos un core con peso mayor que 0.</span>}
+        {!seleccionados.length && <span className="muted small">Selecciona al menos un core con peso mayor que 0.</span>}
       </div>
     </section>
   );

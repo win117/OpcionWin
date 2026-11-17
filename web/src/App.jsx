@@ -28,7 +28,8 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route element={<RequireAuth><Layout /></RequireAuth>}>
-        <Route index element={<Panel />} />
+        <Route index element={<Analizar />} />
+        <Route path="panel" element={<Panel />} />
         <Route path="analizar" element={<Analizar />} />
         <Route path="analizar/:simbolo" element={<Analizar />} />
         <Route path="empresas" element={<Empresas />} />

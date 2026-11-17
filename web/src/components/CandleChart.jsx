@@ -17,13 +17,17 @@ function themeOptions() {
   };
 }
 
+import { rangoVisible } from '../utils/velas';
+
 /**
- * Velas + volumen. `velas`: [{ time (segundos UTC), open, high, low, close, volume }] ascendente y sin duplicados.
+ * Velas o línea + volumen. `velas`: [{ time (segundos UTC), open, high, low, close, volume }] ascendente y sin duplicados.
+ * `tipo`: 'velas'|'linea'. `rango`: clave de utils/velas (null = todo). Una sola instancia; los datos se actualizan in situ.
  */
-export function CandleChart({ velas, height = 380, intradia = false, overlays }) {
+export function CandleChart({ velas, height = 380, intradia = false, overlays, tipo = 'velas', volumen = true, rango = null }) {
   const container = useRef(null);
   const chartRef = useRef(null);
   const seriesRef = useRef({});
+  const lineasRef = useRef(new Map());
 
   useEffect(() => {
     const el = container.current;
@@ -41,45 +45,68 @@ export function CandleChart({ velas, height = 380, intradia = false, overlays })
       upColor: up, downColor: down, borderUpColor: up, borderDownColor: down, wickUpColor: up, wickDownColor: down,
     });
     candles.priceScale().applyOptions({ scaleMargins: { top: 0.06, bottom: 0.26 } });
-    const volume = chart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: 'volumen', lastValueVisible: false, priceLineVisible: false });
+    const linea = chart.addLineSeries({ color: cssVar('--accent', '#0f766e'), lineWidth: 2, visible: false, priceLineVisible: false });
+    const vol = chart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceScaleId: 'volumen', lastValueVisible: false, priceLineVisible: false });
     chart.priceScale('volumen').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
     chartRef.current = chart;
-    seriesRef.current = { candles, volume, up, down };
+    seriesRef.current = { candles, linea, volume: vol, up, down };
 
     const media = window.matchMedia('(prefers-color-scheme: dark)');
     const onTheme = () => chart.applyOptions(themeOptions());
     media.addEventListener?.('change', onTheme);
+    const lineas = lineasRef.current;
     return () => {
       media.removeEventListener?.('change', onTheme);
       chart.remove();
       chartRef.current = null;
+      seriesRef.current = {};
+      lineas.clear();
     };
   }, [height]);
 
   useEffect(() => {
-    const { candles, volume, up, down } = seriesRef.current;
+    const { candles, linea, volume, up, down } = seriesRef.current;
     if (!candles) return;
     candles.setData(velas.map(v => ({ time: v.time, open: v.open, high: v.high, low: v.low, close: v.close })));
-    volume.setData(velas.map(v => ({
-      time: v.time,
-      value: v.volume,
-      color: (v.close >= v.open ? up : down) + '66',
-    })));
+    linea.setData(velas.map(v => ({ time: v.time, value: v.close })));
+    volume.setData(velas.map(v => ({ time: v.time, value: v.volume, color: (v.close >= v.open ? up : down) + '66' })));
     chartRef.current?.applyOptions({ timeScale: { timeVisible: intradia } });
-    chartRef.current?.timeScale().fitContent();
-  }, [velas, intradia]);
+  }, [velas, intradia, height]);
 
-  // Superposiciones opcionales: [{ id, label, color, data: [{ time, value }] }] como líneas.
+  useEffect(() => {
+    const { candles, linea, volume } = seriesRef.current;
+    if (!candles) return;
+    candles.applyOptions({ visible: tipo === 'velas' });
+    linea.applyOptions({ visible: tipo === 'linea' });
+    volume.applyOptions({ visible: volumen });
+    candles.priceScale().applyOptions({ scaleMargins: { top: 0.06, bottom: volumen ? 0.26 : 0.06 } });
+  }, [tipo, volumen, height]);
+
+  // Superposiciones: [{ id, label, color, data }]; se crean/actualizan/eliminan por id.
   useEffect(() => {
     const chart = chartRef.current;
-    if (!chart || !overlays?.length) return undefined;
-    const lines = overlays.map(o => {
-      const line = chart.addLineSeries({ color: cssVar(o.color, o.color), lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, title: o.label });
-      line.setData(o.data);
-      return line;
-    });
-    return () => { if (chartRef.current) lines.forEach(l => { try { chartRef.current.removeSeries(l); } catch { /* ya eliminada */ } }); };
-  }, [overlays, velas]);
+    if (!chart) return;
+    const mapa = lineasRef.current;
+    const ids = new Set((overlays || []).map(o => o.id));
+    for (const [id, l] of mapa) if (!ids.has(id)) { try { chart.removeSeries(l); } catch { /* ya eliminada */ } mapa.delete(id); }
+    for (const o of overlays || []) {
+      let l = mapa.get(o.id);
+      if (!l) {
+        l = chart.addLineSeries({ color: cssVar(o.color, o.color), lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, title: o.label });
+        mapa.set(o.id, l);
+      }
+      l.setData(o.data);
+    }
+  }, [overlays, velas, height]);
 
-  return <div ref={container} className="candle-chart" style={{ height }} role="img" aria-label={`Gráfico de velas con ${velas.length} periodos y volumen`} />;
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart || !velas.length) return;
+    const r = rango ? rangoVisible(rango, velas) : null;
+    try {
+      if (r) chart.timeScale().setVisibleRange(r); else chart.timeScale().fitContent();
+    } catch { chart.timeScale().fitContent(); }
+  }, [velas, rango, height]);
+
+  return <div ref={container} className="candle-chart" style={{ height }} role="img" aria-label={`Gráfico de ${tipo === 'linea' ? 'línea' : 'velas'} con ${velas.length} periodos`} />;
 }

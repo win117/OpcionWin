@@ -40,7 +40,7 @@ export function createSincronizador({ integraciones, factory = repository }) {
       const empresa = await empresaPorSimbolo(ctx, simbolo, factory);
       const { desde, hasta } = rango(datos, 420); // ~290 sesiones: SMA200 + rango 52 semanas
       const intervalo = '1Day';
-      const velas = await alpaca.velas(empresa.simbolo, { intervalo, desde: iso(desde), hasta: iso(hasta) });
+      const velas = await alpaca.velas(empresa.simbolo, { intervalo, desde: iso(desde), hasta: iso(hasta), limite: 10000 }); // hasta ~40 años diarios
       return guardarLote('datos-mercado', ctx, velas.map(v => ({ id: idDeterminista(empresa._id, 'vela', intervalo, iso(v.fecha)), datos: {
         empresaId: empresa._id, tipo: 'vela', intervalo,
         apertura: v.apertura, maximo: v.maximo, minimo: v.minimo, cierre: v.cierre, volumen: v.volumen,

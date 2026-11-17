@@ -7,9 +7,10 @@ import { activos, empresas } from '../../api/resources';
 
 const aItem = e => ({ simbolo: e.simbolo, nombre: e.nombre, mercado: e.mercado, registrada: true, empresaId: e._id });
 
-export default function Buscador({ seleccionado, onSelect, version }) {
-  const [texto, setTexto] = useState('');
-  const [q, setQ] = useState('');
+export default function Buscador({ seleccionado, onSelect, version, inicial = '' }) {
+  const [texto, setTexto] = useState(inicial);
+  const [q, setQ] = useState(inicial.trim());
+  useEffect(() => { if (inicial) setTexto(inicial); }, [inicial]);
   const lista = useRef(null);
   const input = useRef(null);
 

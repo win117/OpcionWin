@@ -4,8 +4,8 @@ import { useAuth } from '../context/AuthContext';
 import { IntegrationStatus, useIntegraciones } from './IntegrationStatus';
 
 const NAV = [
-  { to: '/', label: 'Panel', end: true },
-  { to: '/analizar', label: 'Analizar símbolo' },
+  { to: '/', label: 'Buscar y analizar', end: true },
+  { to: '/panel', label: 'Resumen' },
   { group: 'Catálogos' },
   { to: '/empresas', label: 'Empresas' },
   { to: '/estrategias', label: 'Estrategias' },

@@ -484,3 +484,18 @@ input:disabled, select:disabled { opacity: .65; }
 .chain__grp { text-align: center !important; }
 .chain__grp--call { color: var(--up) !important; }
 .chain__grp--put { color: var(--down) !important; }
+
+/* ---- Barra de opciones del gráfico ---- */
+.chart-toolbar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; background: var(--surface); }
+.seg__btn { border: 0; border-right: 1px solid var(--border-subtle); background: transparent; color: var(--text); font: inherit; font-size: .85rem; padding: 6px 10px; min-height: 34px; cursor: pointer; }
+.seg__btn:last-child { border-right: 0; }
+.seg__btn:hover { background: var(--surface-3); }
+.seg__btn:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.seg__btn.is-active { background: var(--accent-soft); color: var(--accent-strong); font-weight: 700; }
+.chart-hist { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+.cfg-resumen { margin: 0; font-weight: 600; color: var(--accent-strong); }
+.cfg-accion { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding-top: 8px; border-top: 1px solid var(--border-subtle); }
+.btn--lg { min-height: 48px; padding: 0 28px; font-size: 1.05rem; font-weight: 700; }
+.cfg-card { border: 2px solid var(--accent); }
+.mini-progress { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }

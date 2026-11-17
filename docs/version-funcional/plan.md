@@ -52,6 +52,14 @@ ejecutar cores → confluencia por estrategia → selección (3 modos) → confi
   Corregido con datos reales: atributo de opciones de Alpaca es `has_options` (no `options_enabled`).
   Verificado en Supabase con NVDA (66 contratos del vencimiento más cercano, 62 con griegas). MongoDB Atlas rechazó la IP actual
   (lista de acceso de Atlas, no código). 96 pruebas. Respaldo `backups/05-maestro-detalle-*.zip`.
+- 2026-11-17: Retroalimentación del usuario: la entrada debe ser **buscar**, no analizar. Inicio (`/`) = espacio Buscar y analizar;
+  Panel pasa a `/panel` (Resumen) y su tarjeta solo busca (`/analizar?q=`). Clic en un resultado muestra todo a la derecha;
+  si la empresa no está registrada se sincronizan sus datos automáticamente. Configuración de cores/pesos/métricas siempre visible
+  con botón Analizar al final. Gráfico: rangos 1M…Máx, intervalos diario/semanal/mensual (agregado en cliente), velas/línea,
+  SMA y volumen, botón «Cargar histórico largo (10 años)» (`desde` en la sincronización).
+  Backend: velas por sincronización hasta 10 000 (antes cortaba en 1000) y serie `/mercado/historicos` hasta 10 000.
+  Limitación: el feed IEX de Alpaca solo tiene velas desde 2020-07 (~6 años; MSFT 1587 sesiones).
+  Respaldo `backups/06-buscar-y-graficos-*.zip`.
 
 ## Cómo ejecutar
 - Desarrollo: `npm.cmd run dev` (API :PORT) y en otra terminal `npm.cmd run dev:web` (Vite con proxy).
