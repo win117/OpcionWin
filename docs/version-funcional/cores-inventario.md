@@ -229,7 +229,7 @@ Exporta `VERSION`, `REQUIERE = ['noticias']`, `SENALES` (`sentimiento_promedio`,
 `puntuarTexto`, constantes y `evaluar`.
 
 **Texto → tokens:** minúsculas, sin acentos, sin apóstrofos; tokens `[a-z0-9]+`.
-**Léxico:** ~280 términos inglés/español con valor −2..+2 asignado a mano (±2 eventos extremos: fraud, bankruptcy, plunge, surge;
+**Léxico:** 287 términos inglés/español con valor −2..+2 asignado a mano (±2 eventos extremos: fraud, bankruptcy, plunge, surge;
 ±1.5 resultados/calificaciones: beat, miss, upgrade, downgrade; ±1 movimientos/tono; ±0.5 términos débiles: risk, buy, higher).
 
 **Puntaje por noticia** (`puntuarTexto(título + " " + resumen)`), recorriendo tokens:

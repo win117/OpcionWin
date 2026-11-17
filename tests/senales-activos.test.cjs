@@ -222,3 +222,14 @@ test('sincronizar posiciones: abre, actualiza y marca cerrada la que el broker y
   pos = await todos('posiciones', ctx, { conexionId: conexion._id }, factory);
   assert.equal(pos[0].estado, 'cerrada'); assert.equal(pos[0].cantidad, 1); assert.equal(r.procesados, 1);
 });
+
+test('parametros: noticias configurable, intervalo solo 1Day; sincronización acepta rango de vencimientos', async () => {
+  const { validated } = require('../dist/api/v1/services/crud.service');
+  const base = { usuarioId: 'u1', empresaId: '11111111-1111-4111-8111-111111111111', core: 'noticias', estado: 'pendiente', versionAlgoritmo: 'x' };
+  const ok = await validated('evaluaciones', { ...base, parametros: { vidaMediaDias: 5, ventanaDias: 20 } });
+  assert.equal(ok.parametros.vidaMediaDias, 5);
+  await assert.rejects(validated('evaluaciones', { ...base, parametros: { intervalo: '1Hour' } }));
+  const s = await validated('sincronizaciones', { usuarioId: 'u1', proveedor: 'alpaca', recurso: 'contratos', simbolos: ['AAPL'], diasVencimientoMin: 20, diasVencimientoMax: 90 });
+  assert.equal(s.diasVencimientoMax, 90);
+  await assert.rejects(validated('sincronizaciones', { usuarioId: 'u1', proveedor: 'alpaca', recurso: 'contratos', simbolos: ['AAPL'], diasVencimientoMin: 90, diasVencimientoMax: 20 }));
+});

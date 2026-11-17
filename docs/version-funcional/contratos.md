@@ -24,7 +24,7 @@ export function evaluar(input) { return resultado; }
   reportes: [ { fechaCorte, fechaPublicacion, tenencias: [ { institucion, identificadorInstitucion, acciones, valorReportado, unidad } ] } ],
   noticias: [ { titulo, resumen?, publicadaEn, proveedor } ],
   opciones: [ { tipo:'call'|'put', strike, vencimiento, bid?, ask?, volatilidadImplicita?, griegas? } ], // opcional
-  parametros: { periodos, intervalo, ... },        // parametrosSchema
+  parametros: { intervalo: '1Day', vidaMediaDias, ventanaDias, indicadores, ... }, // parametrosSchema (periodos: reservado)
   reglas: [ { criterio, operador, valorReferencia, valorSuperior?, peso, obligatoria, activo } ] // solo las del core
 }
 ```
@@ -35,7 +35,7 @@ Todos los arreglos pueden venir vacíos. El core **nunca inventa** datos: si fal
 {
   sesgo: -1..1 | null,          // dirección: -1 bajista, 0 neutral, 1 alcista; null si sin datos suficientes
   confianza: 0..1,              // qué tan fuerte/consistente es la señal
-  puntaje: 0..100 | null,       // = round(50 + 50*sesgo) tras aplicar reglas; null si sesgo null
+  puntaje: 0..100 | null,       // = round(50 + 50*sesgo, 2 decimales) tras aplicar reglas; null si sesgo null
   cobertura: 0..1,              // fracción de sub-señales que pudieron calcularse
   metricas: [ { nombre, valor, unidad, periodo? } ],  // nombre en snake_case; valor finito
   motivos: [ 'texto corto en español' ],
@@ -54,7 +54,7 @@ Todos los arreglos pueden venir vacíos. El core **nunca inventa** datos: si fal
 | Core | Familia de señales |
 |---|---|
 | indicadores | Osciladores de momentum y volatilidad: RSI, MACD (histograma), estocástico, Bollinger %B, ATR%, volatilidad histórica, IV vs HV si hay opciones |
-| tecnico | Tendencia y estructura de precio: precio vs SMA50/SMA200, cruce de medias, pendiente (regresión), máximos/mínimos recientes, distancia a soporte/resistencia, volumen relativo |
+| tecnico | Tendencia y estructura de precio: precio vs SMA50/SMA200, cruce de medias, pendiente (regresión), posición y distancia respecto al máximo/mínimo de 52 semanas, volumen relativo |
 | fundamental | Crecimiento de ingresos y utilidad, márgenes, deuda/capital, liquidez corriente, flujo operativo |
 | institucional | Cambio de acciones reportadas entre los dos cortes 13F más recientes, # instituciones que aumentan vs disminuyen |
 | noticias | Sentimiento léxico propio (finanzas, inglés/español) con decaimiento por antigüedad |

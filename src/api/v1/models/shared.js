@@ -37,7 +37,9 @@ export const griegasSchema = valueSchema({
   vega: number(false), rho: number(false),
 });
 export const parametrosSchema = valueSchema({
-  intervalo: text(false), periodos: positiveInteger(120),
+  // Solo se sincronizan velas diarias: otro intervalo dejaría a los cores sin datos.
+  intervalo: { type: String, enum: ['1Day'] }, periodos: positiveInteger(120), // periodos: reservado (los cores usan toda la serie disponible)
+  vidaMediaDias: { type: Number, min: 0.25, max: 365 }, ventanaDias: { type: Number, min: 1, max: 365 }, // core noticias
   diasVencimientoMin: integer(0), diasVencimientoMax: integer(60),
   desde: Date, hasta: Date, indicadores: { type: [String], default: [] },
 });

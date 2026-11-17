@@ -32,7 +32,8 @@ export default ({ factory, integraciones, cola, ahora, cacheActivos }) => {
     const simbolos = Array.isArray(body.simbolos) ? [...new Set(body.simbolos.map(s => String(s).trim().toUpperCase()))] : [];
     if (simbolos.length > 25 || simbolos.some(s => !SIMBOLO.test(s))) throw boom.badRequest('simbolos: arreglo de hasta 25 símbolos válidos.');
     const datos = { recurso: body.recurso, proveedor: PROVEEDOR[body.recurso] || 'alpaca', simbolos,
-      ...(body.desde ? { desde: body.desde } : {}), ...(body.hasta ? { hasta: body.hasta } : {}), ...(body.conexionId ? { conexionId: body.conexionId } : {}) };
+      ...(body.desde ? { desde: body.desde } : {}), ...(body.hasta ? { hasta: body.hasta } : {}),
+      ...(body.diasVencimientoMin != null ? { diasVencimientoMin: Number(body.diasVencimientoMin) } : {}), ...(body.diasVencimientoMax != null ? { diasVencimientoMax: Number(body.diasVencimientoMax) } : {}), ...(body.conexionId ? { conexionId: body.conexionId } : {}) };
     if (['ordenes', 'posiciones'].includes(body.recurso) && !body.conexionId) throw boom.badRequest('conexionId requerido para ' + body.recurso + '.');
     aceptado(res, await iniciarTrabajo({ name: 'sincronizaciones', ctx: req.context, datos, cola, factory, ejecutar: r => sync.ejecutar(req.context, r) }));
   }));
