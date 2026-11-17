@@ -11,9 +11,9 @@ Objetivo: que la plataforma **analice** (5 cores + confluencia + selección), **
 | 2 | Adaptadores Alpaca y SEC con pruebas sin red | agente integraciones | Hecho (19 pruebas; SEC verificado en vivo) |
 | 3 | Frontend React + Vite | agente frontend | Hecho (11 páginas, build OK) |
 | 4 | Orquestación: cola de trabajos, sincronización, ejecución de cores, selección, confluencia | principal | Hecho (prueba E2E) |
-| 5 | Órdenes paper: envío, cancelación, posiciones | principal | Hecho (falta prueba con claves reales) |
+| 5 | Órdenes paper: envío, cancelación, posiciones | principal | Hecho (verificado con Alpaca paper real) |
 | 6 | Integración Express ↔ web/dist, OpenAPI actualizado | principal | Hecho |
-| 7 | Verificación real con claves (usuario) y documentación final | principal + usuario | Hecho (MongoDB y Supabase; falta orden paper real) |
+| 7 | Verificación real con claves (usuario) y documentación final | principal + usuario | Hecho (MongoDB, Supabase y orden paper real) |
 
 ## Requisitos del usuario para verificar en vivo
 1. Completar en `.env`: `SEC_USER_AGENT="AppRESTOpciones tu-correo"`, `ALPACA_KEY_ID`, `ALPACA_SECRET_KEY` (cuenta paper).
@@ -64,6 +64,10 @@ ejecutar cores → confluencia por estrategia → selección (3 modos) → confi
   consulta directa a Alpaca, caché 5 min por proceso, error por símbolo sin romper la respuesta). Panel derecho sin selección:
   Mercado hoy (sparklines), Tus empresas (precio, sparkline, última recomendación, dirección por core), Explora y Actividad reciente.
   97 pruebas. Respaldo `backups/07-inicio-tablero-*.zip`.
+- 2026-11-17: Orden paper real (`npm run smoke:orden -- mongodb`): conexión verificada (cuenta ACTIVE, nivel 3), orden limit
+  1 × AAPL261125C00350000 a 0.01 enviada (pending_new → aceptada por sincronización), reenvío con la misma Idempotency-Key
+  devuelve la misma orden, clave ajena → 409, cancelación confirmada por Alpaca (canceled), posiciones sincronizadas (0).
+  Pendiente opcional: prueba con ejecución real (fill) y cierre de posición.
 
 ## Cómo ejecutar
 - Desarrollo: `npm.cmd run dev` (API :PORT) y en otra terminal `npm.cmd run dev:web` (Vite con proxy).
