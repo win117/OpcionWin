@@ -3,7 +3,7 @@
 Fecha: 2026-11-17. Fuente de verdad: el código en `src/` y `web/src/`. Todo número, constante, peso, archivo y función de esta guía
 se tomó del código (versiones `tecnico@1.1.0`, `indicadores@1.1.0`, `fundamental@1.1.0`, `institucional@1.1.0`, `noticias@1.1.0`,
 `confluencia@1.1.0`, `estrategias@1.1.0`, `blackscholes@1.0.0`, `reglas@1.0.0`, `lexico@1.1.0`). Los ejemplos numéricos marcados
-«(verificado)» se ejecutaron con `node` sobre `dist/` el 2026-11-17, después de `npm.cmd test` (115 pruebas aprobadas).
+«(verificado)» se ejecutaron con `node` sobre `dist/` el 2026-11-17, después de `npm.cmd test` (116 pruebas aprobadas).
 Cuando algo **no** se pudo verificar en el código, se dice explícitamente.
 
 Documentos complementarios: `docs/version-funcional/cores-inventario.md` (inventario exacto), `docs/decisiones/README.md` (ADR-001…012),
@@ -804,7 +804,7 @@ estadístico ni backtesting; ADR-002/012 lo dejan como debate abierto ("calibrar
 30. **¿Por qué limit_price negativo?** La referencia de Alpaca para `mleg` define negativo = crédito. Nuestra API expone siempre positivo + `credito: true` y traduce en un solo lugar (`construirCuerpoOrden`).
 31. **¿Se puede operar en real?** No: URL de trading fija a paper (`NO_PERMITIDO` si no) y conexiones `live` rechazadas (ADR-005).
 32. **¿Dónde están las credenciales?** Variables del servidor referenciadas como `env:ALPACA`; no se guardan en la base ni se devuelven (ADR-006).
-33. **¿Cómo probaste que las fórmulas son correctas?** `npm.cmd test`: **115 pruebas** aprobadas (43 en `tests/cores.test.cjs`): valores de libro de Black-Scholes (10.4506 / 5.5735 / Δ 0.6368, IV recuperada 0.2), RSI/EMA/Bollinger/ATR con valores conocidos, caso NVDA, splits, noticias, look-ahead. Además smokes reales con Alpaca paper y SEC (`smoke:real`, `smoke:orden`, `smoke:ejecucion`, `smoke-ticket.cjs`).
+33. **¿Cómo probaste que las fórmulas son correctas?** `npm.cmd test`: **116 pruebas** aprobadas (43 en `tests/cores.test.cjs`): valores de libro de Black-Scholes (10.4506 / 5.5735 / Δ 0.6368, IV recuperada 0.2), RSI/EMA/Bollinger/ATR con valores conocidos, caso NVDA, splits, noticias, look-ahead. Además smokes reales con Alpaca paper y SEC (`smoke:real`, `smoke:orden`, `smoke:ejecucion`, `smoke-ticket.cjs`).
 34. **¿Qué tan rápido es?** Trabajos asíncronos (202 + sondeo), cola en memoria con concurrencia 2. NVDA completo (sin 13F) ~17 s según la bitácora.
 35. **¿Qué pasa si Alpaca falla?** Los adaptadores normalizan errores (`IntegrationError` con códigos SIN_CREDENCIALES, LIMITE, NO_ENCONTRADO, PROVEEDOR, RED); el trabajo queda `fallida` con mensaje seguro (sin secretos).
 36. **¿Por qué IV solo de contratos ±5 % del dinero?** La IV de contratos muy ITM/OTM (sonrisa) distorsiona el promedio (`insumos()`).
@@ -839,14 +839,14 @@ estadístico ni backtesting; ADR-002/012 lo dejan como debate abierto ("calibrar
 | `web/src/utils/estrategiasOrden.js` | Armado de patas, mid, neto, perfil de riesgo, contexto del análisis. |
 | `web/src/components/BotonOperar.jsx`, `TicketOrden.jsx` | «Operar» y ticket. |
 | `web/src/pages/analizar/flujo.js` | Flujo de un clic: sincronizar → cores → selección. |
-| `tests/*.cjs`, `scripts/check-models.cjs` | Pruebas (115). |
+| `tests/*.cjs`, `scripts/check-models.cjs` | Pruebas (116). |
 | `scripts/smoke-*.cjs` | Pruebas reales opt-in (requieren `.env` con claves). |
 | `docs/decisiones/README.md`, `docs/version-funcional/*.md` | ADR, contratos, plan, inventario. |
 
 **Comandos (PowerShell en Windows; usar `npm.cmd`)**
 | Comando | Qué hace |
 |---|---|
-| `npm.cmd test` | Compila a `dist/` y ejecuta las 115 pruebas sin red. |
+| `npm.cmd test` | Compila a `dist/` y ejecuta las 116 pruebas sin red. |
 | `npm.cmd run build` | Solo compila `src/` → `dist/`. |
 | `npm.cmd run smoke:real -- mongodb AAPL --institucional` | Flujo completo real (Alpaca + SEC + base), usuario temporal, limpia al final, no envía órdenes. |
 | `npm.cmd run smoke:orden -- mongodb` | Ciclo de orden paper: limit a 0.01 (no se ejecuta), reenvío idempotente, cancelación. |
