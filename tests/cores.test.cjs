@@ -10,6 +10,7 @@ const noticias = require('../dist/cores/noticias.core');
 const confluencia = require('../dist/cores/confluencia.core');
 const estrategias = require('../dist/cores/estrategias.core');
 const index = require('../dist/cores');
+const bs = require('../dist/cores/blackscholes');
 
 const REF = '2026-11-16T00:00:00.000Z';
 const DIA = 86400000;
@@ -103,7 +104,7 @@ test('técnico: tendencia alcista → sesgo > 0 y forma del contrato', () => {
   assert.ok(r.sesgo > 0.3);
   assert.equal(r.cobertura, 1);
   assert.equal(metricaDe(r, 'cruce_sma50_200'), 1);
-  assert.equal(tecnico.VERSION, 'tecnico@1.0.1');
+  assert.equal(tecnico.VERSION, 'tecnico@1.1.0');
 });
 test('técnico: tendencia bajista → sesgo < 0', () => {
   const r = tecnico.evaluar({ fechaReferencia: REF, velas: serie(260, -0.3, 200) });
@@ -213,7 +214,10 @@ test('institucional: compara los dos cortes más recientes', () => {
     ],
   });
   verificarForma(r);
-  assert.equal(metricaDe(r, 'cambio_acciones_pct'), 20); // 3000 / 2500
+  // Panel balanceado: solo A y B (presentes en ambos cortes): (1500 + 800)/(1000 + 1000) − 1 = 15 %.
+  assert.equal(metricaDe(r, 'cambio_acciones_pct'), 15);
+  assert.equal(metricaDe(r, 'instituciones_comunes'), 2);
+  assert.equal(metricaDe(r, 'amplitud_instituciones'), 0);
   assert.equal(metricaDe(r, 'instituciones_aumentan'), 1);
   assert.equal(metricaDe(r, 'instituciones_disminuyen'), 1);
   assert.equal(metricaDe(r, 'instituciones_nuevas'), 1);
@@ -273,11 +277,17 @@ test('confluencia: LONG_CALL y LONG_PUT con promedio ponderado peso×confianza',
   const base = { evaluaciones: evals, ponderaciones: [{ core: 'tecnico', peso: 1 }, { core: 'noticias', peso: 2 }], coresSeleccionados: ['tecnico', 'noticias', 'fundamental'] };
   const call = confluencia.evaluar({ ...base, estrategia: 'LONG_CALL' });
   assert.equal(call.sesgoCombinado, 0.4); // (1·0.6 + 1·0.2)/2
-  assert.equal(call.puntaje, 70);
+  // D = sqrt((0.2² + 0.2²)/2) = 0.2 → A = 0.8 → 50 + 50·0.4·0.8 = 66
+  assert.equal(call.dispersion, 0.2);
+  assert.equal(call.acuerdo, 0.8);
+  assert.equal(call.puntaje, 66);
   assert.equal(call.cobertura, 0.6667);
   assert.deepEqual(call.ponderacionesEfectivas, [{ core: 'tecnico', peso: 0.5 }, { core: 'noticias', peso: 0.5 }, { core: 'fundamental', peso: 0 }]);
   const put = confluencia.evaluar({ ...base, estrategia: 'LONG_PUT' });
-  assert.equal(put.puntaje, 30);
+  assert.equal(put.puntaje, 34);
+  // confianza = (Σw·c/Σw)·cobertura·A = ((1·1 + 2·0.5)/3)·(2/3)·0.8
+  assert.ok(Math.abs(call.confianza - (2 / 3) * (2 / 3) * 0.8) < 1e-4);
+  assert.ok(call.metricas.some(m => m.nombre === 'dispersion_cores' && m.valor === 0.2));
 });
 test('confluencia: IRON_CONDOR con ajuste de IV', () => {
   const base = { estrategia: 'IRON_CONDOR', evaluaciones: [{ core: 'tecnico', sesgo: 0.2, confianza: 1 }], coresSeleccionados: ['tecnico'] };
@@ -353,7 +363,7 @@ test('estrategias: sin precios no calcula montos; delta neta si hay griegas', ()
 test('index: exporta cores con VERSION, REQUIERE y evaluar', () => {
   assert.deepEqual(Object.keys(index.cores).sort(), ['fundamental', 'indicadores', 'institucional', 'noticias', 'tecnico']);
   for (const [nombre, core] of Object.entries(index.cores)) {
-    assert.equal(core.VERSION, `${nombre}@1.0.1`);
+    assert.equal(core.VERSION, `${nombre}@1.1.0`);
     assert.ok(Array.isArray(core.REQUIERE));
     const r = core.evaluar({ fechaReferencia: REF, velas: [], fundamentales: [], reportes: [], noticias: [], reglas: [] });
     verificarForma(r);
@@ -362,4 +372,139 @@ test('index: exporta cores con VERSION, REQUIERE y evaluar', () => {
   assert.equal(typeof index.confluencia.evaluar, 'function');
   assert.equal(typeof index.estrategias.evaluarConfiguracion, 'function');
   assert.equal(typeof index.reglas.aplicarReglas, 'function');
+});
+
+// ---------- ADR-012: desacuerdo entre cores ----------
+const ev = (core, sesgo, confianza = 0.8) => ({ core, sesgo, confianza });
+test('confluencia ADR-012: cores contradictorios (caso NVDA) no favorecen al Iron Condor', () => {
+  const evaluaciones = [ev('fundamental', 1), ev('tecnico', -0.6), ev('indicadores', -0.8), ev('noticias', 0)];
+  const coresSeleccionados = evaluaciones.map(e => e.core);
+  const ic = confluencia.evaluar({ estrategia: 'IRON_CONDOR', evaluaciones, coresSeleccionados });
+  // s̄ = −0.1; neutralidad media = (0 + 0.4 + 0.2 + 1)/4 = 0.4 → 40 (antes 100·(1 − 0.1) = 90)
+  assert.equal(ic.sesgoCombinado, -0.1);
+  assert.equal(ic.puntaje, 40);
+  assert.equal(ic.dispersion, 0.7); // sqrt((1.1² + 0.5² + 0.7² + 0.1²)/4)
+  assert.ok(ic.motivos.some(m => m.includes('se contradicen')));
+  const put = confluencia.evaluar({ estrategia: 'LONG_PUT', evaluaciones, coresSeleccionados });
+  assert.equal(put.puntaje, 51.5); // 50 + 50·0.1·0.3
+  assert.ok(put.confianza < 0.3);
+});
+test('confluencia ADR-012: cores neutrales unánimes favorecen al Iron Condor', () => {
+  const evaluaciones = [ev('tecnico', 0.05), ev('indicadores', -0.05), ev('noticias', 0)];
+  const ic = confluencia.evaluar({ estrategia: 'IRON_CONDOR', evaluaciones, coresSeleccionados: ['tecnico', 'indicadores', 'noticias'] });
+  assert.ok(ic.puntaje > 95, String(ic.puntaje));
+  const call = confluencia.evaluar({ estrategia: 'LONG_CALL', evaluaciones, coresSeleccionados: ['tecnico', 'indicadores', 'noticias'] });
+  assert.ok(Math.abs(call.puntaje - 50) < 1);
+});
+test('confluencia ADR-012: alcistas unánimes → LONG_CALL alto, igual que antes (tolerancia)', () => {
+  const evaluaciones = [ev('tecnico', 0.7), ev('indicadores', 0.65), ev('fundamental', 0.75)];
+  const r = confluencia.evaluar({ estrategia: 'LONG_CALL', evaluaciones, coresSeleccionados: ['tecnico', 'indicadores', 'fundamental'] });
+  const antes = 50 + 50 * 0.7; // fórmula 1.0.0
+  assert.ok(r.puntaje > 80 && Math.abs(r.puntaje - antes) < 2, String(r.puntaje));
+  assert.ok(r.acuerdo > 0.95);
+  const unico = confluencia.evaluar({ estrategia: 'LONG_CALL', evaluaciones: [ev('tecnico', 0.7)], coresSeleccionados: ['tecnico'] });
+  assert.equal(unico.dispersion, 0);
+  assert.equal(unico.puntaje, 85);
+});
+
+// ---------- Black-Scholes ----------
+const cerca = (a, b, tol = 1e-4) => assert.ok(Math.abs(a - b) < tol, `${a} != ${b}`);
+test('blackscholes: valores de libro (S=K=100, T=1, r=5 %, sigma=20 %)', () => {
+  const base = { S: 100, K: 100, T: 1, r: 0.05, sigma: 0.2 };
+  const c = bs.opcion({ ...base, tipo: 'call' });
+  const p = bs.opcion({ ...base, tipo: 'put' });
+  cerca(c.precio, 10.4506);
+  cerca(p.precio, 5.5735);
+  cerca(c.delta, 0.6368);
+  cerca(p.delta, -0.3632);
+  cerca(c.gamma, 0.018762, 1e-5);
+  cerca(c.vega, 0.375240, 1e-5); // por punto de volatilidad
+  cerca(c.theta, -6.414028 / 365, 1e-5); // por día
+  cerca(c.probabilidadITM, 0.5596, 1e-4); // N(d2)
+  cerca(c.precio - p.precio, 100 - 100 * Math.exp(-0.05), 1e-9); // paridad put-call
+  cerca(bs.cdf(0), 0.5, 1e-9);
+  cerca(bs.cdf(1.96), 0.9750021, 1e-6);
+  cerca(bs.cdf(-1.96), 0.0249979, 1e-6);
+  cerca(bs.volatilidadImplicita({ ...base, tipo: 'call', precio: 10.4506 }), 0.2, 1e-4);
+  assert.equal(bs.opcion({ ...base, T: 0, tipo: 'call' }), null);
+  assert.equal(bs.volatilidadImplicita({ ...base, tipo: 'call', precio: 200 }), null); // sobre el límite sin arbitraje
+});
+test('estrategias: probabilidad de ganancia y verificación de delta con Black-Scholes', () => {
+  const ref = '2026-11-16T20:00:00.000Z';
+  const venc = '2027-11-16'; // T = 1 año (cierre 20:00 UTC)
+  const c = bs.opcion({ tipo: 'call', S: 100, K: 100, T: 1, r: 0.04, sigma: 0.2 });
+  const r = estrategias.evaluarConfiguracion({
+    estrategia: 'LONG_CALL', fechaReferencia: ref, precioSubyacente: 100,
+    componentes: [{ tipo: 'call', accion: 'buy', strike: 100, cantidad: 1, vencimiento: venc, precio: c.precio, volatilidadImplicita: 0.2, griegas: { delta: 0.6 } }],
+  });
+  cerca(met(r, 'anos_al_vencimiento'), 1);
+  const esperado = bs.probabilidadSobre({ S: 100, X: 100 + c.precio, T: 1, r: 0.04, sigma: 0.2 });
+  cerca(met(r, 'probabilidad_ganancia'), esperado);
+  cerca(met(r, 'diferencia_delta_max'), Math.abs(c.delta - 0.6));
+  cerca(met(r, 'diferencia_iv_max'), 0, 1e-3);
+  cerca(met(r, 'delta_neta_bs'), c.delta * 100, 1e-3);
+  // Iron condor: probabilidad entre breakevens, en (0, 1)
+  const ic = estrategias.evaluarConfiguracion({
+    estrategia: 'IRON_CONDOR', fechaReferencia: ref, precioSubyacente: 100,
+    componentes: condor().map(x => ({ ...x, vencimiento: venc, volatilidadImplicita: 0.25 })),
+  });
+  const pop = met(ic, 'probabilidad_ganancia');
+  const manual = bs.probabilidadSobre({ S: 100, X: 92, T: 1, r: 0.04, sigma: 0.25 }) - bs.probabilidadSobre({ S: 100, X: 108, T: 1, r: 0.04, sigma: 0.25 });
+  cerca(pop, manual);
+  // Sin fecha de referencia: no se calcula (no se usa el reloj del sistema)
+  assert.equal(met(estrategias.evaluarConfiguracion({ estrategia: 'IRON_CONDOR', componentes: condor(), precioSubyacente: 100 }), 'probabilidad_ganancia'), undefined);
+});
+
+// ---------- auditoría de cores 1.1.0 ----------
+test('noticias 1.1.0: polaridad (pos - neg)/(pos + neg), intensidad y negación', () => {
+  const r = noticias.puntuarTexto('Microsoft beats estimates but warns on costs');
+  cerca(r.puntaje, (1.5 - 1) / 2.5);
+  assert.equal(noticias.puntuarTexto('Shares fall').puntaje, -1);
+  assert.ok(noticias.puntuarTexto('Shares fall sharply').negativo === noticias.puntuarTexto('Shares fall').negativo); // el modificador va antes
+  assert.ok(noticias.puntuarTexto('Shares sharply fall').negativo > noticias.puntuarTexto('Shares fall').negativo);
+  assert.ok(noticias.puntuarTexto('Company fails to beat estimates').puntaje < 0);
+  assert.equal(noticias.puntuarTexto('Nothing to see here').coincidencias, 0);
+});
+test('noticias 1.1.0: titulares sin términos no diluyen el sentimiento (caso MSFT)', () => {
+  const dias = d => new Date(Date.parse(REF) - d * DIA).toISOString();
+  const pos = Array.from({ length: 8 }, (_, i) => ({ titulo: `Microsoft shares rise on strong cloud growth ${i}`, publicadaEn: dias(i + 1) }));
+  const neg = Array.from({ length: 3 }, (_, i) => ({ titulo: `Microsoft faces antitrust probe ${i}`, publicadaEn: dias(i + 2) }));
+  const neutras = Array.from({ length: 30 }, (_, i) => ({ titulo: `Microsoft to host developer conference ${i}`, publicadaEn: dias(i % 10) }));
+  const r = noticias.evaluar({ fechaReferencia: REF, noticias: [...pos, ...neg, ...neutras] });
+  verificarForma(r);
+  assert.equal(metricaDe(r, 'noticias_positivas'), 8);
+  assert.equal(metricaDe(r, 'noticias_negativas'), 3);
+  assert.ok(r.sesgo > 0.3, String(r.sesgo));
+  cerca(r.cobertura, 11 / 41);
+});
+test('institucional 1.1.0: split 10:1 entre cortes no se lee como compra masiva', () => {
+  const r = institucional.evaluar({
+    fechaReferencia: REF,
+    reportes: [
+      { fechaCorte: '2026-03-31', fechaPublicacion: '2026-05-15', tenencias: [tenencia('A', 100), tenencia('B', 200), tenencia('C', 300)] },
+      { fechaCorte: '2026-06-30', fechaPublicacion: '2026-08-14', tenencias: [tenencia('A', 1000), tenencia('B', 2100), tenencia('C', 2900)] },
+    ],
+  });
+  assert.equal(metricaDe(r, 'factor_split'), 10);
+  cerca(metricaDe(r, 'cambio_acciones_pct'), 0);
+  assert.equal(metricaDe(r, 'instituciones_aumentan'), 1);
+  assert.equal(metricaDe(r, 'instituciones_disminuyen'), 1);
+});
+test('indicadores 1.1.0: IV ignora contratos vencidos y valores absurdos', () => {
+  const r = indicadores.evaluar({ fechaReferencia: REF, velas: serie(100, 0.5), opciones: [
+    { volatilidadImplicita: 0.3, vencimiento: '2026-12-18' },
+    { volatilidadImplicita: 0.9, vencimiento: '2026-10-01' }, // vencido
+    { volatilidadImplicita: 40, vencimiento: '2026-12-18' }, // error de cotización
+  ] });
+  assert.equal(metricaDe(r, 'iv_promedio'), 0.3);
+});
+test('fundamental 1.1.0: un periodo presentado después de la referencia no se usa', () => {
+  const base = [
+    periodo('2024-01-01', '2024-12-31', { ingresos: 1000 }, '10-K'),
+    { ...periodo('2025-01-01', '2025-12-31', { ingresos: 2000 }, '10-K'), fechaPresentacion: '2026-02-20' },
+  ];
+  const antes = fundamental.evaluar({ fechaReferencia: '2026-01-15T00:00:00Z', fundamentales: base });
+  assert.equal(metricaDe(antes, 'crecimiento_ingresos_yoy'), undefined);
+  const despues = fundamental.evaluar({ fechaReferencia: '2026-03-01T00:00:00Z', fundamentales: base });
+  assert.equal(metricaDe(despues, 'crecimiento_ingresos_yoy'), 100);
 });

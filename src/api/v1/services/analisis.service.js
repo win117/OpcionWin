@@ -196,7 +196,9 @@ export function createAnalisis({ cola, factory = repository }) {
           const s = snaps.filter(x => x.contratoId === contrato._id).sort((a, b) => fecha(b.fuente.fechaDato) - fecha(a.fuente.fechaDato))[0];
           const precio = s && s.bid != null && s.ask != null ? (s.bid + s.ask) / 2 : s?.ultimo;
           if (s) fuentes.push(...ultimaFuente([s], contrato.contratoExternoId));
-          componentes.push({ tipo: contrato.tipo, strike: contrato.strike, vencimiento: contrato.vencimiento, accion: c.accion, cantidad: c.cantidad, ...(precio != null ? { precio } : {}) });
+          componentes.push({ tipo: contrato.tipo, strike: contrato.strike, vencimiento: contrato.vencimiento, accion: c.accion, cantidad: c.cantidad, ...(precio != null ? { precio } : {}),
+            // IV y griegas indicativas del snapshot: Black-Scholes (estrategias@1.1.0) las verifica y calcula la probabilidad de ganancia.
+            ...(Number.isFinite(s?.volatilidadImplicita) ? { volatilidadImplicita: s.volatilidadImplicita } : {}), ...(s?.griegas ? { griegas: s.griegas } : {}) });
         }
         let precioSubyacente = Number.isFinite(body.precioSubyacente) ? body.precioSubyacente : undefined;
         if (precioSubyacente === undefined) {
@@ -204,7 +206,7 @@ export function createAnalisis({ cola, factory = repository }) {
           const ultima = velas.sort((a, b) => fecha(b.fuente.fechaDato) - fecha(a.fuente.fechaDato))[0];
           precioSubyacente = ultima?.cierre;
         }
-        const r = estrategiasCore.evaluarConfiguracion({ estrategia: estrategia.codigo, componentes, precioSubyacente, multiplicador: 100 });
+        const r = estrategiasCore.evaluarConfiguracion({ estrategia: estrategia.codigo, componentes, precioSubyacente, multiplicador: 100, fechaReferencia: new Date().toISOString() });
         const conPrecio = componentes.filter(c => c.precio != null).length;
         return { metricas: metricasValidas(r.metricas), motivos: [...(r.errores || []), ...(r.motivos || [])].map(String).slice(0, 50),
           cobertura: componentes.length ? conPrecio / componentes.length : 0,

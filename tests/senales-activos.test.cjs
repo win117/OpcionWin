@@ -129,7 +129,7 @@ test('HTTP: catálogo de cores, búsqueda, resumen de opciones y pesos en selecc
     const cat = await call('GET', '/cores/catalogo');
     assert.deepEqual(cat.items.map(i => i.core), ['tecnico', 'fundamental', 'institucional', 'indicadores', 'noticias']);
     const t = cat.items[0];
-    assert.equal(t.version, 'tecnico@1.0.1'); assert.deepEqual(t.requiere, ['velas']);
+    assert.equal(t.version, 'tecnico@1.1.0'); assert.deepEqual(t.requiere, ['velas']);
     assert.equal(t.senales.length, 6); assert.ok(t.senales.every(s => s.nombre && s.etiqueta && s.descripcion && s.pesoBase > 0));
     assert.deepEqual(cat.items[4].senales.map(s => s.nombre), ['sentimiento_promedio']);
     await call('GET', '/cores/tecnico/evaluaciones');

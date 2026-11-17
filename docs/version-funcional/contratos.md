@@ -63,16 +63,20 @@ Todos los arreglos pueden venir vacíos. El core **nunca inventa** datos: si fal
 ```js
 evaluar({ estrategia:'LONG_CALL'|'LONG_PUT'|'IRON_CONDOR', evaluaciones:[{core, sesgo, confianza, puntaje, cobertura}],
           ponderaciones:[{core,peso}], coresSeleccionados:[...], volatilidad?: { ivActual?, hv20?, ivRank? } })
-→ { puntaje 0..100, cobertura 0..1, sesgoCombinado, motivos[], ponderacionesEfectivas:[{core,peso}] }
+→ { puntaje 0..100, confianza 0..1, cobertura 0..1, sesgoCombinado, dispersion, acuerdo, metricas[], motivos[], ponderacionesEfectivas:[{core,peso}] }
 ```
-- Sesgo combinado = promedio ponderado por `peso × confianza` de cores con datos.
-- LONG_CALL: 50+50·s. LONG_PUT: 50−50·s. IRON_CONDOR: 100·(1−|s|), ajustado ±15 por IV alta/baja relativa a HV.
+- Sesgo combinado s̄ = promedio ponderado por `e = peso × confianza` de cores con datos (ADR-012).
+- Dispersión D = desviación estándar ponderada de los sesgos; acuerdo A = 1 − D.
+- LONG_CALL: 50+50·s̄·A. LONG_PUT: 50−50·s̄·A. IRON_CONDOR: 100·Σe(1−|s|)/Σe (neutralidad media), ajustado ±15 por IV/HV20.
+- confianza = (Σ peso·confianza / Σ peso) · cobertura · A. Detalle exacto: `docs/version-funcional/cores-inventario.md`.
 - Cobertura = cores con resultado / cores seleccionados. Core desactivado ≠ evaluación negativa.
 
 ## 3. Estrategias / configuración (`src/cores/estrategias.core.js`)
 ```js
-evaluarConfiguracion({ estrategia, componentes:[{tipo, strike, vencimiento, accion, cantidad, precio? }], precioSubyacente?, multiplicador=100 })
-→ { valida, errores[], metricas:[ prima_neta, perdida_maxima, ganancia_maxima (null=ilimitada), breakevens..., delta_neta? ], motivos[] }
+evaluarConfiguracion({ estrategia, componentes:[{tipo, strike, vencimiento, accion, cantidad, precio?, volatilidadImplicita?, griegas? }],
+                       precioSubyacente?, multiplicador=100, fechaReferencia?, tasaLibreRiesgo=0.04 })
+→ { valida, errores[], metricas:[ prima_neta, perdida_maxima, ganancia_maxima (null=ilimitada), breakevens..., delta_neta?,
+     anos_al_vencimiento?, probabilidad_ganancia?, delta_neta_bs?, prima_neta_teorica_bs?, diferencia_delta_max?, diferencia_iv_max? ], motivos[] }
 ```
 Reglas: LONG_CALL = 1 call buy. LONG_PUT = 1 put buy. IRON_CONDOR = 4 patas mismo vencimiento:
 buy put K1 < sell put K2 < sell call K3 < buy call K4, cantidades iguales.

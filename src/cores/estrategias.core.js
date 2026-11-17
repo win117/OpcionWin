@@ -1,9 +1,13 @@
 // Estrategias: validación de patas y perfil de pago al vencimiento (contrato §3).
 // Convenciones: `precio` = prima por acción; montos = por acción × cantidad × multiplicador.
 // prima_neta > 0 = crédito recibido; < 0 = débito pagado. perdida_maxima se expresa como monto positivo.
-import { esNumero, round, tiempo } from './util.js';
+import { DIA_MS, esNumero, round, tiempo } from './util.js';
+import { DIAS_ANIO, opcion, probabilidadSobre, TASA_LIBRE_RIESGO, volatilidadImplicita } from './blackscholes.js';
 
-export const VERSION = 'estrategias@1.0.0';
+export const VERSION = 'estrategias@1.1.0';
+// Hora UTC aproximada del vencimiento: las opciones de acciones de EE. UU. dejan de cotizar a las 16:00 ET
+// (20:00 UTC en horario de verano, 21:00 UTC en invierno; la diferencia de 1 h es despreciable para T).
+export const HORA_VENCIMIENTO_UTC = 20;
 export const ESTRATEGIAS = ['LONG_CALL', 'LONG_PUT', 'IRON_CONDOR'];
 
 const signo = c => (c.accion === 'buy' ? 1 : -1);
@@ -57,9 +61,82 @@ export const validar = (estrategia, componentes) => {
 
 const m = (nombre, valor, unidad = 'USD') => ({ nombre, valor: valor == null ? null : round(valor), unidad });
 
+/** Años hasta el vencimiento (días naturales / 365) desde fechaReferencia; null si no hay fecha o ya venció. */
+export const anosHastaVencimiento = (vencimiento, fechaReferencia) => {
+  const ref = tiempo(fechaReferencia);
+  const v = tiempo(vencimiento);
+  if (ref == null || v == null) return null;
+  const d = new Date(v);
+  const cierre = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), HORA_VENCIMIENTO_UTC);
+  const T = (cierre - ref) / (DIAS_ANIO * DIA_MS);
+  return T > 0 ? T : null;
+};
+
+const ivDe = c => (esNumero(c.volatilidadImplicita) && c.volatilidadImplicita > 0 ? c.volatilidadImplicita : null);
+
+/**
+ * Métricas de Black-Scholes (blackscholes.js) por configuración. Requiere precioSubyacente > 0, fechaReferencia y,
+ * según la métrica, IV y prima de las patas. Probabilidades neutrales al riesgo (deriva r), lognormales, al vencimiento.
+ */
+const metricasBlackScholes = ({ estrategia, componentes, S, fechaReferencia, r, multiplicador, metricas, motivos }) => {
+  if (!(esNumero(S) && S > 0)) { motivos.push('Sin precio del subyacente: no se calculan métricas de Black-Scholes.'); return; }
+  const T = anosHastaVencimiento(componentes[0].vencimiento, fechaReferencia);
+  if (T == null) { motivos.push('Sin fecha de referencia o vencimiento ya cumplido: no se calculan métricas de Black-Scholes.'); return; }
+  metricas.push(m('anos_al_vencimiento', T, 'anios'));
+  const ivs = componentes.map(ivDe);
+  const bs = componentes.map((c, i) => (ivs[i] == null ? null : opcion({ tipo: c.tipo, S, K: c.strike, T, r, sigma: ivs[i] })));
+
+  // Verificación independiente de la delta del proveedor (indicativa de Alpaca).
+  if (bs.every(Boolean)) {
+    metricas.push(m('delta_neta_bs', componentes.reduce((a, c, i) => a + signo(c) * bs[i].delta * c.cantidad * multiplicador, 0), 'acciones'));
+    if (componentes.every(c => esNumero(c.precio))) {
+      metricas.push(m('prima_neta_teorica_bs', componentes.reduce((a, c, i) => a - signo(c) * bs[i].precio * c.cantidad * multiplicador, 0)));
+    }
+  } else motivos.push('Alguna pata no trae volatilidad implícita: no se calcula delta ni probabilidad con Black-Scholes.');
+  const difDelta = componentes.map((c, i) => {
+    const dProv = esNumero(c.delta) ? c.delta : c.griegas && esNumero(c.griegas.delta) ? c.griegas.delta : null;
+    return bs[i] && dProv != null ? Math.abs(bs[i].delta - dProv) : null;
+  }).filter(v => v != null);
+  if (difDelta.length) metricas.push(m('diferencia_delta_max', Math.max(...difDelta), 'delta'));
+  // IV recalculada desde la prima media (bid+ask)/2 frente a la IV del proveedor.
+  const difIv = componentes.map((c, i) => {
+    if (ivs[i] == null || !esNumero(c.precio)) return null;
+    const iv = volatilidadImplicita({ tipo: c.tipo, precio: c.precio, S, K: c.strike, T, r });
+    return iv == null ? null : Math.abs(iv - ivs[i]);
+  }).filter(v => v != null);
+  if (difIv.length) metricas.push(m('diferencia_iv_max', Math.max(...difIv), 'fraccion_anual'));
+
+  // Probabilidad de ganancia al vencimiento (P[S_T en la zona de ganancia]).
+  if (!componentes.every(c => esNumero(c.precio))) return;
+  const sobre = (X, sigma) => (sigma == null ? null : probabilidadSobre({ S, X, T, r, sigma }));
+  let pop = null;
+  if (estrategia === 'LONG_CALL') pop = sobre(componentes[0].strike + componentes[0].precio, ivs[0]);
+  else if (estrategia === 'LONG_PUT') {
+    const p = sobre(componentes[0].strike - componentes[0].precio, ivs[0]);
+    pop = p == null ? null : 1 - p;
+  } else {
+    const idx = (tipo, accion) => componentes.findIndex(c => c.tipo === tipo && c.accion === accion);
+    const ps = idx('put', 'sell'), cs = idx('call', 'sell');
+    const q = componentes[0].cantidad;
+    const credito = componentes.reduce((a, c) => a - signo(c) * c.precio * c.cantidad * multiplicador, 0) / (q * multiplicador);
+    if (credito <= 0) pop = 0;
+    else {
+      // Cada breakeven usa la IV de la pata vendida más cercana (aproxima la sonrisa de volatilidad).
+      const pInf = sobre(componentes[ps].strike - credito, ivs[ps]);
+      const pSup = sobre(componentes[cs].strike + credito, ivs[cs]);
+      pop = pInf == null || pSup == null ? null : Math.min(1, Math.max(0, pInf - pSup));
+    }
+  }
+  if (pop != null) {
+    metricas.push(m('probabilidad_ganancia', pop, 'fraccion'));
+    motivos.push(`Probabilidad de ganancia al vencimiento ${(pop * 100).toFixed(1)} % (Black-Scholes lognormal, neutral al riesgo, r = ${(r * 100).toFixed(1)} %, IV de las patas).`);
+  }
+};
+
 export function evaluarConfiguracion(input = {}) {
   const { estrategia, componentes = [], precioSubyacente } = input;
   const multiplicador = esNumero(input.multiplicador) && input.multiplicador > 0 ? input.multiplicador : 100;
+  const tasa = esNumero(input.tasaLibreRiesgo) ? input.tasaLibreRiesgo : TASA_LIBRE_RIESGO;
   const errores = validar(estrategia, componentes);
   const motivos = [];
   const metricas = [];
@@ -73,6 +150,7 @@ export function evaluarConfiguracion(input = {}) {
 
   if (!componentes.every(c => esNumero(c.precio))) {
     motivos.push('Faltan precios de prima en alguna pata: no se calculan prima, pérdida, ganancia ni breakevens.');
+    metricasBlackScholes({ estrategia, componentes, S: precioSubyacente, fechaReferencia: input.fechaReferencia, r: tasa, multiplicador, metricas, motivos });
     return { valida: true, errores, metricas, motivos };
   }
 
@@ -95,7 +173,7 @@ export function evaluarConfiguracion(input = {}) {
     const ancho = Math.max(k2 - k1, k4 - k3);
     metricas.push(
       m('ganancia_maxima', credito * q * multiplicador),
-      m('perdida_maxima', (ancho - credito) * q * multiplicador),
+      m('perdida_maxima', Math.max(0, ancho - credito) * q * multiplicador),
       m('breakeven_inferior', k2 - credito, 'precio'),
       m('breakeven_superior', k3 + credito, 'precio'),
       m('ancho_alas', ancho, 'precio'),
@@ -107,6 +185,7 @@ export function evaluarConfiguracion(input = {}) {
   if (esNumero(precioSubyacente) && precioSubyacente > 0) {
     metricas.push(m('resultado_vencimiento_precio_actual', payoff(componentes, precioSubyacente, multiplicador)));
   }
+  metricasBlackScholes({ estrategia, componentes, S: precioSubyacente, fechaReferencia: input.fechaReferencia, r: tasa, multiplicador, metricas, motivos });
   return { valida: true, errores, metricas, motivos };
 }
 

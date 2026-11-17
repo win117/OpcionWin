@@ -7,7 +7,7 @@ Para debatir una decisión: cambiar su estado a Propuesta, anotar el argumento e
 | # | Decisión | Estado |
 |---|---|---|
 | 001 | Cores como funciones puras sobre datos almacenados | Aceptada |
-| 002 | Puntaje de core = índice direccional; compatibilidad en confluencia | Aceptada |
+| 002 | Puntaje de core = índice direccional; compatibilidad en confluencia | Aceptada (fórmulas de confluencia reemplazadas por ADR-012) |
 | 003 | Trabajos asíncronos en proceso con estado en la base (202 + sondeo) | Aceptada |
 | 004 | Alpaca como proveedor principal; SEC EDGAR para fundamentales y 13F | Aceptada |
 | 005 | Órdenes solo en Alpaca paper; live bloqueado en código | Aceptada |
@@ -15,6 +15,9 @@ Para debatir una decisión: cambiar su estado a Propuesta, anotar el argumento e
 | 007 | Frontend React + Vite servido por Express | Aceptada |
 | 008 | Respaldos: zip local + rama git local por etapa | Aceptada |
 | 009 | Desarrollo multiagente por carpetas con contratos fijos | Aceptada |
+| 010 | Selección de señales por core y pesos en selección | Aceptada |
+| 011 | Ticket de órdenes en un paso y cierre de posiciones (paper) | Aceptada |
+| 012 | Desacuerdo entre cores en la confluencia (dispersión y neutralidad media) | Aceptada |
 
 ---
 
@@ -29,6 +32,7 @@ Para debatir una decisión: cambiar su estado a Propuesta, anotar el argumento e
 **Decisión.** El core produce `sesgo` −1..1 y `puntaje = 50+50·sesgo`. La confluencia transforma a compatibilidad por estrategia (ver contratos §2). `sesgo` y `confianza` se guardan como métricas.
 **Alternativas.** Un puntaje por estrategia dentro de cada core (triplica lógica y duplica criterios).
 **Debate abierto.** Ajuste de IV para Iron Condor (±15) es heurístico; calibrar con datos.
+**Reemplazo parcial (2026-11-17).** Las fórmulas de compatibilidad por estrategia (`50 ± 50·s`, `100·(1 − |s|)`) quedan reemplazadas por ADR-012. Se mantiene el resto (sesgo/puntaje del core, sesgo y confianza como métricas).
 
 ## ADR-003 · Trabajos asíncronos en proceso
 **Contexto.** Sincronizar y evaluar puede tardar segundos. El inventario A define 202 + consulta.
@@ -75,3 +79,23 @@ Para debatir una decisión: cambiar su estado a Propuesta, anotar el argumento e
 **Alternativas.** Reutilizar una Configuracion existente por orden (menos registros, pero acopla tickets distintos y complica la idempotencia); aceptar `precioLimite` negativo en la API (expone la convención del proveedor).
 **Debate abierto.** Se crea una Configuracion nueva por cada orden: simple y trazable, pero genera muchos registros; podría deduplicarse o archivarse. Las guías de Alpaca muestran el ejemplo del iron condor con precio positivo sin explicar el signo; se siguió la referencia de la API, que es explícita.
 **Consecuencias.** `Orden.credito` (booleano) nuevo en el modelo. `normalizarPosicion` añade `plNoRealizado` y `plPctNoRealizado`. Un envío fallido deja la orden `pendiente` con evento `error_envio`; se reintenta con `POST /ordenes/:id/envio`.
+
+## ADR-012 · Desacuerdo entre cores en la confluencia
+**Estado.** Aceptada (2026-11-17). Reemplaza las fórmulas de compatibilidad de ADR-002.
+**Contexto.** Con la fórmula 1.0.0 el Iron Condor usaba la neutralidad del promedio, `100·(1 − |s̄|)`. Si los cores se contradicen
+(caso real NVDA: fundamental +1.0, técnico −0.6, indicadores −0.8, noticias 0) el promedio ≈ −0.1 y el Iron Condor salía ≈ 90–100,
+aunque ningún core indicaba un mercado lateral. Igualmente, un Long Call/Put salía con la misma fuerza con o sin acuerdo.
+**Decisión.** Por core i usado: e_i = peso_i · confianza_i (la cobertura del core ya está dentro de su confianza).
+s̄ = Σe·s/Σe; dispersión D = √(Σe·(s − s̄)²/Σe) ∈ [0, 1]; acuerdo A = 1 − D (un core → A = 1).
+LONG_CALL = 50 + 50·s̄·A; LONG_PUT = 50 − 50·s̄·A; IRON_CONDOR = 100·Σe·(1 − |s|)/Σe + ajuste IV/HV (±15, sin cambios:
+clamp((IV/HV20 − 1)/0.2)·15, o con IV Rank clamp((rank − 50)/30)·15). confianza = (Σpeso·confianza/Σpeso)·cobertura·A.
+Se informan `dispersion_cores`, `acuerdo_cores`, `neutralidad_media` (métricas del resultado) y un motivo en español
+("Los cores se contradicen (dispersión 0.62): la señal direccional se reduce un 62 %…"). `confluencia@1.1.0`.
+**Alternativas.** Penalizar solo la confianza (no cambia el ranking de la selección, que ordena por puntaje); usar el rango
+máx − mín (sensible a un solo core extremo con poca confianza); entropía de signos (ignora magnitudes).
+**Consecuencias.** Con cores unánimes los puntajes casi no cambian (A ≈ 1). Con cores contradictorios el Iron Condor baja
+(NVDA: 90 → 40) y las direccionales se acercan a 50 (NVDA Long Put 55 → 51.5). La selección queda menos "segura" cuando no hay acuerdo,
+que es el comportamiento buscado. El modelo Confluencia no guarda `metricas`: la dispersión queda registrada en `motivos`.
+**Debate abierto.** El factor A es lineal en D; podría usarse A² para castigar más el desacuerdo. Calibrar con resultados históricos
+cuando exista un registro de evaluaciones y precios posteriores. El centro del ajuste IV/HV en 1.0 ignora la prima de riesgo de
+varianza (IV/HV ≈ 1.1–1.2 es habitual), lo que favorece levemente al Iron Condor.

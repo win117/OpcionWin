@@ -82,6 +82,13 @@ ejecutar cores → confluencia por estrategia → selección (3 modos) → confi
   Verificado real: Iron Condor a crédito aceptado/cancelado (subagente); Long Call y venta de put vía ticket aceptadas/canceladas;
   reintento con la misma key no duplica. 105 pruebas. Respaldo `backups/10-ordenes-interfaz-*.zip`.
 
+- 2026-11-17: Auditoría de exactitud y explicabilidad de los cores (ADR-012). Confluencia 1.1.0 con dispersión/acuerdo entre cores y
+  neutralidad media para el Iron Condor. Cores 1.1.0: constantes con nombre y justificación; noticias (polaridad por noticia, sin dilución
+  por titulares neutros, intensidad, negadores); institucional (panel balanceado, detección de split); indicadores (IV solo de contratos
+  vigentes y ≤ 500 %); fundamental (sin anticipación si el periodo trae `fechaPresentacion`). Nuevo `src/cores/blackscholes.js`
+  (A&S 26.2.17) y estrategias 1.1.0: probabilidad de ganancia, delta e IV verificadas contra Alpaca. Inventario técnico exacto en
+  `docs/version-funcional/cores-inventario.md`. 115 pruebas.
+
 ## Cómo ejecutar
 - Desarrollo: `npm.cmd run dev` (API :PORT) y en otra terminal `npm.cmd run dev:web` (Vite con proxy).
 - Producción local: `npm.cmd run build:all` y `npm.cmd start` → interfaz en `http://HOST:PORT/`, Swagger en `/api/v1/api-docs`.
@@ -98,6 +105,13 @@ ejecutar cores → confluencia por estrategia → selección (3 modos) → confi
 - Ajuste IV ±15 del Iron Condor heurístico (ADR-002).
 - 13F por nombre de emisor puede fallar; agregar campo CUSIP a Empresa mejoraría la coincidencia.
 - Tablas 13F grandes (BlackRock ~23 MB) hacen lenta la sincronización institucional.
-- **Desacuerdo entre cores ≠ neutralidad.** Si técnico es muy bajista y fundamental muy alcista, el sesgo combinado ≈ 0 y el Iron Condor sale favorecido. Propuesta: reducir compatibilidad o confianza según la dispersión de sesgos entre cores.
+- ~~**Desacuerdo entre cores ≠ neutralidad.**~~ **Atendido (ADR-012, `confluencia@1.1.0`)**: dispersión ponderada D, acuerdo A = 1 − D
+  multiplica la señal direccional y la confianza; el Iron Condor usa la neutralidad media de los cores (NVDA: 90 → 40).
 - **Snapshots sin historial.** Solo se conserva el último por contrato; un IV Rank requeriría histórico de IV.
-- **Noticias casi neutras** con el léxico propio (MSFT 0.00 con 8 positivas / 3 negativas); calibrar léxico o pesos.
+- ~~**Noticias casi neutras**~~ **Atendido (`noticias@1.1.0`, `lexico@1.1.0`)**: los titulares sin términos del léxico ya no cuentan como
+  neutros (diluían el promedio hacia 0: causa probable del 0.00 de MSFT); polaridad por noticia (pos − neg)/(pos + neg), intensificadores,
+  más negadores ("fail", "unable", "lacks") y ~60 términos nuevos. Pendiente: calibrar con titulares reales etiquetados.
+- 13F: una institución que aún no presentó el corte más reciente se trataba como "sale" (sesgo bajista artificial entre el
+  cierre del trimestre y el día 45). Atendido con panel balanceado (`institucional@1.1.0`). Pendiente: guardar qué filers presentaron
+  cada corte para distinguir salida real de presentación pendiente.
+- Probabilidad de ganancia (Black-Scholes) es neutral al riesgo y lognormal: no es una predicción del mundo real.

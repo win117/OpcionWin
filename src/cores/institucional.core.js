@@ -1,16 +1,50 @@
 // Core institucional: cambio de tenencias 13F entre los dos cortes más recientes.
 // 13F se publica hasta 45 días después del trimestre: describe posiciones pasadas, no flujo en tiempo real.
+// Entrada: reportes por corte (SEC EDGAR 13F-HR, information table; filers fijos en src/integrations/institucionales.js),
+// con tenencias = acciones (sshPrnamt, tipo SH, sin opciones put/call) por institución.
+// Panel balanceado: el cambio y la amplitud se miden solo con las instituciones presentes en AMBOS cortes. Una institución
+// que falta en un corte puede no haber presentado aún su 13F (hasta 45 días) o no coincidir por nombre de emisor; contarla
+// como salida/entrada sesgaría el resultado. Las nuevas/salen se informan como métricas pero no entran en la señal.
 import { combinar, DIA_MS, esNumero, filtrarSenales, finalizar, metrica, tiempo } from './util.js';
 
-export const VERSION = 'institucional@1.0.1';
+export const VERSION = 'institucional@1.1.0';
 export const REQUIERE = ['reportes'];
 export const SENALES = [
   { nombre: 'cambio_acciones_pct', etiqueta: 'Cambio de acciones (%)', descripcion: 'Variación porcentual de las acciones en poder de instituciones entre cortes 13F.', pesoBase: 1.5 },
   { nombre: 'amplitud_instituciones', etiqueta: 'Amplitud institucional', descripcion: 'Balance entre instituciones que aumentan y las que disminuyen su posición.', pesoBase: 1 },
 ];
 
-const DIAS_VIGENCIA = 135; // corte + 45 días de publicación + un trimestre
+// ---- Constantes (fijas). pesoBase: heurística (el cambio agregado de acciones pesa más que la amplitud, que solo cuenta
+// instituciones). No hay ajuste estadístico.
+// Corte vigente: 45 días de plazo de publicación + un trimestre (90) = 135 días; más antiguo → confianza × 0.5.
+export const DIAS_VIGENCIA = 135;
+export const FACTOR_CONFIANZA_ANTIGUO = 0.5;
+// Escala de tanh del cambio de acciones: ±10 % entre trimestres → ±0.76 (los grandes filers indexados rara vez mueven más).
+export const ESCALA_CAMBIO_PCT = 10;
+// Detección de split entre cortes (13F reporta acciones sin ajustar): si la mediana de acciones_nuevas/acciones_previas
+// por institución está a ±5 % de un factor de split habitual, se ajusta el corte previo por ese factor.
+export const FACTORES_SPLIT = [2, 3, 4, 5, 8, 10, 15, 20, 25, 30, 40, 50];
+export const TOLERANCIA_SPLIT = 0.05;
+// Mínimo de instituciones comunes para inferir un split (con 1–2 una compra real ×2 se confundiría con un split).
+export const MIN_INSTITUCIONES_SPLIT = 3;
 
+const mediana = xs => {
+  const o = [...xs].sort((a, b) => a - b);
+  const k = Math.floor(o.length / 2);
+  return o.length % 2 ? o[k] : (o[k - 1] + o[k]) / 2;
+};
+/** Factor de split (≥ 2, o su inverso para un contrasplit) si la mediana de razones lo sugiere; 1 si no. */
+export const detectarSplit = razones => {
+  if (razones.length < MIN_INSTITUCIONES_SPLIT) return 1;
+  const r = mediana(razones);
+  for (const f of FACTORES_SPLIT) {
+    if (Math.abs(r / f - 1) <= TOLERANCIA_SPLIT) return f;
+    if (Math.abs(r * f - 1) <= TOLERANCIA_SPLIT) return 1 / f;
+  }
+  return 1;
+};
+
+// Suma acciones por institución dentro de un reporte (varias filas por gestor/clase).
 const agregar = reporte => {
   const mapa = new Map();
   for (const t of reporte.tenencias || []) {
@@ -57,39 +91,50 @@ export function evaluar(input = {}) {
   } else {
     const a = mapaCorte(cortes[0]);
     const b = mapaCorte(cortes[1]);
-    const totalA = [...a.values()].reduce((x, y) => x + y, 0);
-    const totalB = [...b.values()].reduce((x, y) => x + y, 0);
-    let aumentan = 0, disminuyen = 0, nuevas = 0, salen = 0;
-    for (const [id, acc] of a) {
-      if (!b.has(id)) nuevas++;
-      else if (acc > b.get(id)) aumentan++;
-      else if (acc < b.get(id)) disminuyen++;
-    }
-    for (const id of b.keys()) if (!a.has(id)) salen++;
+    const comunes = [...a.keys()].filter(id => b.has(id));
+    const nuevas = [...a.keys()].filter(id => !b.has(id)).length;
+    const salen = [...b.keys()].filter(id => !a.has(id)).length;
     const periodo = `${String(cortes[1].fecha).slice(0, 10)}→${String(cortes[0].fecha).slice(0, 10)}`;
-    if (totalB > 0) {
+    // Split entre cortes: se reexpresa el corte previo en acciones posteriores al split.
+    const factor = detectarSplit(comunes.filter(id => b.get(id) > 0).map(id => a.get(id) / b.get(id)));
+    if (factor !== 1) motivos.push(`Posible split ${factor >= 1 ? `${factor}:1` : `1:${Math.round(1 / factor)}`} entre cortes: acciones previas ajustadas por ${factor >= 1 ? factor : `1/${Math.round(1 / factor)}`}.`);
+    const previo = id => b.get(id) * factor;
+    let aumentan = 0, disminuyen = 0;
+    for (const id of comunes) {
+      if (a.get(id) > previo(id)) aumentan++;
+      else if (a.get(id) < previo(id)) disminuyen++;
+    }
+    const totalA = comunes.reduce((x, id) => x + a.get(id), 0);
+    const totalB = comunes.reduce((x, id) => x + previo(id), 0);
+    if (comunes.length && totalB > 0) {
       const pct = (totalA / totalB - 1) * 100;
-      sCambio = Math.tanh(pct / 10);
+      sCambio = Math.tanh(pct / ESCALA_CAMBIO_PCT);
       metricas.push(metrica('cambio_acciones_pct', pct, '%', periodo));
-      motivos.push(`Acciones reportadas ${pct >= 0 ? 'aumentan' : 'disminuyen'} ${Math.abs(pct).toFixed(2)}% entre cortes.`);
-    } else datosFaltantes.push('reportes.acciones_previas');
-    const universo = new Set([...a.keys(), ...b.keys()]).size;
-    if (universo > 0) sAmplitud = (aumentan + nuevas - disminuyen - salen) / universo;
+      motivos.push(`Acciones de las ${comunes.length} instituciones presentes en ambos cortes ${pct >= 0 ? 'aumentan' : 'disminuyen'} ${Math.abs(pct).toFixed(2)}%.`);
+    } else datosFaltantes.push(comunes.length ? 'reportes.acciones_previas' : 'reportes.instituciones_comunes');
+    // Amplitud = (aumentan − disminuyen) / instituciones comunes: −1 (todas venden) .. +1 (todas compran).
+    if (comunes.length) {
+      sAmplitud = (aumentan - disminuyen) / comunes.length;
+      metricas.push(metrica('amplitud_instituciones', sAmplitud, 'indice', periodo));
+    }
+    if (nuevas || salen) motivos.push(`${nuevas} institución(es) solo en el corte reciente y ${salen} solo en el previo: no entran en la señal (pueden ser 13F aún no presentados o nombres de emisor distintos).`);
     metricas.push(
       metrica('instituciones_aumentan', aumentan, 'conteo', periodo),
       metrica('instituciones_disminuyen', disminuyen, 'conteo', periodo),
       metrica('instituciones_nuevas', nuevas, 'conteo', periodo),
       metrica('instituciones_salen', salen, 'conteo', periodo),
+      metrica('instituciones_comunes', comunes.length, 'conteo', periodo),
       metrica('instituciones_reportadas', a.size, 'conteo', String(cortes[0].fecha).slice(0, 10)),
+      factor !== 1 ? metrica('factor_split', factor, 'razon', periodo) : null,
     );
-    motivos.push(`${aumentan} instituciones aumentan, ${disminuyen} disminuyen, ${nuevas} nuevas y ${salen} salen (solo las instituciones sincronizadas).`);
+    motivos.push(`${aumentan} instituciones aumentan y ${disminuyen} disminuyen (solo las instituciones sincronizadas).`);
   }
 
   if (cortes.length && ref != null) {
     const dias = (ref - cortes[0].t) / DIA_MS;
     metricas.push(metrica('dias_desde_corte', dias, 'dias'));
     if (dias > DIAS_VIGENCIA) {
-      factorVigencia = 0.5;
+      factorVigencia = FACTOR_CONFIANZA_ANTIGUO;
       motivos.push(`Último corte con ${Math.round(dias)} días de antigüedad: confianza reducida.`);
     }
   }
