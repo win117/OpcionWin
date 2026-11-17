@@ -1,0 +1,49 @@
+@api = http://localhost:3020/api/v1
+@email = reemplazar
+@password = reemplazar
+@token = reemplazar
+@empresaId = reemplazar
+
+### Login: elegir mongodb o supabase. Copiar data.token sin subirlo al repositorio.
+POST {{api}}/sesiones
+Content-Type: application/json
+
+{"email":"{{email}}","password":"{{password}}","baseDatos":"mongodb"}
+
+### Consultar sesión
+GET {{api}}/sesiones/actual
+Authorization: Bearer {{token}}
+
+### Crear empresa
+POST {{api}}/empresas
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"simbolo":"DEMO","nombre":"Empresa de prueba","mercado":"DEMO"}
+
+### Consultar empresas
+GET {{api}}/empresas?page=1&limit=10
+Authorization: Bearer {{token}}
+
+### Reemplazar empresa
+PUT {{api}}/empresas/{{empresaId}}
+Authorization: Bearer {{token}}
+Content-Type: application/json
+If-Match: "1"
+
+{"simbolo":"DEMO","nombre":"Empresa actualizada","mercado":"DEMO","activo":true}
+
+### Crear varias empresas
+POST {{api}}/empresas/lote
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"items":[{"simbolo":"DEMO2","nombre":"Segunda","mercado":"DEMO"},{"simbolo":"DEMO3","nombre":"Tercera","mercado":"DEMO"}]}
+
+### Eliminar empresa sin referencias
+DELETE {{api}}/empresas/{{empresaId}}
+Authorization: Bearer {{token}}
+
+### Cerrar sesión
+DELETE {{api}}/sesiones/actual
+Authorization: Bearer {{token}}

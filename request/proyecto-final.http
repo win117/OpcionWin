@@ -1,0 +1,15 @@
+@api = http://localhost:3020/api/v1
+
+### Raíz pública
+GET {{api}}
+
+### Contrato OpenAPI
+GET {{api}}/openapi.json
+
+### Disponibilidad del proceso
+GET http://localhost:3020/health
+
+### Sin token debe devolver 401
+GET {{api}}/empresas
+
+# Usar flujo-crud.http para autenticación y operaciones.

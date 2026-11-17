@@ -1,0 +1,40 @@
+{
+  "name": "app-rest-opciones",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+"scripts": {
+    "babel-node": "babel-node",
+    "dev": "nodemon --exec npm run babel-node -- src/index.js",
+    "build": "babel src --out-dir dist",
+    "start": "node dist/index.js",
+    "check:structure": "npm run build && node scripts/check-structure.cjs",
+    "check:models": "npm run build && node --test scripts/check-models.cjs",
+    "test": "npm run build && node --test scripts/check-models.cjs tests/services.test.cjs tests/http.test.cjs tests/start.test.cjs",
+    "test:databases": "npm run build && node scripts/check-databases.cjs",
+    "setup:mongodb": "npm run build && node scripts/setup-mongodb.cjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@babel/runtime": "^8.1.2",
+    "@hapi/boom": "^10.0.1",
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.10",
+    "express": "^5.3.0",
+    "mongoose": "^9.12.1",
+    "morgan": "^1.12.1",
+    "swagger-jsdoc": "^6.3.0",
+    "swagger-ui-express": "^5.0.1"
+  },
+  "devDependencies": {
+    "@babel/cli": "^8.1.0",
+    "@babel/core": "^8.1.2",
+    "@babel/node": "^8.1.2",
+    "@babel/plugin-transform-runtime": "^8.1.2",
+    "@babel/preset-env": "^8.0.7",
+    "nodemon": "^3.1.14"
+  }
+}
