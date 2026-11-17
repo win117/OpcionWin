@@ -11,6 +11,28 @@ const limite = (valor, porDefecto, maximo) => {
   return n;
 };
 
+// Panorama de mercado (consulta directa al proveedor, sin guardar). Caché por proceso de 5 min.
+const PANORAMA_DEFECTO = ['SPY', 'QQQ', 'DIA', 'IWM'];
+const PANORAMA_NOMBRES = { SPY: 'S&P 500', QQQ: 'Nasdaq 100', DIA: 'Dow Jones', IWM: 'Russell 2000' };
+const cachePanorama = new Map();
+async function panoramaSimbolo(alpaca, simbolo, ahora = Date.now()) {
+  const previo = cachePanorama.get(simbolo);
+  if (previo && ahora - previo.t < 5 * 60000) return previo.dato;
+  const velas = await alpaca.velas(simbolo, { intervalo: '1Day', desde: new Date(ahora - 70 * 86400000).toISOString(), hasta: new Date(ahora).toISOString(), limite: 100 });
+  const q = await alpaca.cotizacion(simbolo).catch(() => null);
+  const cierres = velas.map(v => ({ fecha: new Date(v.fecha).toISOString(), cierre: v.cierre })).slice(-45);
+  const ultimaVela = cierres.at(-1);
+  const hoy = new Date(ahora).toISOString().slice(0, 10);
+  // Cierre previo: si la última vela es de hoy, la anterior; si no, la última.
+  const previa = ultimaVela?.fecha.slice(0, 10) === hoy ? cierres.at(-2) : ultimaVela;
+  const ultimo = q?.ultimo ?? ultimaVela?.cierre ?? null;
+  const dato = { simbolo, nombre: PANORAMA_NOMBRES[simbolo] || simbolo, ultimo,
+    cambioPct: ultimo != null && previa?.cierre ? (ultimo - previa.cierre) / previa.cierre : null,
+    cierres, fechaDato: q?.fechaDato || ultimaVela?.fecha || null };
+  cachePanorama.set(simbolo, { t: ahora, dato });
+  return dato;
+}
+
 export default (factory, integraciones) => {
   const crud = name => createCrudService(name, factory);
   const forCompany = (name, extra = {}) => handle(async(req,res) => {
@@ -61,6 +83,12 @@ export default (factory, integraciones) => {
         vencimientos, vencimiento: elegido, items, total: items.length });
     }),
     // Consultas directas al proveedor (no se guardan; para guardar usar /sincronizaciones/ejecuciones).
+    panorama: handle(async (req, res) => {
+      const lista = req.query.simbolos ? String(req.query.simbolos).split(',').map(x => x.trim().toUpperCase()).filter(Boolean) : PANORAMA_DEFECTO;
+      if (lista.length > 8 || lista.some(x => !/^[A-Z][A-Z0-9.]{0,9}$/.test(x))) throw boom.badRequest('simbolos: hasta 8 símbolos separados por coma.');
+      const items = await Promise.all(lista.map(x => panoramaSimbolo(integraciones.alpaca, x).catch(e => ({ simbolo: x, nombre: PANORAMA_NOMBRES[x] || x, error: e?.mensaje || 'Sin datos' }))));
+      respond(res, { items, total: items.length, fuente: { proveedor: 'alpaca', feed: integraciones.alpaca.feed || 'iex' } });
+    }),
     liveQuote: handle(async (req, res) => respond(res, await integraciones.alpaca.cotizacion(req.params.simbolo.toUpperCase()))),
     chain: handle(async (req, res) => {
       const simbolo = req.params.simbolo.toUpperCase();

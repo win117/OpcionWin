@@ -87,6 +87,7 @@ export async function listLatest(source, params = {}, { dateOf = r => r.createdA
 const sym = simbolo => enc(String(simbolo).toUpperCase());
 
 export const mercado = {
+  panorama: params => api.get('/mercado/panorama' + qs(params)),
   historicos: (simbolo, params) => api.get(`/mercado/historicos/${sym(simbolo)}` + qs(params)),
   cotizaciones: (simbolo, params) => api.get(`/mercado/cotizaciones/${sym(simbolo)}` + qs(params)),
   fundamentales: (simbolo, params) => api.get(`/mercado/fundamentales/${sym(simbolo)}` + qs(params)),

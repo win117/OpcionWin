@@ -183,3 +183,23 @@ test('HTTP: catálogo de cores, búsqueda, resumen de opciones y pesos en selecc
     assert.ok(evs.some(e => e.parametros?.indicadores?.includes('precio_vs_sma50') && e.motivos.includes('Señales usadas: precio_vs_sma50 (selección del usuario).')));
   } finally { server.close(); }
 });
+
+test('mercado/panorama: cambio vs cierre previo, caché y error por símbolo', async () => {
+  const controller = require('../dist/api/v1/controllers/mercado.controller').default;
+  let llamadas = 0;
+  const hoy = new Date().toISOString().slice(0, 10);
+  const alpaca = {
+    feed: 'iex',
+    velas: async s => { llamadas++; if (s === 'MALO') throw { mensaje: 'Sin velas' }; return [{ fecha: '2026-01-02T05:00:00Z', cierre: 100 }, { fecha: hoy + 'T05:00:00Z', cierre: 103 }]; },
+    cotizacion: async () => ({ ultimo: 110, fechaDato: new Date().toISOString() }),
+  };
+  const c = controller(null, { alpaca });
+  const run = query => new Promise((resolve, reject) => c.panorama({ query, context: {} }, { status() { return this; }, json: b => resolve(b.data) }, reject));
+  const d = await run({ simbolos: 'SPYX,MALO' });
+  assert.equal(d.items[0].ultimo, 110);
+  assert.ok(Math.abs(d.items[0].cambioPct - 0.1) < 1e-9, 'la última vela es de hoy: compara contra la anterior');
+  assert.equal(d.items[1].error, 'Sin velas');
+  await run({ simbolos: 'SPYX' });
+  assert.equal(llamadas, 2, 'SPYX se sirve desde caché');
+  await assert.rejects(run({ simbolos: 'A,B,C,D,E,F,G,H,I' }), /hasta 8/);
+});

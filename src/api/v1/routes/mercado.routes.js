@@ -6,6 +6,7 @@ import { forRepository as noticias } from '../controllers/noticias.controller';
 export default ({factory, integraciones}={})=>{
   const router=Router(), c=controller(factory, integraciones);
   router.get('/empresas',empresas(factory).list);
+  router.get('/panorama',c.panorama);
   router.get('/cotizaciones/:simbolo/en-vivo',c.liveQuote);
   router.get('/cotizaciones/:simbolo',c.quotes);
   router.get('/historicos/:simbolo',c.history);

@@ -2,12 +2,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { PageHeader } from '../components/Layout';
-import { Empty, ErrorMessage, Loading } from '../components/States';
+import { ErrorMessage, Loading } from '../components/States';
 import { useAsync } from '../hooks/useAsync';
 import { empresas } from '../api/resources';
 import Buscador from './analizar/Buscador';
 import DetalleEmpresa from './analizar/DetalleEmpresa';
 import ConfigAnalisis, { useCatalogo } from './analizar/ConfigAnalisis';
+import Inicio from './analizar/Inicio';
 import Progreso from './analizar/Progreso';
 import { ejecutarFlujo, guardarConfig, leerConfig, pasosDatos, pasosIniciales, resolverConfig, sincronizarDatos } from './analizar/flujo';
 import { DISCLAIMER } from '../utils/constants';
@@ -83,7 +84,7 @@ export default function Analizar() {
         </aside>
         <div className="workspace__main stack" ref={detalle}>
           {error && <ErrorMessage error={error} title="La operación no pudo completarse" />}
-          {!simbolo && <Empty title="Selecciona una empresa">Busca un símbolo a la izquierda y haz clic en un resultado: verás su gráfico, opciones y griegas, fundamentales y noticias.</Empty>}
+          {!simbolo && <Inicio />}
           {simbolo && registro.loading && !registro.data && empresa === undefined && <Loading text={'Cargando ' + simbolo + '…'} />}
           {simbolo && registro.error && empresa === undefined && <ErrorMessage error={registro.error} onRetry={registro.reload} />}
           {simbolo && empresa === null && (

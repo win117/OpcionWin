@@ -60,6 +60,10 @@ ejecutar cores → confluencia por estrategia → selección (3 modos) → confi
   Backend: velas por sincronización hasta 10 000 (antes cortaba en 1000) y serie `/mercado/historicos` hasta 10 000.
   Limitación: el feed IEX de Alpaca solo tiene velas desde 2020-07 (~6 años; MSFT 1587 sesiones).
   Respaldo `backups/06-buscar-y-graficos-*.zip`.
+- 2026-11-17: Inicio con tablero (el usuario lo veía vacío). `GET /mercado/panorama?simbolos=` (por defecto SPY, QQQ, DIA, IWM;
+  consulta directa a Alpaca, caché 5 min por proceso, error por símbolo sin romper la respuesta). Panel derecho sin selección:
+  Mercado hoy (sparklines), Tus empresas (precio, sparkline, última recomendación, dirección por core), Explora y Actividad reciente.
+  97 pruebas. Respaldo `backups/07-inicio-tablero-*.zip`.
 
 ## Cómo ejecutar
 - Desarrollo: `npm.cmd run dev` (API :PORT) y en otra terminal `npm.cmd run dev:web` (Vite con proxy).
