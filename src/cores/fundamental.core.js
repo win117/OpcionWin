@@ -52,6 +52,9 @@ export const tipoPeriodo = p => {
   return 'instante';
 };
 
+// Fecha como AAAA-MM-DD (acepta Date u ISO string; String(Date) daría 'Sat Jul 25').
+const isoDia = d => new Date(d).toISOString().slice(0, 10);
+
 const valorDe = (p, nombre) => {
   const m = (p.metricas || []).find(x => x && x.nombre === nombre && esNumero(x.valor));
   return m ? m.valor : null;
@@ -77,8 +80,8 @@ export function evaluar(input = {}) {
   const previo = actual
     ? conFlujo.find(p => p !== actual && p._tipo === actual._tipo && Math.abs(actual._fin - 365 * DIA_MS - p._fin) <= TOLERANCIA_YOY_DIAS * DIA_MS)
     : null;
-  const etiqueta = actual ? `${actual._tipo}:${String(actual.periodoFin).slice(0, 10)}` : undefined;
-  if (actual) motivos.push(`Periodo base ${actual._tipo} con cierre ${new Date(actual.periodoFin).toISOString().slice(0, 10)}${previo ? `, comparado con ${new Date(previo.periodoFin).toISOString().slice(0, 10)}` : ''}.`);
+  const etiqueta = actual ? `${actual._tipo}:${isoDia(actual.periodoFin)}` : undefined;
+  if (actual) motivos.push(`Periodo base ${actual._tipo} con cierre ${isoDia(actual.periodoFin)}${previo ? `, comparado con ${isoDia(previo.periodoFin)}` : ''}.`);
   else datosFaltantes.push('fundamentales.periodo_flujo');
   if (actual && !previo) datosFaltantes.push('fundamentales.periodo_comparable_yoy');
 
@@ -127,7 +130,7 @@ export function evaluar(input = {}) {
     if (cap > 0) {
       const d = pas / cap;
       sDeuda = clamp(DEUDA_CAPITAL_NEUTRA - d); // 0.5 → +1, 1.5 → 0, 2.5 → −1
-      metricas.push(metrica('deuda_capital', d, 'razon', String(pDeuda.periodoFin).slice(0, 10)));
+      metricas.push(metrica('deuda_capital', d, 'razon', isoDia(pDeuda.periodoFin)));
     } else {
       sDeuda = -1;
       motivos.push('Capital contable no positivo: apalancamiento desfavorable (razón no definida).');
@@ -139,7 +142,7 @@ export function evaluar(input = {}) {
   if (pLiq && valorDe(pLiq, 'pasivo_circulante') > 0) {
     const rc = valorDe(pLiq, 'activo_circulante') / valorDe(pLiq, 'pasivo_circulante');
     sLiq = clamp(rc - RAZON_CORRIENTE_NEUTRA); // 2 → +1, 1 → 0, 0 → −1
-    metricas.push(metrica('razon_corriente', rc, 'razon', String(pLiq.periodoFin).slice(0, 10)));
+    metricas.push(metrica('razon_corriente', rc, 'razon', isoDia(pLiq.periodoFin)));
   } else datosFaltantes.push('razon_corriente');
 
   const eps = actual && valorDe(actual, 'eps_diluido');
