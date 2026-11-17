@@ -128,7 +128,7 @@ test('Flujo funcional: sincronizar → cores → confluencia → selección → 
     const conexion=await call('POST','/conexiones-broker',{brokerId:broker._id,alias:'Paper',entorno:'paper',credencialRef:'env:ALPACA'},201);
     assert.equal(conexion.credencialRef,undefined,'credencialRef nunca se devuelve');
     const v=await call('POST','/conexiones-broker/'+conexion._id+'/verificacion');
-    assert.equal(v.conexion.estado,'activa');
+    assert.equal(v.estadoConexion,'activa'); assert.equal(v.cuentaExternaId,'PA123');
     const key=randomUUID();
     const orden=await call('POST','/ordenes',{conexionId:conexion._id,configuracionId:conf._id,idempotencyKey:key,tipo:'limit',vigencia:'day',cantidad:1,precioLimite:2.5,
       componentes:[{contratoId:contrato._id,simbolo:contrato.simbolo,accion:'buy',intencion:'buy_to_open',proporcion:1}]},201);

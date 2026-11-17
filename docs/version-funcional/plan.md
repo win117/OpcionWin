@@ -9,10 +9,10 @@ Objetivo: que la plataforma **analice** (5 cores + confluencia + selección), **
 | 0 | Respaldo, rama, ADRs, contratos | principal | Hecho |
 | 1 | Cores puros + reglas + estrategias + confluencia, con pruebas | agente cores | Hecho (32 pruebas) |
 | 2 | Adaptadores Alpaca y SEC con pruebas sin red | agente integraciones | Hecho (19 pruebas; SEC verificado en vivo) |
-| 3 | Frontend React + Vite | agente frontend | En curso |
+| 3 | Frontend React + Vite | agente frontend | Hecho (11 páginas, build OK) |
 | 4 | Orquestación: cola de trabajos, sincronización, ejecución de cores, selección, confluencia | principal | Hecho (prueba E2E) |
 | 5 | Órdenes paper: envío, cancelación, posiciones | principal | Hecho (falta prueba con claves reales) |
-| 6 | Integración Express ↔ web/dist, OpenAPI actualizado | principal | Pendiente |
+| 6 | Integración Express ↔ web/dist, OpenAPI actualizado | principal | Hecho |
 | 7 | Verificación real con claves (usuario) y documentación final | principal + usuario | Pendiente |
 
 ## Requisitos del usuario para verificar en vivo
@@ -28,6 +28,15 @@ ejecutar cores → confluencia por estrategia → selección (3 modos) → confi
   SEC_USER_AGENT queda vacío en .env: lo completa el usuario (política de privacidad impide escribir el correo desde el agente).
 - 2026-11-16: Etapas 1, 2, 4 y 5. 91 pruebas aprobadas (39 previas + 32 cores + 19 integraciones + 1 flujo E2E).
   Respaldo `backups/01-backend-funcional-*.zip`.
+
+- 2026-11-16: Etapas 3 y 6. Express sirve `web/dist` con respaldo SPA (excepto /api, /health, /assets).
+  Listas CRUD ordenadas por `createdAt` descendente (antes por UUID aleatorio). Verificación de conexión devuelve objeto plano.
+  Claves Alpaca del usuario devuelven 401: empiezan con `CK` (Broker API), se requieren claves Trading API paper (`PK`).
+  Respaldo `backups/02-frontend-integrado-*.zip`.
+
+## Cómo ejecutar
+- Desarrollo: `npm.cmd run dev` (API :PORT) y en otra terminal `npm.cmd run dev:web` (Vite con proxy).
+- Producción local: `npm.cmd run build:all` y `npm.cmd start` → interfaz en `http://HOST:PORT/`, Swagger en `/api/v1/api-docs`.
 
 ## Desviaciones aceptadas respecto a contratos.md
 - `sec.cikDeSimbolo` devuelve `{cik, nombre, simbolo}`; `tenencias13F` requiere `filers` (se usa `integraciones.filers13F`, 9 instituciones verificadas en EDGAR).

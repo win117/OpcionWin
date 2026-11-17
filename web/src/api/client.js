@@ -1,0 +1,103 @@
+// Envoltura de fetch para la API REST. Agrega el token de sessionStorage,
+// serializa JSON y convierte respuestas de error en ApiError con el mensaje del servidor.
+const STORAGE_KEY = 'opciones.sesion';
+export const API_PREFIX = '/api/v1';
+export const SESSION_EXPIRED_EVENT = 'opciones:sesion-expirada';
+
+export function readSession() {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeSession(session) {
+  try {
+    if (session) sessionStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+    else sessionStorage.removeItem(STORAGE_KEY);
+  } catch {
+    /* almacenamiento no disponible */
+  }
+}
+
+export class ApiError extends Error {
+  constructor(message, status, body) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.body = body;
+  }
+}
+
+export function qs(params = {}) {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null || value === '') continue;
+    search.set(key, String(value));
+  }
+  const text = search.toString();
+  return text ? '?' + text : '';
+}
+
+function friendlyMessage(status, json) {
+  const message = json?.message;
+  if (status === 404 && (!message || message === 'Ruta no encontrada.')) {
+    return 'Esta función aún no está disponible en el servidor (ruta no encontrada).';
+  }
+  if (message) return message;
+  if (status === 429) return 'Demasiadas solicitudes. Espera un momento e inténtalo de nuevo.';
+  if (status >= 500) return 'El servidor no pudo completar la operación (error ' + status + ').';
+  return 'La solicitud falló (error ' + status + ').';
+}
+
+export async function request(path, { method = 'GET', body, headers = {}, signal } = {}) {
+  const session = readSession();
+  const url = path.startsWith('/health') ? path : API_PREFIX + path;
+  const init = { method, headers: { Accept: 'application/json', ...headers }, signal };
+  if (body !== undefined) {
+    init.headers['Content-Type'] = 'application/json';
+    init.body = JSON.stringify(body);
+  }
+  if (session?.token) init.headers.Authorization = 'Bearer ' + session.token;
+
+  let response;
+  try {
+    response = await fetch(url, init);
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error;
+    throw new ApiError('No se pudo contactar al servidor. Verifica que la API esté en ejecución.', 0);
+  }
+
+  let json = null;
+  if (response.status !== 204) {
+    const text = await response.text();
+    if (text) {
+      try { json = JSON.parse(text); } catch { json = null; }
+    }
+  }
+
+  if (response.status === 401 && session?.token) {
+    writeSession(null);
+    window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
+  }
+  if (!response.ok) throw new ApiError(friendlyMessage(response.status, json), response.status, json);
+
+  return {
+    status: response.status,
+    data: json && typeof json === 'object' && 'data' in json ? json.data : json,
+    message: json?.message,
+    etag: response.headers.get('ETag'),
+  };
+}
+
+const unwrap = promise => promise.then(result => result.data);
+
+export const api = {
+  request,
+  get: (path, options) => unwrap(request(path, options)),
+  post: (path, body, options) => unwrap(request(path, { ...options, method: 'POST', body })),
+  put: (path, body, options) => unwrap(request(path, { ...options, method: 'PUT', body })),
+  del: (path, options) => unwrap(request(path, { ...options, method: 'DELETE' })),
+};

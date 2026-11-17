@@ -80,6 +80,9 @@ export function createCrudService(name, factory = repository) {
         if (key === 'search') rows = rows.filter(r => ['nombre','simbolo','titulo','descripcion'].some(k => String(r.document[k] || '').toLowerCase().includes(value.toLowerCase())));
         else rows = rows.filter(r => String(r.document[key]) === value);
       }
+      // Más recientes primero (los _id son UUID aleatorios y no sirven como orden).
+      const t = r => new Date(r.document.createdAt || 0).getTime() || 0;
+      rows.sort((a, b) => t(b) - t(a) || String(a._id).localeCompare(String(b._id)));
       return { items: rows.slice((page-1)*limit, page*limit).map(safeDocument), page, limit, total: rows.length };
     },
     async get(context, id) {

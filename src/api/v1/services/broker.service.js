@@ -24,7 +24,8 @@ export function createBroker({ integraciones, factory = repository }) {
       try {
         const cuenta = await alpaca.cuenta();
         const actualizada = await parchar('conexiones-broker', ctx, conexion._id, { estado: 'activa', ...(cuenta.cuentaExternaId ? { cuentaExternaId: String(cuenta.cuentaExternaId) } : {}) }, factory);
-        return { conexion: actualizada, cuenta };
+        // Respuesta plana para la interfaz; sin secretos.
+        return { conexionId: actualizada._id, estadoConexion: actualizada.estado, ...cuenta };
       } catch (error) {
         await parchar('conexiones-broker', ctx, conexion._id, { estado: 'error' }, factory).catch(() => {});
         throw error;
