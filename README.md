@@ -57,8 +57,3 @@ Ver request/proyecto-final.http y request/flujo-crud.http.
 - Tokens expirados se rechazan siempre. MongoDB puede limpiarlos por TTL una vez instalado su índice; en SQL debe programarse limpieza posterior.
 - Configurar CORS_ORIGINS y HTTPS para clientes externos.
 
-## Evidencia
-
-docs/inciso-b.md y docs/inciso-c.md conservan la descripción de esas etapas.
-docs/inciso-d.md a docs/inciso-h.md describen la implementación actual.
-backups/ contiene una copia del código/configuración anterior a cada inciso. Incluyen secretos locales: no compartirlos ni subirlos a Git.
