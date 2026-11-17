@@ -18,7 +18,8 @@
     "build:all": "npm run build && npm run build:web",
     "backup": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/backup.ps1 -Etiqueta",
     "smoke:real": "npm run build && node scripts/smoke-real.cjs",
-    "smoke:orden": "npm run build && node scripts/smoke-orden-paper.cjs"
+    "smoke:orden": "npm run build && node scripts/smoke-orden-paper.cjs",
+    "smoke:ejecucion": "npm run build && node scripts/smoke-orden-ejecucion.cjs"
   },
   "keywords": [],
   "author": "",

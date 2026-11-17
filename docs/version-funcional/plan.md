@@ -67,7 +67,11 @@ ejecutar cores → confluencia por estrategia → selección (3 modos) → confi
 - 2026-11-17: Orden paper real (`npm run smoke:orden -- mongodb`): conexión verificada (cuenta ACTIVE, nivel 3), orden limit
   1 × AAPL261125C00350000 a 0.01 enviada (pending_new → aceptada por sincronización), reenvío con la misma Idempotency-Key
   devuelve la misma orden, clave ajena → 409, cancelación confirmada por Alpaca (canceled), posiciones sincronizadas (0).
-  Pendiente opcional: prueba con ejecución real (fill) y cierre de posición.
+- 2026-11-17: Ejecución real en paper (`npm run smoke:ejecucion -- mongodb`, mercado abierto): compra market 1 × AAPL261125C00350000
+  ejecutada a 6.65 (3.8 s) → posición abierta long x1 @ 6.65 → venta market sell_to_close ejecutada a 5.85 → posición cerrada.
+  Resultado simulado −80 USD (spread bid/ask 5.80/6.75). Sin posición residual en Alpaca.
+  Corregido: la sincronización de posiciones nunca marcaba como `cerrada` una posición que el broker ya no reporta;
+  la sincronización de órdenes ahora registra el precio de ejecución en eventos. 98 pruebas. Respaldo `backups/09-ejecucion-paper-*.zip`.
 
 ## Cómo ejecutar
 - Desarrollo: `npm.cmd run dev` (API :PORT) y en otra terminal `npm.cmd run dev:web` (Vite con proxy).

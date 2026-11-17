@@ -203,3 +203,22 @@ test('mercado/panorama: cambio vs cierre previo, caché y error por símbolo', a
   assert.equal(llamadas, 2, 'SPYX se sirve desde caché');
   await assert.rejects(run({ simbolos: 'A,B,C,D,E,F,G,H,I' }), /hasta 8/);
 });
+
+test('sincronizar posiciones: abre, actualiza y marca cerrada la que el broker ya no reporta', async () => {
+  const { createSincronizador } = require('../dist/api/v1/services/sincronizacion.service');
+  const { crear, todos } = require('../dist/api/v1/services/registros');
+  const factory = memoryFactory(), ctx = { database: 'mongodb', userId: 'u1' };
+  const broker = await crear('brokers', ctx, { codigo: 'alpaca', nombre: 'Alpaca', activo: true, entornos: ['paper'] }, factory);
+  const conexion = await crear('conexiones-broker', ctx, { brokerId: broker._id, alias: 'p', entorno: 'paper' }, factory);
+  const empresa = await crear('empresas', ctx, { simbolo: 'AAPL', nombre: 'Apple', mercado: 'NASDAQ', activo: true }, factory);
+  await crear('contratos', ctx, { proveedor: 'alpaca', contratoExternoId: 'AAPL261125C00350000', empresaId: empresa._id, simbolo: 'AAPL261125C00350000', tipo: 'call', strike: 350, vencimiento: new Date('2026-11-25'), multiplicador: 100, activo: true }, factory);
+  let remotas = [{ posicionExternaId: 'a1', simbolo: 'AAPL261125C00350000', lado: 'long', cantidad: 1, precioPromedio: 6.65 }];
+  const sync = createSincronizador({ integraciones: { alpaca: { posiciones: async () => remotas }, sec: {} }, factory });
+  await sync.ejecutar(ctx, { recurso: 'posiciones', conexionId: conexion._id });
+  let pos = await todos('posiciones', ctx, { conexionId: conexion._id }, factory);
+  assert.equal(pos.length, 1); assert.equal(pos[0].estado, 'abierta'); assert.equal(pos[0].precioPromedio, 6.65);
+  remotas = [];
+  const r = await sync.ejecutar(ctx, { recurso: 'posiciones', conexionId: conexion._id });
+  pos = await todos('posiciones', ctx, { conexionId: conexion._id }, factory);
+  assert.equal(pos[0].estado, 'cerrada'); assert.equal(pos[0].cantidad, 1); assert.equal(r.procesados, 1);
+});

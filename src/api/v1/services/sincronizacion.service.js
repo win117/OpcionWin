@@ -123,13 +123,22 @@ export function createSincronizador({ integraciones, factory = repository }) {
     async posiciones(ctx, conexion, conteo) {
       const lista = await alpaca.posiciones();
       let n = 0;
+      const vigentes = new Set();
       for (const p of lista) {
         const [contrato] = await todos('contratos', ctx, { contratoExternoId: p.simbolo }, factory);
         if (!contrato) { conteo.fallidos++; continue; } // posición sin contrato sincronizado (p. ej. acciones)
-        await guardar('posiciones', ctx, idDeterminista(conexion._id, 'pos', p.posicionExternaId || p.simbolo), {
+        const id = idDeterminista(conexion._id, 'pos', p.posicionExternaId || p.simbolo);
+        vigentes.add(id);
+        await guardar('posiciones', ctx, id, {
           conexionId: conexion._id, posicionExternaId: p.posicionExternaId || p.simbolo, contratoId: contrato._id,
           lado: p.lado, cantidad: Math.abs(p.cantidad), precioPromedio: Math.abs(p.precioPromedio), actualizadaEn: new Date(), estado: 'abierta',
         }, factory);
+        n++;
+      }
+      // Abiertas localmente que el broker ya no reporta → cerradas (se conserva la última cantidad y precio promedio).
+      for (const p of await todos('posiciones', ctx, { conexionId: conexion._id, estado: 'abierta' }, factory)) {
+        if (vigentes.has(p._id)) continue;
+        await parchar('posiciones', ctx, p._id, { estado: 'cerrada', actualizadaEn: new Date() }, factory);
         n++;
       }
       return n;
@@ -138,8 +147,9 @@ export function createSincronizador({ integraciones, factory = repository }) {
       const ordenes = (await todos('ordenes', ctx, { conexionId: conexion._id }, factory)).filter(o => o.ordenExternaId);
       for (const o of ordenes) {
         const remoto = await alpaca.consultarOrden(o.ordenExternaId);
+        const ejecucion = remoto.precioPromedioEjecucion != null ? '; ejecutada a ' + remoto.precioPromedioEjecucion : '';
         if (remoto.estado !== o.estado) await parchar('ordenes', ctx, o._id, d => ({ ...d, estado: remoto.estado,
-          eventos: [...(d.eventos || []), { tipo: 'sincronizacion', mensaje: 'Estado del broker: ' + remoto.estado }] }), factory);
+          eventos: [...(d.eventos || []), { tipo: 'sincronizacion', mensaje: 'Estado del broker: ' + remoto.estado + ejecucion }] }), factory);
       }
       return ordenes.length;
     },
