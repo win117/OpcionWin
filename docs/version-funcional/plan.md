@@ -89,6 +89,11 @@ ejecutar cores → confluencia por estrategia → selección (3 modos) → confi
   (A&S 26.2.17) y estrategias 1.1.0: probabilidad de ganancia, delta e IV verificadas contra Alpaca. Inventario técnico exacto en
   `docs/version-funcional/cores-inventario.md`. 115 pruebas.
 
+- 2026-11-17: Despliegue en Render preparado (`render.yaml`, `docs/despliegue-render.md`). Usuarios desde `AUTH_USERS_JSON`
+  (prioridad sobre `AUTH_USERS_FILE`) y `npm run exportar:usuarios`; `engines.node >= 20`. Simulado con un clon limpio sin `.env`:
+  build de Render OK, servidor en 0.0.0.0, `/health` y SPA 200, login lee usuarios de la variable (401 con clave incorrecta). 117 pruebas.
+  El repositorio es público: secretos solo en el panel de Render. Respaldo `backups/13-render-*.zip`.
+
 ## Cómo ejecutar
 - Desarrollo: `npm.cmd run dev` (API :PORT) y en otra terminal `npm.cmd run dev:web` (Vite con proxy).
 - Producción local: `npm.cmd run build:all` y `npm.cmd start` → interfaz en `http://HOST:PORT/`, Swagger en `/api/v1/api-docs`.
