@@ -8,15 +8,18 @@ import { iniciarTrabajo } from '../services/trabajos.service';
 import { createSincronizador } from '../services/sincronizacion.service';
 import { createAnalisis } from '../services/analisis.service';
 import { createBroker } from '../services/broker.service';
+import { createBusquedaActivos } from '../services/activos.service';
+import { cores as modulosCores } from '../../../cores';
 
 const SIMBOLO = /^[A-Z][A-Z0-9.\-]{0,9}$/;
 const PROVEEDOR = { fundamentales: 'sec', institucional: 'sec' };
 
-export default ({ factory, integraciones, cola }) => {
+export default ({ factory, integraciones, cola, ahora, cacheActivos }) => {
   const router = Router();
   const sync = createSincronizador({ integraciones, factory });
   const analisis = createAnalisis({ cola, factory });
   const broker = createBroker({ integraciones, factory });
+  const busqueda = createBusquedaActivos({ integraciones, factory, ahora, cache: cacheActivos });
   const aceptado = (res, data) => respond(res, data, 202, 'Trabajo en proceso. Consulta el registro hasta completada o fallida.');
 
   router.get('/integraciones/estado', handle(async (_req, res) => respond(res, integraciones.estado())));
@@ -31,6 +34,11 @@ export default ({ factory, integraciones, cola }) => {
     if (['ordenes', 'posiciones'].includes(body.recurso) && !body.conexionId) throw boom.badRequest('conexionId requerido para ' + body.recurso + '.');
     aceptado(res, await iniciarTrabajo({ name: 'sincronizaciones', ctx: req.context, datos, cola, factory, ejecutar: r => sync.ejecutar(req.context, r) }));
   }));
+
+  // Catálogo de señales por core (para elegir parametros.indicadores). /cores/catalogo no choca con /cores/:core/evaluaciones.
+  router.get('/cores/catalogo', handle(async (_req, res) => respond(res, { items: Object.entries(modulosCores).map(([core, m]) => ({
+    core, version: m.VERSION, requiere: [...(m.REQUIERE || [])], senales: m.SENALES || [] })) })));
+  router.get('/activos/busqueda', handle(async (req, res) => respond(res, await busqueda.buscar(req.context, req.query.q, req.query.limit))));
 
   router.post('/cores/:core/evaluaciones', handle(async (req, res) => aceptado(res, await analisis.ejecutarCore(req.context, req.params.core, input(req.body)))));
   router.post('/selecciones/ejecuciones', handle(async (req, res) => aceptado(res, await analisis.ejecutarSeleccion(req.context, input(req.body)))));

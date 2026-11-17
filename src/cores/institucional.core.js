@@ -1,9 +1,13 @@
 // Core institucional: cambio de tenencias 13F entre los dos cortes más recientes.
 // 13F se publica hasta 45 días después del trimestre: describe posiciones pasadas, no flujo en tiempo real.
-import { combinar, DIA_MS, esNumero, finalizar, metrica, tiempo } from './util.js';
+import { combinar, DIA_MS, esNumero, filtrarSenales, finalizar, metrica, tiempo } from './util.js';
 
-export const VERSION = 'institucional@1.0.0';
+export const VERSION = 'institucional@1.0.1';
 export const REQUIERE = ['reportes'];
+export const SENALES = [
+  { nombre: 'cambio_acciones_pct', etiqueta: 'Cambio de acciones (%)', descripcion: 'Variación porcentual de las acciones en poder de instituciones entre cortes 13F.', pesoBase: 1.5 },
+  { nombre: 'amplitud_instituciones', etiqueta: 'Amplitud institucional', descripcion: 'Balance entre instituciones que aumentan y las que disminuyen su posición.', pesoBase: 1 },
+];
 
 const DIAS_VIGENCIA = 135; // corte + 45 días de publicación + un trimestre
 
@@ -90,9 +94,9 @@ export function evaluar(input = {}) {
     }
   }
 
-  const c = combinar([
-    { nombre: 'cambio_acciones_pct', valor: sCambio, peso: 1.5 },
-    { nombre: 'amplitud_instituciones', valor: sAmplitud, peso: 1 },
-  ]);
+  const valores = { cambio_acciones_pct: sCambio, amplitud_instituciones: sAmplitud };
+  const { senales, motivo } = filtrarSenales(SENALES.map(s => ({ nombre: s.nombre, valor: valores[s.nombre], peso: s.pesoBase })), input.parametros);
+  if (motivo) motivos.push(motivo);
+  const c = combinar(senales);
   return finalizar({ ...c, confianza: c.confianza * factorVigencia, metricas, motivos, datosFaltantes, reglas: input.reglas, core: 'institucional' });
 }

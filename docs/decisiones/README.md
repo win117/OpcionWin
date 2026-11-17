@@ -58,3 +58,11 @@ Para debatir una decisión: cambiar su estado a Propuesta, anotar el argumento e
 ## ADR-009 · Multiagente
 **Decisión.** Tres agentes en paralelo con carpetas exclusivas: cores (`src/cores`, `tests/cores*`), integraciones (`src/integrations`, `tests/integrations*`), frontend (`web/`). El agente principal integra servicios/rutas y es el único que edita `package.json` raíz y `src/api`. Contratos fijos en `docs/version-funcional/contratos.md`.
 **Por qué.** Las tres áreas son independientes dado el contrato; paralelizar reduce tiempo y cada agente carga solo su contexto (menos tokens que un solo hilo largo).
+
+## ADR-010 · Selección de señales por core y pesos en selección
+**Estado.** Aceptada.
+**Contexto.** El usuario quería elegir qué señales de cada core cuentan y dar más peso a unos cores en la selección. `parametrosSchema.indicadores` ya existía sin efecto.
+**Decisión.** Cada core exporta `SENALES` (nombre, etiqueta, descripción, peso base) y filtra con `filtrarSenales` (util): si la lista trae al menos una señal del core, solo esas entran en `combinar` (cobertura y confianza reflejan menos señales); si trae ninguna o está vacía, se usan todas (compatible hacia atrás). `GET /cores/catalogo` publica el catálogo. `POST /selecciones/ejecuciones` acepta `ponderaciones [{core, peso>=0}]` con el mismo subesquema que Confluencia. Versiones de los cores suben a 1.0.1.
+**Alternativas.** Pesos por señal editables por el usuario (más flexible, pero rompe la trazabilidad de `pesoBase` y complica la UI); un campo nuevo en lugar de reutilizar `indicadores` (más claro, pero duplica el esquema).
+**Debate abierto.** Reutilizar `indicadores` para señales de todos los cores mezcla nombres en una sola lista; se tolera porque los nombres son únicos entre cores. Queda pendiente decidir si los pesos por señal serán editables.
+**Consecuencias.** Elegir una sola señal puede subir la cobertura aparente; el motivo deja constancia de la selección.

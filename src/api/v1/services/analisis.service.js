@@ -143,7 +143,7 @@ export function createAnalisis({ cola, factory = repository }) {
 
     async ejecutarSeleccion(ctx, body = {}) {
       const perfil = body.perfilId ? await obtener('perfiles-analisis', ctx, body.perfilId, factory) : null;
-      const campos = ['modo', 'empresaId', 'estrategiaId', 'empresasCandidatas', 'estrategiasCandidatas', 'coresSeleccionados', 'perfilId', 'filtros'];
+      const campos = ['modo', 'empresaId', 'estrategiaId', 'empresasCandidatas', 'estrategiasCandidatas', 'coresSeleccionados', 'perfilId', 'filtros', 'ponderaciones'];
       const datos = Object.fromEntries(campos.filter(k => body[k] !== undefined).map(k => [k, body[k]]));
       return iniciarTrabajo({ name: 'selecciones', ctx, factory, cola, datos, ejecutar: async registro => {
         const catalogo = await asegurarEstrategias(ctx);
@@ -169,7 +169,7 @@ export function createAnalisis({ cola, factory = repository }) {
           }
           for (const codigo of codigos) {
             const estrategia = catalogo.get(codigo);
-            const r = combinar(codigo, evaluaciones, registro.coresSeleccionados);
+            const r = combinar(codigo, evaluaciones, registro.coresSeleccionados, registro.ponderaciones);
             const conf = await crear('confluencias', ctx, { empresaId: empresa._id, estrategiaId: estrategia._id,
               evaluacionesIds: evaluaciones.map(e => e._id), coresSeleccionados: registro.coresSeleccionados, estado: 'completada',
               ...datosConfluencia(r, registro.coresSeleccionados) }, factory);

@@ -12,6 +12,7 @@ export default ({factory, integraciones}={})=>{
   router.get('/fundamentales/:simbolo',c.fundamentals);
   router.get('/institucional/:simbolo',c.institutional);
   router.get('/opciones/cadena/:simbolo',c.chain);
+  router.get('/opciones/resumen/:simbolo',c.resumenOpciones);
   router.get('/opciones',contratos(factory).list);
   router.get('/opciones/:contratoId/snapshot',c.snapshot);
   router.get('/opciones/:id',contratos(factory).get);

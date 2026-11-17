@@ -2,8 +2,11 @@
 import { LEXICO, NEGADORES, VENTANA_NEGACION } from './lexico.js';
 import { clamp, DIA_MS, esNumero, finalizar, metrica, tiempo } from './util.js';
 
-export const VERSION = 'noticias@1.0.0';
+export const VERSION = 'noticias@1.0.1';
 export const REQUIERE = ['noticias'];
+export const SENALES = [
+  { nombre: 'sentimiento_promedio', etiqueta: 'Sentimiento promedio', descripcion: 'Sentimiento léxico de los titulares con decaimiento exponencial por antigüedad.', pesoBase: 1 },
+];
 
 const UMBRAL_POLARIDAD = 0.1;
 

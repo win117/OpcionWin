@@ -190,6 +190,18 @@ export const combinar = subsenales => {
   return { sesgo, confianza: clamp(cobertura * (0.5 * consistencia + 0.5 * intensidad), 0, 1), cobertura };
 };
 
+/**
+ * Aplica la selección de señales del usuario (parametros.indicadores) a la lista de sub-señales de un core.
+ * Si contiene al menos una señal de ESTE core, solo esas entran; si no (vacía o de otros cores) se usan todas.
+ * Devuelve { senales, motivo } (motivo null cuando no hay selección aplicable).
+ */
+export const filtrarSenales = (lista, parametros) => {
+  const sel = Array.isArray(parametros?.indicadores) ? parametros.indicadores : [];
+  const propias = lista.filter(s => sel.includes(s.nombre));
+  if (!propias.length) return { senales: lista, motivo: null };
+  return { senales: propias, motivo: `Señales usadas: ${propias.map(s => s.nombre).join(', ')} (selección del usuario).` };
+};
+
 /** Métrica con valor finito redondeado; null si el valor no es finito (no se inventan datos). */
 export const metrica = (nombre, valor, unidad, periodo) => {
   if (!esNumero(valor)) return null;

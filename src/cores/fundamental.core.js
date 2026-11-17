@@ -1,9 +1,17 @@
 // Core fundamental: crecimiento, márgenes, apalancamiento y liquidez a partir de periodos reportados (SEC).
 // Comparaciones solo entre periodos de igual duración: anual vs anual, o trimestre vs mismo trimestre del año previo.
-import { clamp, combinar, DIA_MS, esNumero, finalizar, metrica, tiempo } from './util.js';
+import { clamp, combinar, DIA_MS, esNumero, filtrarSenales, finalizar, metrica, tiempo } from './util.js';
 
-export const VERSION = 'fundamental@1.0.0';
+export const VERSION = 'fundamental@1.0.1';
 export const REQUIERE = ['fundamentales'];
+export const SENALES = [
+  { nombre: 'crecimiento_ingresos_yoy', etiqueta: 'Crecimiento de ingresos (YoY)', descripcion: 'Variación interanual de los ingresos.', pesoBase: 1.5 },
+  { nombre: 'crecimiento_utilidad_yoy', etiqueta: 'Crecimiento de utilidad (YoY)', descripcion: 'Variación interanual de la utilidad neta.', pesoBase: 1 },
+  { nombre: 'margen_neto', etiqueta: 'Margen neto', descripcion: 'Utilidad neta sobre ingresos.', pesoBase: 1 },
+  { nombre: 'deuda_capital', etiqueta: 'Deuda / capital', descripcion: 'Pasivos totales sobre capital contable (apalancamiento).', pesoBase: 1 },
+  { nombre: 'razon_corriente', etiqueta: 'Razón corriente', descripcion: 'Activo circulante sobre pasivo circulante (liquidez).', pesoBase: 0.75 },
+  { nombre: 'margen_flujo_operativo', etiqueta: 'Margen de flujo operativo', descripcion: 'Flujo operativo sobre ingresos.', pesoBase: 1 },
+];
 
 const FLUJOS = ['ingresos', 'utilidad_neta', 'flujo_operativo', 'eps_diluido'];
 
@@ -113,14 +121,10 @@ export function evaluar(input = {}) {
   const eps = actual && valorDe(actual, 'eps_diluido');
   if (esNumero(eps)) metricas.push(metrica('eps_diluido', eps, 'USD/accion', etiqueta));
 
-  const c = combinar([
-    { nombre: 'crecimiento_ingresos_yoy', valor: sIng, peso: 1.5 },
-    { nombre: 'crecimiento_utilidad_yoy', valor: sUt, peso: 1 },
-    { nombre: 'margen_neto', valor: sMargen, peso: 1 },
-    { nombre: 'deuda_capital', valor: sDeuda, peso: 1 },
-    { nombre: 'razon_corriente', valor: sLiq, peso: 0.75 },
-    { nombre: 'margen_flujo_operativo', valor: sFlujo, peso: 1 },
-  ]);
+  const valores = { crecimiento_ingresos_yoy: sIng, crecimiento_utilidad_yoy: sUt, margen_neto: sMargen, deuda_capital: sDeuda, razon_corriente: sLiq, margen_flujo_operativo: sFlujo };
+  const { senales, motivo } = filtrarSenales(SENALES.map(s => ({ nombre: s.nombre, valor: valores[s.nombre], peso: s.pesoBase })), input.parametros);
+  if (motivo) motivos.push(motivo);
+  const c = combinar(senales);
   if (c.sesgo == null) motivos.push('Sin métricas fundamentales calculables.');
   motivos.push('Pasivos totales se usan como aproximación de deuda (deuda_capital = pasivos/capital).');
   return finalizar({ ...c, metricas, motivos, datosFaltantes, reglas: input.reglas, core: 'fundamental' });

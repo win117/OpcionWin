@@ -102,7 +102,10 @@ el cliente consulta `GET` hasta `completada|fallida`.
 | GET | /integraciones/estado | — | 200 `{alpaca:{configurado}, sec:{configurado}, webull:{configurado:false}}` |
 | POST | /sincronizaciones/ejecuciones | `{recurso, simbolos[], desde?, hasta?, conexionId?}` | 202 Sincronizacion |
 | POST | /cores/:core/evaluaciones | `{empresaId, perfilId?, parametros?}` | 202 Evaluacion |
-| POST | /selecciones/ejecuciones | campos de Seleccion | 202 Seleccion |
+| POST | /selecciones/ejecuciones | campos de Seleccion (incl. `ponderaciones?: [{core, peso>=0}]`, `filtros.indicadores?`) | 202 Seleccion |
+| GET | /cores/catalogo | — | 200 `{items:[{core, version, requiere[], senales:[{nombre, etiqueta, descripcion, pesoBase}]}]}` |
+| GET | /activos/busqueda | `?q` (1–20 car.) `&limit` (1–50, def. 20) | 200 `{items:[{simbolo, nombre, mercado, opciones, registrada, empresaId?}], total}`; solo negociables; orden: símbolo exacto, prefijo, nombre; lista de Alpaca en caché 12 h por proceso |
+| GET | /mercado/opciones/resumen/:simbolo | `?vencimiento=AAAA-MM-DD` (def. el más cercano) | 200 `{empresa:{_id,simbolo,nombre}, precioSubyacente, vencimientos[], vencimiento, items:[{contratoId, simbolo, tipo, strike, vencimiento, bid, ask, ultimo, volatilidadImplicita, griegas, fechaDato}], total}`; solo datos guardados (404 si la empresa no está registrada) |
 | POST | /confluencias/ejecuciones | `{empresaId, estrategiaId, evaluacionesIds[], coresSeleccionados[], ponderaciones?}` | 202 Confluencia |
 | POST | /configuraciones/:id/evaluaciones | `{precioSubyacente?}` | 202 Evaluacion (core `configuracion`) |
 | GET | /mercado/cotizaciones/:simbolo/en-vivo | — | 200 cotización del proveedor (no se guarda) |
@@ -110,6 +113,9 @@ el cliente consulta `GET` hasta `completada|fallida`.
 | POST | /ordenes/:id/envio | header `Idempotency-Key` | 200 Orden (estado del broker) |
 | POST | /ordenes/:id/cancelacion | — | 200 Orden |
 | POST | /conexiones-broker/:id/verificacion | — | 200 estado de cuenta paper |
+
+`griegas` (indicativas de Alpaca, pueden ser `null` por clave): `delta`, `gamma`, `theta`, `vega`, `rho`.
+Selección de señales: cada core exporta `SENALES = [{nombre, etiqueta, descripcion, pesoBase}]`; si `parametros.indicadores` (o `filtros.indicadores` en selecciones) contiene alguna señal del core, solo esas entran en `combinar` y se añade el motivo «Señales usadas: … (selección del usuario)»; si no contiene ninguna, se usan todas. Las métricas se reportan siempre.
 
 `recurso` de sincronización: empresas, contratos, cotizaciones, historicos, fundamentales, institucional, noticias, ordenes, posiciones.
 Formato de respuesta igual al existente: `{ success, message, data }`; listas `{ items, page, limit, total }`.

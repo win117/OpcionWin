@@ -424,3 +424,63 @@ input:disabled, select:disabled { opacity: .65; }
 .news li { padding: 8px 0; border-bottom: 1px solid var(--border-subtle); }
 .news li:last-child { border-bottom: 0; }
 .news a { font-weight: 600; }
+
+/* ---- Analizar: espacio de trabajo maestro-detalle ---- */
+.workspace { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+.workspace__main { min-width: 0; }
+.workspace__main > * + * { margin-top: 12px; }
+@media (min-width: 960px) {
+  .workspace { grid-template-columns: 340px minmax(0, 1fr); }
+  .workspace__side { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; }
+}
+.buscador__input { width: 100%; min-height: 40px; }
+.resultados { list-style: none; margin: 0; padding: 0; max-height: 420px; overflow-y: auto; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); }
+.resultados li + li { border-top: 1px solid var(--border-subtle); }
+.resultado { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; width: 100%; text-align: left; padding: 8px 10px; border: 0; background: var(--surface); color: var(--text); font: inherit; cursor: pointer; }
+.resultado:hover { background: var(--surface-2); }
+.resultado:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.resultado.is-active { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.resultado__sym { font-weight: 700; font-variant-numeric: tabular-nums; }
+.resultado__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.resultado__badges { grid-column: 2; display: flex; gap: 4px; flex-wrap: wrap; }
+.resultado__badges:empty { display: none; }
+
+.cfg-cores, .cfg-senales__lista { list-style: none; margin: 0; padding: 0; }
+.cfg-core { padding: 8px 0; border-bottom: 1px solid var(--border-subtle); }
+.cfg-core:last-child { border-bottom: 0; }
+.cfg-core__row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+.cfg-core__name { flex: 1 1 260px; align-items: flex-start; }
+.cfg-core__name small { display: block; }
+.cfg-peso { display: flex; align-items: center; gap: 6px; }
+.cfg-peso input { width: 64px; font-variant-numeric: tabular-nums; }
+.cfg-senales { margin: 8px 0 0 24px; padding: 10px; background: var(--surface-2); border-radius: var(--radius-sm); }
+.cfg-senales__acciones { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 6px; }
+.cfg-senales__lista { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: 2px 14px; }
+.cfg-senales__lista small { display: block; }
+.cfg-opciones { display: flex; flex-wrap: wrap; gap: 4px 24px; }
+
+.swatch { display: inline-block; width: 18px; height: 3px; border-radius: 2px; vertical-align: middle; background: var(--text-muted); }
+.swatch--call { background: var(--up); }
+.swatch--put { background: var(--down); }
+.swatch--spot { background: var(--text-muted); height: 0; border-top: 2px dashed var(--text-muted); background: none; }
+.chips--legend { list-style: none; display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; padding: 0; font-size: .85rem; }
+
+.smile { margin: 0; }
+.smile svg { width: 100%; height: auto; max-height: 260px; display: block; }
+.smile__grid { stroke: var(--border-subtle); stroke-width: 1; }
+.smile__tick { fill: var(--text-muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.smile__spot { stroke: var(--text-muted); stroke-dasharray: 4 3; stroke-width: 1.5; }
+.smile__line { fill: none; stroke-width: 2; }
+.smile__line--call, .smile__dot--call { stroke: var(--up); fill-opacity: 1; }
+.smile__line--put, .smile__dot--put { stroke: var(--down); }
+.smile__dot--call { fill: var(--up); }
+.smile__dot--put { fill: var(--down); }
+.smile__legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: .85rem; color: var(--text-muted); }
+
+.chain .num { text-align: right; font-variant-numeric: tabular-nums; }
+.chain td.itm { background: var(--accent-soft); }
+.chain__strike { background: var(--surface-3); font-weight: 700; text-align: center !important; }
+.chain__atm td, .chain__atm th { box-shadow: inset 0 1px 0 var(--accent), inset 0 -1px 0 var(--accent); font-weight: 600; }
+.chain__grp { text-align: center !important; }
+.chain__grp--call { color: var(--up) !important; }
+.chain__grp--put { color: var(--down) !important; }

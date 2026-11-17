@@ -27,12 +27,12 @@ import auditoria from './auditoria.routes';
 import acciones from './acciones.routes';
 import { createIntegrations } from '../../../integrations';
 import { colaGlobal } from '../../../jobs/cola';
-export default function routeAPI(app, { factory = repository, auth = createSessionService(factory), integraciones = createIntegrations(process.env), cola = colaGlobal } = {}) {
+export default function routeAPI(app, { factory = repository, auth = createSessionService(factory), integraciones = createIntegrations(process.env), cola = colaGlobal, ahora, cacheActivos } = {}) {
   const router=Router();
   router.use('/sesiones',sesiones({auth}));
   const secured=Router();
   secured.use(authenticate(auth));
-  secured.use(acciones({factory,integraciones,cola}));
+  secured.use(acciones({factory,integraciones,cola,ahora,cacheActivos}));
   secured.use('/empresas',empresas({factory}));
   secured.use('/estrategias',estrategias({factory}));
   secured.use('/configuraciones',configuraciones({factory}));

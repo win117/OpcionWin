@@ -44,6 +44,14 @@ ejecutar cores → confluencia por estrategia → selección (3 modos) → confi
   guardado (precio, velas, recomendación, tarjetas por core, noticias). El core institucional se omite si no hay 13F.
   Corregido: el gráfico de Mercado mostraba las 100 velas más antiguas de 300 (`slice(0,100)` sobre serie ascendente).
   Verificado con NVDA real en ~17 s (sin 13F). Respaldo `backups/04-interfaz-analizar-*.zip`.
+- 2026-11-17: Espacio maestro–detalle (2 subagentes en paralelo: backend y frontend con contratos fijados de antemano).
+  Backend: `GET /activos/busqueda` (catálogo Alpaca en caché 12 h; 1.ª consulta ~11 s, luego <0.5 s), `GET /cores/catalogo` (señales por core),
+  `GET /mercado/opciones/resumen/:simbolo` (cadena guardada con IV y griegas), cores 1.0.1 respetan `parametros.indicadores`,
+  selección acepta `ponderaciones` (ADR-010). Frontend: buscador a la izquierda, detalle a la derecha (gráfico con SMA 20/50/200,
+  opciones y griegas con sonrisa de IV, fundamentales, 13F, noticias, último análisis) y configuración de cores/pesos/señales.
+  Corregido con datos reales: atributo de opciones de Alpaca es `has_options` (no `options_enabled`).
+  Verificado en Supabase con NVDA (66 contratos del vencimiento más cercano, 62 con griegas). MongoDB Atlas rechazó la IP actual
+  (lista de acceso de Atlas, no código). 96 pruebas. Respaldo `backups/05-maestro-detalle-*.zip`.
 
 ## Cómo ejecutar
 - Desarrollo: `npm.cmd run dev` (API :PORT) y en otra terminal `npm.cmd run dev:web` (Vite con proxy).

@@ -1,8 +1,17 @@
 // Core técnico: tendencia y estructura de precio (no incluye osciladores: eso es del core indicadores).
-import { clamp, combinar, esNumero, finalizar, limpiarVelas, metrica, pendienteRegresion, promedio, sma, smaSerie } from './util.js';
+import { clamp, combinar, esNumero, finalizar, filtrarSenales, limpiarVelas, metrica, pendienteRegresion, promedio, sma, smaSerie } from './util.js';
 
-export const VERSION = 'tecnico@1.0.0';
+export const VERSION = 'tecnico@1.0.1';
 export const REQUIERE = ['velas'];
+
+export const SENALES = [
+  { nombre: 'precio_vs_sma50', etiqueta: 'Precio vs SMA50', descripcion: 'Distancia porcentual del precio a la media móvil simple de 50 velas.', pesoBase: 1 },
+  { nombre: 'precio_vs_sma200', etiqueta: 'Precio vs SMA200', descripcion: 'Distancia porcentual del precio a la media móvil simple de 200 velas.', pesoBase: 1.5 },
+  { nombre: 'cruce_sma50_200', etiqueta: 'Cruce SMA50/SMA200', descripcion: 'Posición relativa de la SMA50 frente a la SMA200 (cruce dorado / de la muerte).', pesoBase: 1 },
+  { nombre: 'pendiente_20', etiqueta: 'Pendiente 20 velas', descripcion: 'Pendiente de regresión lineal de las últimas 20 velas, en % del precio medio.', pesoBase: 1 },
+  { nombre: 'posicion_rango_52s', etiqueta: 'Posición en rango 52 semanas', descripcion: 'Ubicación del precio entre el mínimo y el máximo de 52 semanas.', pesoBase: 0.75 },
+  { nombre: 'volumen_relativo_20', etiqueta: 'Volumen relativo 20', descripcion: 'Volumen de la última vela frente al promedio de 20, confirmando la dirección.', pesoBase: 0.5 },
+];
 
 const VENTANA_52S = 252;
 const MIN_RANGO = 60;
@@ -96,14 +105,10 @@ export function evaluar(input = {}) {
     }
   } else datosFaltantes.push('volumen<21');
 
-  const c = combinar([
-    { nombre: 'precio_vs_sma50', valor: s50, peso: 1 },
-    { nombre: 'precio_vs_sma200', valor: s200, peso: 1.5 },
-    { nombre: 'cruce_sma50_200', valor: sCruce, peso: 1 },
-    { nombre: 'pendiente_20', valor: sPend, peso: 1 },
-    { nombre: 'posicion_rango_52s', valor: sRango, peso: 0.75 },
-    { nombre: 'volumen_relativo_20', valor: sVol, peso: 0.5 },
-  ]);
+  const valores = { precio_vs_sma50: s50, precio_vs_sma200: s200, cruce_sma50_200: sCruce, pendiente_20: sPend, posicion_rango_52s: sRango, volumen_relativo_20: sVol };
+  const { senales, motivo } = filtrarSenales(SENALES.map(s => ({ nombre: s.nombre, valor: valores[s.nombre], peso: s.pesoBase })), input.parametros);
+  if (motivo) motivos.push(motivo);
+  const c = combinar(senales);
   if (c.sesgo == null) motivos.push('Sin velas suficientes para evaluar tendencia (mínimo 20).');
   return finalizar({ ...c, metricas, motivos, datosFaltantes, reglas: input.reglas, core: 'tecnico' });
 }

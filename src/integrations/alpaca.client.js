@@ -238,6 +238,18 @@ export const createAlpacaClient = ({
     };
   };
 
+  // Lista de activos negociables de EE. UU. (para búsqueda). Una sola llamada: la respuesta no se pagina.
+  const listarActivos = async () => {
+    const lista = await trading('/v2/assets', { query: { status: 'active', asset_class: 'us_equity' } });
+    return (Array.isArray(lista) ? lista : []).filter(a => a && texto(a.symbol)).map(a => ({
+      simbolo: a.symbol,
+      nombre: texto(a.name) || a.symbol,
+      mercado: a.exchange || null,
+      negociable: Boolean(a.tradable),
+      opciones: Array.isArray(a.attributes) ? (a.attributes.includes('has_options') || a.attributes.includes('options_enabled')) : false,
+    }));
+  };
+
   const velas = async (simbolo, { intervalo = '1Day', desde, hasta, limite = 1000, ajuste = 'split' } = {}) => {
     const s = exigirSimbolo(simbolo);
     const tope = Math.max(1, Math.min(Number(limite) || 1000, 10000));
@@ -375,7 +387,7 @@ export const createAlpacaClient = ({
     feed,
     opcionesFeed,
     configurado,
-    buscarActivo, velas, cotizacion, contratos, snapshotsOpciones, noticias,
+    buscarActivo, listarActivos, velas, cotizacion, contratos, snapshotsOpciones, noticias,
     cuenta, enviarOrden, consultarOrden, cancelarOrden, posiciones,
   };
 };

@@ -1,8 +1,14 @@
 // Core indicadores: osciladores de momentum y volatilidad (no incluye tendencia: eso es del core técnico).
-import { atr, bollinger, clamp, combinar, esNumero, estocastico, finalizar, limpiarVelas, macd, metrica, promedio, rsi, volatilidadHistorica } from './util.js';
+import { atr, bollinger, clamp, combinar, esNumero, estocastico, filtrarSenales, finalizar, limpiarVelas, macd, metrica, promedio, rsi, volatilidadHistorica } from './util.js';
 
-export const VERSION = 'indicadores@1.0.0';
+export const VERSION = 'indicadores@1.0.1';
 export const REQUIERE = ['velas', 'opciones?'];
+export const SENALES = [
+  { nombre: 'rsi_14', etiqueta: 'RSI 14', descripcion: 'Índice de fuerza relativa de Wilder (sobrecompra/sobreventa).', pesoBase: 1 },
+  { nombre: 'macd_hist', etiqueta: 'Histograma MACD', descripcion: 'Histograma del MACD (12, 26, 9): momentum de tendencia.', pesoBase: 1 },
+  { nombre: 'estocastico_k', etiqueta: 'Estocástico %K', descripcion: 'Oscilador estocástico %K (14, 3).', pesoBase: 0.75 },
+  { nombre: 'bollinger_pctb', etiqueta: 'Bollinger %B', descripcion: 'Posición del precio dentro de las bandas de Bollinger (20, 2).', pesoBase: 0.75 },
+];
 
 // Momentum que se atenúa en zonas extremas (sobrecompra/sobreventa) en vez de invertirse.
 const senalOscilador = (valor, bajo, alto) => {
@@ -84,12 +90,9 @@ export function evaluar(input = {}) {
     }
   }
 
-  const direccionales = [
-    { nombre: 'rsi_14', valor: sRsi, peso: 1 },
-    { nombre: 'macd_hist', valor: sMacd, peso: 1 },
-    { nombre: 'estocastico_k', valor: sEst, peso: 0.75 },
-    { nombre: 'bollinger_pctb', valor: sBol, peso: 0.75 },
-  ];
+  const valores = { rsi_14: sRsi, macd_hist: sMacd, estocastico_k: sEst, bollinger_pctb: sBol };
+  const { senales: direccionales, motivo: motivoSenales } = filtrarSenales(SENALES.map(s => ({ nombre: s.nombre, valor: valores[s.nombre], peso: s.pesoBase })), input.parametros);
+  if (motivoSenales) motivos.push(motivoSenales);
   const c = combinar(direccionales);
   const total = direccionales.length + subVol.length;
   const calculadas = direccionales.filter(s => s.valor != null).length + subVol.filter(v => v != null).length;

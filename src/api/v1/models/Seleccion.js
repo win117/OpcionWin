@@ -1,4 +1,4 @@
-import { text, choice, reference, coresField, entitySchema, register, ESTRATEGIAS, ESTADOS_TRABAJO, parametrosSchema, resultadoSchema } from './shared';
+import { text, choice, reference, coresField, entitySchema, register, ESTRATEGIAS, ESTADOS_TRABAJO, parametrosSchema, resultadoSchema, ponderacionSchema } from './shared';
 
 
 export const schema = entitySchema({
@@ -7,12 +7,15 @@ export const schema = entitySchema({
   empresasCandidatas: { type: [String], default: [] },
   estrategiasCandidatas: { type: [String], enum: ESTRATEGIAS, default: [] },
   coresSeleccionados: coresField(), perfilId: reference('PerfilAnalisis', false),
+  ponderaciones: { type: [ponderacionSchema], default: [] },
   filtros: { type: parametrosSchema, default: () => ({}) },
   estado: choice(ESTADOS_TRABAJO, 'pendiente'),
   resultados: { type: [resultadoSchema], default: [] }, error: text(false)
 });
 schema.index({ usuarioId: 1, createdAt: -1 });
 schema.pre('validate', function () {
+  const cores = this.ponderaciones.map(p => p.core);
+  if (new Set(cores).size !== cores.length || cores.some(c => !this.coresSeleccionados.includes(c))) this.invalidate('ponderaciones', 'Cores duplicados o no seleccionados.');
   if (['empresa', 'empresa_estrategia'].includes(this.modo) && !this.empresaId) this.invalidate('empresaId', 'Empresa requerida para este modo.');
   if (['estrategia', 'empresa_estrategia'].includes(this.modo) && !this.estrategiaId) this.invalidate('estrategiaId', 'Estrategia requerida para este modo.');
 });

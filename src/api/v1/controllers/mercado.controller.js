@@ -33,6 +33,33 @@ export default (factory, integraciones) => {
     fundamentals: forCompany('fundamentales'),
     institutional: forCompany('institucional'),
     snapshot: handle(async(req,res)=>respond(res,await crud('datos-mercado').list(req.context,{...req.query,tipo:'snapshot_opcion',contratoId:req.params.contratoId}))),
+    // Contratos guardados + snapshot almacenado (IV y griegas) de un vencimiento; no llama al proveedor.
+    resumenOpciones: handle(async (req, res) => {
+      const { vencimiento } = req.query;
+      if (vencimiento !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(vencimiento)) throw boom.badRequest('vencimiento: AAAA-MM-DD.');
+      const empresa = await empresaPorSimbolo(req.context, req.params.simbolo, factory).catch(() => { throw boom.notFound('Empresa no registrada.'); });
+      const contratos = (await todos('contratos', req.context, { empresaId: empresa._id }, factory)).filter(c => c.activo !== false && c.vencimiento);
+      const dia = c => new Date(c.vencimiento).toISOString().slice(0, 10);
+      const vencimientos = [...new Set(contratos.map(dia))].sort();
+      const elegido = vencimiento || vencimientos[0] || null;
+      const snaps = new Map();
+      for (const s of await todos('datos-mercado', req.context, { empresaId: empresa._id, tipo: 'snapshot_opcion' }, factory)) {
+        const prev = snaps.get(s.contratoId);
+        if (!prev || fecha(s.fuente?.fechaDato) > fecha(prev.fuente?.fechaDato)) snaps.set(s.contratoId, s);
+      }
+      const items = contratos.filter(c => dia(c) === elegido).map(c => {
+        const s = snaps.get(c._id);
+        return { contratoId: c._id, simbolo: c.simbolo, tipo: c.tipo, strike: c.strike, vencimiento: dia(c),
+          bid: s?.bid ?? null, ask: s?.ask ?? null, ultimo: s?.ultimo ?? null, volatilidadImplicita: s?.volatilidadImplicita ?? null,
+          griegas: s?.griegas ?? null, fechaDato: s?.fuente?.fechaDato ?? null };
+      }).sort((a, b) => a.strike - b.strike || String(a.tipo).localeCompare(String(b.tipo)));
+      // Precio del subyacente: última cotización guardada; si no hay, cierre de la última vela.
+      const ultima = lista => lista.sort((a, b) => fecha(b.fuente.fechaDato) - fecha(a.fuente.fechaDato))[0];
+      const cot = ultima((await todos('datos-mercado', req.context, { empresaId: empresa._id, tipo: 'cotizacion' }, factory)).filter(q => q.ultimo != null && q.fuente?.fechaDato));
+      const vela = cot ? null : ultima((await todos('datos-mercado', req.context, { empresaId: empresa._id, tipo: 'vela' }, factory)).filter(v => v.cierre != null && v.fuente?.fechaDato));
+      respond(res, { empresa: { _id: empresa._id, simbolo: empresa.simbolo, nombre: empresa.nombre }, precioSubyacente: cot?.ultimo ?? vela?.cierre ?? null,
+        vencimientos, vencimiento: elegido, items, total: items.length });
+    }),
     // Consultas directas al proveedor (no se guardan; para guardar usar /sincronizaciones/ejecuciones).
     liveQuote: handle(async (req, res) => respond(res, await integraciones.alpaca.cotizacion(req.params.simbolo.toUpperCase()))),
     chain: handle(async (req, res) => {

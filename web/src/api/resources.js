@@ -94,6 +94,15 @@ export const mercado = {
   snapshot: (contratoId, params) => api.get(`/mercado/opciones/${enc(contratoId)}/snapshot` + qs(params)),
   cotizacionEnVivo: simbolo => api.get(`/mercado/cotizaciones/${sym(simbolo)}/en-vivo`),
   cadena: (simbolo, params) => api.get(`/mercado/opciones/cadena/${sym(simbolo)}` + qs(params)),
+  opcionesResumen: (simbolo, params) => api.get(`/mercado/opciones/resumen/${sym(simbolo)}` + qs(params)),
+};
+
+export const activos = {
+  buscar: (q, limit = 20) => api.get('/activos/busqueda' + qs({ q, limit })),
+};
+
+export const cores = {
+  catalogo: () => api.get('/cores/catalogo'),
 };
 
 // Endpoints de acción (contratos.md §5).

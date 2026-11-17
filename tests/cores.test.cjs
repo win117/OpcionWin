@@ -103,7 +103,7 @@ test('técnico: tendencia alcista → sesgo > 0 y forma del contrato', () => {
   assert.ok(r.sesgo > 0.3);
   assert.equal(r.cobertura, 1);
   assert.equal(metricaDe(r, 'cruce_sma50_200'), 1);
-  assert.equal(tecnico.VERSION, 'tecnico@1.0.0');
+  assert.equal(tecnico.VERSION, 'tecnico@1.0.1');
 });
 test('técnico: tendencia bajista → sesgo < 0', () => {
   const r = tecnico.evaluar({ fechaReferencia: REF, velas: serie(260, -0.3, 200) });
@@ -353,7 +353,7 @@ test('estrategias: sin precios no calcula montos; delta neta si hay griegas', ()
 test('index: exporta cores con VERSION, REQUIERE y evaluar', () => {
   assert.deepEqual(Object.keys(index.cores).sort(), ['fundamental', 'indicadores', 'institucional', 'noticias', 'tecnico']);
   for (const [nombre, core] of Object.entries(index.cores)) {
-    assert.equal(core.VERSION, `${nombre}@1.0.0`);
+    assert.equal(core.VERSION, `${nombre}@1.0.1`);
     assert.ok(Array.isArray(core.REQUIERE));
     const r = core.evaluar({ fechaReferencia: REF, velas: [], fundamentales: [], reportes: [], noticias: [], reglas: [] });
     verificarForma(r);

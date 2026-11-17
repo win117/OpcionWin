@@ -156,3 +156,5 @@ test('Flujo funcional: sincronizar → cores → confluencia → selección → 
     assert.equal((await call('GET','/mercado/opciones/cadena/TEST')).items[0].griegas.delta,0.55);
   } finally { server.close(); }
 });
+
+// Pruebas de señales/catálogo/búsqueda/resumen (se cargan aquí porque npm test lista los archivos explícitamente).

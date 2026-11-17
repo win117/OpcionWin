@@ -20,7 +20,7 @@ function themeOptions() {
 /**
  * Velas + volumen. `velas`: [{ time (segundos UTC), open, high, low, close, volume }] ascendente y sin duplicados.
  */
-export function CandleChart({ velas, height = 380, intradia = false }) {
+export function CandleChart({ velas, height = 380, intradia = false, overlays }) {
   const container = useRef(null);
   const chartRef = useRef(null);
   const seriesRef = useRef({});
@@ -68,6 +68,18 @@ export function CandleChart({ velas, height = 380, intradia = false }) {
     chartRef.current?.applyOptions({ timeScale: { timeVisible: intradia } });
     chartRef.current?.timeScale().fitContent();
   }, [velas, intradia]);
+
+  // Superposiciones opcionales: [{ id, label, color, data: [{ time, value }] }] como líneas.
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart || !overlays?.length) return undefined;
+    const lines = overlays.map(o => {
+      const line = chart.addLineSeries({ color: cssVar(o.color, o.color), lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, title: o.label });
+      line.setData(o.data);
+      return line;
+    });
+    return () => { if (chartRef.current) lines.forEach(l => { try { chartRef.current.removeSeries(l); } catch { /* ya eliminada */ } }); };
+  }, [overlays, velas]);
 
   return <div ref={container} className="candle-chart" style={{ height }} role="img" aria-label={`Gráfico de velas con ${velas.length} periodos y volumen`} />;
 }

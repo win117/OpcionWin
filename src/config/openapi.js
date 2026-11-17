@@ -42,6 +42,10 @@ export function openapi() {
   paths['/configuraciones/{id}/evaluaciones']={post:job('Validar estructura y calcular payoff de la configuración',[id('id')])};
   paths['/estrategias/catalogo-base']={post:operation('Crear el catálogo LONG_CALL, LONG_PUT, IRON_CONDOR si falta')};
   paths['/mercado/cotizaciones/{simbolo}/en-vivo']={get:operation('Cotización directa del proveedor (no se guarda)',[id('simbolo')])};
+  paths['/cores/catalogo']={get:operation('Catálogo de cores: {items:[{core,version,requiere[],senales:[{nombre,etiqueta,descripcion,pesoBase}]}]}; las señales se eligen con parametros.indicadores')};
+  paths['/activos/busqueda']={get:operation('Busca activos negociables de Alpaca (?q=1-20 caracteres&limit=1-50, def. 20): {items:[{simbolo,nombre,mercado,opciones,registrada,empresaId?}],total}; lista en caché 12 h',[{name:'q',in:'query',required:true,schema:{type:'string',minLength:1,maxLength:20}},{name:'limit',in:'query',schema:{type:'integer',minimum:1,maximum:50}}])};
+  paths['/mercado/opciones/resumen/{simbolo}']={get:operation('Contratos guardados con snapshot almacenado (IV y griegas) de un vencimiento (?vencimiento=AAAA-MM-DD, def. el más cercano); no llama al proveedor',[id('simbolo'),{name:'vencimiento',in:'query',schema:{type:'string',format:'date'}}])};
+  paths['/selecciones/ejecuciones'].post=job('Ejecutar selección (empresa | estrategia | empresa_estrategia); admite ponderaciones:[{core,peso>=0}] y filtros.indicadores (señales por core)');
   paths['/mercado/opciones/cadena/{simbolo}']={get:operation('Cadena de opciones con IV y griegas del proveedor (?vencimiento&tipo)',[id('simbolo')])};
   const key={name:'Idempotency-Key',in:'header',required:true,schema:{type:'string'}};
   paths['/ordenes/{id}/envio']={post:{...operation('Enviar orden a Alpaca PAPER (idempotente)',[id('id'),key]),responses:{200:ok,400:{description:'Falta Idempotency-Key'},403:{description:'Entorno no paper'},409:{description:'Key distinta o estado inválido'}}}};
