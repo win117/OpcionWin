@@ -2,7 +2,7 @@
 // Cada recurso hace "upsert" con _id determinista: repetir una sincronización no duplica datos.
 import boom from '@hapi/boom';
 import { repository } from '../../../repositories';
-import { idDeterminista, todos, guardar, obtener, parchar } from './registros';
+import { idDeterminista, todos, guardar, guardarLote, obtener, parchar } from './registros';
 
 const DIA = 86400000;
 const iso = d => new Date(d).toISOString();
@@ -26,11 +26,12 @@ export function createSincronizador({ integraciones, factory = repository }) {
   const porSimbolo = {
     async empresas(ctx, simbolo) {
       const activo = await alpaca.buscarActivo(simbolo);
-      let cik;
-      try { cik = await cikDe(simbolo); } catch { cik = undefined; } // SEC opcional
+      let cik, nombreSec;
+      try { ({ cik, nombre: nombreSec } = await sec.cikDeSimbolo(simbolo)); } catch { cik = undefined; } // SEC opcional
       const existentes = await todos('empresas', ctx, { simbolo: activo.simbolo }, factory);
       const previo = existentes[0];
-      const datos = { simbolo: activo.simbolo, nombre: activo.nombre, mercado: activo.mercado, activo: true,
+      // Nombre SEC ('Apple Inc.') coincide mejor con tablas 13F que 'Apple Inc. Common Stock'.
+      const datos = { simbolo: activo.simbolo, nombre: nombreSec || activo.nombre, mercado: activo.mercado, activo: true,
         ...(previo?.sector ? { sector: previo.sector } : {}), ...(cik || previo?.cik ? { cik: cik || previo.cik } : {}) };
       await guardar('empresas', ctx, previo?._id || idDeterminista(ctx.userId, 'empresa', activo.simbolo, activo.mercado), datos, factory);
       return 1;
@@ -40,20 +41,17 @@ export function createSincronizador({ integraciones, factory = repository }) {
       const { desde, hasta } = rango(datos, 420); // ~290 sesiones: SMA200 + rango 52 semanas
       const intervalo = '1Day';
       const velas = await alpaca.velas(empresa.simbolo, { intervalo, desde: iso(desde), hasta: iso(hasta) });
-      let n = 0;
-      for (const v of velas) {
-        await guardar('datos-mercado', ctx, idDeterminista(empresa._id, 'vela', intervalo, iso(v.fecha)), {
-          empresaId: empresa._id, tipo: 'vela', intervalo,
-          apertura: v.apertura, maximo: v.maximo, minimo: v.minimo, cierre: v.cierre, volumen: v.volumen,
-          fuente: { proveedor: 'alpaca', fechaDato: v.fecha, feed: alpaca.feed || 'iex' },
-        }, factory);
-        n++;
-      }
-      return n;
+      return guardarLote('datos-mercado', ctx, velas.map(v => ({ id: idDeterminista(empresa._id, 'vela', intervalo, iso(v.fecha)), datos: {
+        empresaId: empresa._id, tipo: 'vela', intervalo,
+        apertura: v.apertura, maximo: v.maximo, minimo: v.minimo, cierre: v.cierre, volumen: v.volumen,
+        fuente: { proveedor: 'alpaca', fechaDato: v.fecha, feed: alpaca.feed || 'iex' },
+      } })), factory);
     },
     async cotizaciones(ctx, simbolo) {
       const empresa = await empresaPorSimbolo(ctx, simbolo, factory);
-      const q = await alpaca.cotizacion(empresa.simbolo);
+      const q = { ...await alpaca.cotizacion(empresa.simbolo) };
+      // IEX fuera de horario puede venir cruzada (ask < bid): se descarta bid/ask y se conserva el último precio.
+      if (q.bid != null && q.ask != null && q.ask < q.bid) { delete q.bid; delete q.ask; }
       await guardar('datos-mercado', ctx, idDeterminista(empresa._id, 'cotizacion', iso(q.fechaDato)), {
         empresaId: empresa._id, tipo: 'cotizacion',
         ...(q.bid != null ? { bid: q.bid } : {}), ...(q.ask != null ? { ask: q.ask } : {}), ...(q.ultimo != null ? { ultimo: q.ultimo } : {}),
@@ -65,56 +63,49 @@ export function createSincronizador({ integraciones, factory = repository }) {
       const empresa = await empresaPorSimbolo(ctx, simbolo, factory);
       const hoy = Date.now();
       const min = Number(datos.diasVencimientoMin ?? 7), max = Number(datos.diasVencimientoMax ?? 60);
-      const lista = await alpaca.contratos({ subyacente: empresa.simbolo,
-        vencimientoDesde: iso(hoy + min * DIA).slice(0, 10), vencimientoHasta: iso(hoy + max * DIA).slice(0, 10) });
-      const ids = new Map();
-      for (const c of lista) {
-        const id = idDeterminista(ctx.userId, 'contrato', 'alpaca', c.contratoExternoId);
-        await guardar('contratos', ctx, id, { proveedor: 'alpaca', contratoExternoId: c.contratoExternoId, empresaId: empresa._id,
-          simbolo: c.simbolo || c.contratoExternoId, tipo: c.tipo, strike: c.strike, vencimiento: c.vencimiento,
-          multiplicador: c.multiplicador || 100, activo: true }, factory);
-        ids.set(c.contratoExternoId, id);
-      }
-      // Snapshot (cotización, IV y griegas indicativas) de los contratos sincronizados.
-      const snaps = lista.length ? await alpaca.snapshotsOpciones(empresa.simbolo) : [];
-      for (const s of snaps) {
+      // Solo strikes cercanos al precio (±25 %) para acotar volumen (cientos, no miles, de contratos).
+      const q = await alpaca.cotizacion(empresa.simbolo).catch(() => null);
+      const precio = q?.ultimo ?? (q?.bid != null && q?.ask != null ? (q.bid + q.ask) / 2 : undefined);
+      const rangoStrike = Number.isFinite(precio) ? { strikeMin: Math.floor(precio * 0.75), strikeMax: Math.ceil(precio * 1.25) } : {};
+      const filtros = { ...rangoStrike, vencimientoDesde: iso(hoy + min * DIA).slice(0, 10), vencimientoHasta: iso(hoy + max * DIA).slice(0, 10) };
+      const lista = await alpaca.contratos({ subyacente: empresa.simbolo, ...filtros });
+      const ids = new Map(lista.map(c => [c.contratoExternoId, idDeterminista(ctx.userId, 'contrato', 'alpaca', c.contratoExternoId)]));
+      await guardarLote('contratos', ctx, lista.map(c => ({ id: ids.get(c.contratoExternoId), datos: {
+        proveedor: 'alpaca', contratoExternoId: c.contratoExternoId, empresaId: empresa._id,
+        simbolo: c.contratoExternoId, tipo: c.tipo, strike: c.strike, vencimiento: c.vencimiento,
+        multiplicador: c.multiplicador || 100, activo: true } })), factory);
+      // Snapshot (cotización, IV y griegas indicativas): uno vigente por contrato, se sobrescribe (evita crecimiento ilimitado).
+      const snaps = lista.length ? await alpaca.snapshotsOpciones(empresa.simbolo, filtros) : [];
+      await guardarLote('datos-mercado', ctx, snaps.filter(s => ids.has(s.contratoExternoId) && s.fechaDato).map(s => {
         const contratoId = ids.get(s.contratoExternoId);
-        if (!contratoId || !s.fechaDato) continue;
         const bid = s.bid, ask = s.ask != null && bid != null && s.ask < bid ? undefined : s.ask;
-        await guardar('datos-mercado', ctx, idDeterminista(contratoId, 'snapshot', iso(s.fechaDato)), {
+        return { id: idDeterminista(contratoId, 'snapshot'), datos: {
           empresaId: empresa._id, contratoId, tipo: 'snapshot_opcion',
           ...(bid != null ? { bid } : {}), ...(ask != null ? { ask } : {}), ...(s.ultimo != null ? { ultimo: s.ultimo } : {}),
           ...(s.volatilidadImplicita != null ? { volatilidadImplicita: s.volatilidadImplicita } : {}),
           ...(s.griegas ? { griegas: s.griegas } : {}),
-          fuente: { proveedor: 'alpaca', fechaDato: s.fechaDato, feed: 'indicative', referencia: s.contratoExternoId },
-        }, factory);
-      }
+          fuente: { proveedor: 'alpaca', fechaDato: s.fechaDato, feed: 'indicative', referencia: s.contratoExternoId } } };
+      }), factory);
       return lista.length;
     },
     async noticias(ctx, simbolo, datos) {
       const { desde, hasta } = rango(datos, 14);
       const lista = await alpaca.noticias({ simbolos: [String(simbolo).toUpperCase()], desde: iso(desde), hasta: iso(hasta), limite: 50 });
-      for (const n of lista) {
-        await guardar('noticias', ctx, idDeterminista(ctx.userId, 'noticia', n.proveedor || 'alpaca', n.noticiaExternaId), {
+      return guardarLote('noticias', ctx, lista.filter(n => n.titulo && /^https?:\/\//.test(n.url || '')).map(n => ({
+        id: idDeterminista(ctx.userId, 'noticia', n.proveedor || 'alpaca', n.noticiaExternaId), datos: {
           proveedor: n.proveedor || 'alpaca', noticiaExternaId: String(n.noticiaExternaId), titulo: n.titulo.slice(0, 2000),
           ...(n.resumen ? { resumen: n.resumen.slice(0, 2000) } : {}), url: n.url, publicadaEn: n.publicadaEn,
-          simbolos: n.simbolos || [], idioma: 'en',
-        }, factory);
-      }
-      return lista.length;
+          simbolos: n.simbolos || [], idioma: 'en' } })), factory);
     },
     async fundamentales(ctx, simbolo) {
       const empresa = await empresaPorSimbolo(ctx, simbolo, factory);
       const cik = empresa.cik || await cikDe(empresa.simbolo);
       if (!empresa.cik && cik) await parchar('empresas', ctx, empresa._id, { cik }, factory);
       const periodos = await sec.fundamentales(cik);
-      for (const p of periodos) {
-        await guardar('fundamentales', ctx, idDeterminista(empresa._id, 'fund', iso(p.periodoInicio), iso(p.periodoFin), p.forma || ''), {
+      return guardarLote('fundamentales', ctx, periodos.map(p => ({
+        id: idDeterminista(empresa._id, 'fund', iso(p.periodoInicio), iso(p.periodoFin), p.forma || ''), datos: {
           empresaId: empresa._id, fuente: p.fuente, periodoInicio: p.periodoInicio, periodoFin: p.periodoFin,
-          ...(p.forma ? { forma: p.forma } : {}), metricas: p.metricas,
-        }, factory);
-      }
-      return periodos.length;
+          ...(p.forma ? { forma: p.forma } : {}), metricas: p.metricas } })), factory);
     },
     async institucional(ctx, simbolo) {
       const empresa = await empresaPorSimbolo(ctx, simbolo, factory);

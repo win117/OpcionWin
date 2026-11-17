@@ -31,6 +31,10 @@ function memoryFactory() {
         const row={_id:id,owner_id:ctx.userId,document:clone(doc),revision:revision+1};
         store.set(id,row); return clone(row);
       },
+      async upsertMany(docs) {
+        for(const doc of docs){const prev=store.get(doc._id);unique(doc,doc._id);store.set(doc._id,{_id:doc._id,owner_id:ctx.userId,document:clone(doc),revision:(prev?.revision||0)+1});}
+        return docs.length;
+      },
       async remove(id,revision) {
         if (!store.has(id)||store.get(id).revision!==revision) throw boom.conflict();
         store.delete(id);

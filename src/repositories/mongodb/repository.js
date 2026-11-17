@@ -31,6 +31,17 @@ export function mongoRepository(name, owner, connect = connectMongo) {
       } catch (e) { if (e.code === 11000) throw boom.conflict('El registro ya existe.'); throw e; }
       return row;
     },
+    // Inserta o reemplaza en bloque (datos externos sincronizados). Incrementa revision.
+    async upsertMany(documents) {
+      const c = await collection();
+      for (let i = 0; i < documents.length; i += 500) {
+        const ops = documents.slice(i, i + 500).map(document => ({ updateOne: {
+          filter: { _id: document._id, owner_id: owner }, update: { $set: { document }, $inc: { revision: 1 } }, upsert: true } }));
+        try { await c.bulkWrite(ops, { ordered: false }); }
+        catch (e) { if (e.code === 11000) throw boom.conflict('Identificador en uso por otro registro.'); throw e; }
+      }
+      return documents.length;
+    },
     async remove(id, revision) {
       const result = await (await collection()).deleteOne({ _id: id, owner_id: owner, revision });
       if (!result.deletedCount) throw boom.conflict('El registro cambió. Consulta de nuevo.');

@@ -30,7 +30,7 @@ export function createAnalisis({ cola, factory = repository }) {
   async function insumos(ctx, empresa, requiere, parametros = {}) {
     const input = { simbolo: empresa.simbolo, velas: [], fundamentales: [], reportes: [], noticias: [], opciones: [] };
     const fuentes = [];
-    const necesita = k => requiere.includes(k);
+    const necesita = k => requiere.some(r => r.replace(/\?$/, '') === k); // 'x?' = insumo opcional
     if (necesita('velas')) {
       const intervalo = parametros.intervalo || '1Day';
       const velas = (await todos('datos-mercado', ctx, { empresaId: empresa._id, tipo: 'vela' }, factory))
@@ -60,7 +60,10 @@ export function createAnalisis({ cola, factory = repository }) {
         const prev = ultimos.get(s.contratoId);
         if (!prev || fecha(s.fuente.fechaDato) > fecha(prev.fuente.fechaDato)) ultimos.set(s.contratoId, s);
       }
-      input.opciones = [...ultimos.values()].filter(s => contratos.has(s.contratoId)).map(s => {
+      // Cerca del dinero (±5 % del último cierre): la IV de contratos muy ITM/OTM distorsiona el promedio.
+      const cierre = input.velas.at(-1)?.cierre;
+      const cerca = c => !Number.isFinite(cierre) || Math.abs(c.strike / cierre - 1) <= 0.05;
+      input.opciones = [...ultimos.values()].filter(s => contratos.has(s.contratoId) && cerca(contratos.get(s.contratoId))).map(s => {
         const c = contratos.get(s.contratoId);
         return { tipo: c.tipo, strike: c.strike, vencimiento: c.vencimiento, bid: s.bid, ask: s.ask, volatilidadImplicita: s.volatilidadImplicita, griegas: s.griegas };
       });

@@ -21,6 +21,19 @@ export function supabaseRepository(name, owner, transport = createSupabaseTransp
       if (!rows.length) throw boom.conflict('El registro cambió. Consulta de nuevo antes de editar.');
       return normalize(rows[0]);
     },
+    // Upsert en bloque: consulta revisiones existentes (sin filtro de dueño, para rechazar ids ajenos) y envía lotes.
+    async upsertMany(documents) {
+      for (let i = 0; i < documents.length; i += 100) {
+        const chunk = documents.slice(i, i + 100);
+        const existing = await transport(table, 'GET', { select: 'id,owner_id,revision', id: 'in.(' + chunk.map(d => d._id).join(',') + ')' });
+        if (existing.some(r => r.owner_id !== owner)) throw boom.conflict('Identificador en uso por otro registro.');
+        const rev = new Map(existing.map(r => [r.id, r.revision]));
+        await transport(table, 'POST', { on_conflict: 'id' },
+          chunk.map(document => ({ id: document._id, owner_id: owner, document, revision: (rev.get(document._id) || 0) + 1 })),
+          { Prefer: 'return=minimal,resolution=merge-duplicates' });
+      }
+      return documents.length;
+    },
     async remove(id, revision) {
       const rows = await transport(table, 'DELETE', { ...scope, id: 'eq.' + id, revision: 'eq.' + revision });
       if (!rows.length) throw boom.conflict('El registro cambió. Consulta de nuevo.');

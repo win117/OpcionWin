@@ -46,6 +46,17 @@ export async function guardar(name, ctx, id, datos, factory = repository) {
   return { registro: safeDocument(await repo.replace(id, doc, row.revision)), nuevo: false };
 }
 
+// Upsert en bloque validando cada documento. items: [{ id, datos }]. Datos externos: createdAt = momento de la sincronización.
+export async function guardarLote(name, ctx, items, factory = repository) {
+  if (!items.length) return 0;
+  const repo = factory(name, ctx), now = new Date();
+  const docs = [];
+  for (const { id, datos } of items) docs.push(await validated(name, { ...datos, ...propietario(name, ctx), _id: id, createdAt: now, updatedAt: now }));
+  if (repo.upsertMany) return repo.upsertMany(docs);
+  for (const d of docs) await guardar(name, ctx, d._id, d, factory); // repositorio sin soporte de bloque
+  return docs.length;
+}
+
 // Aplica cambios parciales con reintento ante conflicto de revisión.
 export async function parchar(name, ctx, id, cambios, factory = repository) {
   const repo = factory(name, ctx);

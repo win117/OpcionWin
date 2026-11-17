@@ -16,7 +16,8 @@
     "dev:web": "npm --prefix web run dev",
     "build:web": "npm --prefix web install && npm --prefix web run build",
     "build:all": "npm run build && npm run build:web",
-    "backup": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/backup.ps1 -Etiqueta"
+    "backup": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/backup.ps1 -Etiqueta",
+    "smoke:real": "npm run build && node scripts/smoke-real.cjs"
   },
   "keywords": [],
   "author": "",

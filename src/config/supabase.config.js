@@ -2,14 +2,14 @@ import boom from '@hapi/boom';
 import config from './config';
 // REST del servidor: nunca enviar esta clave al navegador.
 export function createSupabaseTransport(settings = config, fetcher = fetch) {
-  return async (table, method, query = {}, body) => {
+  return async (table, method, query = {}, body, extraHeaders = {}) => {
     if (!settings.SUPABASE_URL || !settings.SUPABASE_SECRET_KEY) throw boom.serverUnavailable('Falta configurar Supabase.');
     const base = new URL(settings.SUPABASE_URL);
     if (base.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(base.hostname)) throw boom.serverUnavailable('Supabase requiere HTTPS.');
     const url = new URL('/rest/v1/' + table, base);
     for (const [key, value] of Object.entries(query)) url.searchParams.set(key, String(value));
     const key = settings.SUPABASE_SECRET_KEY;
-    const headers = { apikey: key, 'Content-Type': 'application/json', Prefer: 'return=representation' };
+    const headers = { apikey: key, 'Content-Type': 'application/json', Prefer: 'return=representation', ...extraHeaders };
     if (!key.startsWith('sb_secret_')) headers.Authorization = 'Bearer ' + key;
     let response;
     try { response = await fetcher(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(10000) }); }
@@ -19,7 +19,8 @@ export function createSupabaseTransport(settings = config, fetcher = fetch) {
       if (detail.code === '23505') throw boom.conflict('El registro ya existe.');
       throw boom.serverUnavailable('Supabase no pudo completar la operación. Verifica esquema y permisos.');
     }
-    if (response.status === 204) return [];
-    return response.json();
+    // 204 o 201 con Prefer: return=minimal llegan sin cuerpo.
+    const text = response.status === 204 ? '' : await response.text();
+    return text ? JSON.parse(text) : [];
   };
 }
