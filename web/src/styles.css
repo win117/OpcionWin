@@ -552,3 +552,8 @@ a.inicio-card:focus-visible { outline: 2px solid var(--focus); outline-offset: 2
 .chain__px:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .cartera__body > * + * { margin-top: 12px; }
 .cartera h3 { margin: 0; font-size: .95rem; }
+.cfg-dias { border: 0; padding: 0; margin: 12px 0 0; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.cfg-dias legend { padding: 0; }
+.cfg-dias__campos { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.ticket__venc { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 16px; }
+.ticket__venc .field { min-width: 220px; }

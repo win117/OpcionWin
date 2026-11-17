@@ -14,7 +14,17 @@ export const configPorDefecto = () => ({
   excluidas: {}, // core → nombres de señales desmarcadas (lo nuevo queda marcado por defecto)
   institucional: false,
   sincronizar: true,
+  diasMin: 7,
+  diasMax: 60,
 });
+
+const diasOk = v => Number.isInteger(v) && v >= 0 && v <= 730;
+/** Mensaje de error del rango de días a vencimiento, o null si es válido. */
+export function errorRangoDias({ diasMin, diasMax }) {
+  if (!diasOk(diasMin) || !diasOk(diasMax)) return 'Los días a vencimiento deben ser enteros entre 0 y 730.';
+  if (diasMin > diasMax) return 'El mínimo de días no puede ser mayor que el máximo.';
+  return null;
+}
 
 export function leerConfig() {
   const base = configPorDefecto();
@@ -27,6 +37,7 @@ export function leerConfig() {
     base.excluidas = g.excluidas && typeof g.excluidas === 'object' ? g.excluidas : {};
     base.institucional = Boolean(g.institucional);
     base.sincronizar = g.sincronizar !== false;
+    if (!errorRangoDias(g)) { base.diasMin = g.diasMin; base.diasMax = g.diasMax; }
   } catch { /* sin almacenamiento */ }
   return base;
 }
@@ -98,9 +109,10 @@ function crearPaso(setPasos, cancelado) {
 }
 
 /** Solo la parte de datos. Devuelve los trabajos de sincronización de recursos. */
-export async function sincronizarDatos(simbolo, { institucional = false }, setPasos, cancelado) {
+export async function sincronizarDatos(simbolo, { institucional = false, diasMin, diasMax }, setPasos, cancelado) {
   const { paso } = crearPaso(setPasos, cancelado);
-  const sync = recurso => paso('sync:' + recurso, () => acciones.sincronizar({ recurso, simbolos: [simbolo] }), r => jobPaths.sincronizacion(r._id));
+  const rango = isNum(diasMin) && isNum(diasMax) ? { diasVencimientoMin: diasMin, diasVencimientoMax: diasMax } : {};
+  const sync = recurso => paso('sync:' + recurso, () => acciones.sincronizar({ recurso, simbolos: [simbolo], ...(recurso === 'contratos' ? rango : {}) }), r => jobPaths.sincronizacion(r._id));
   const emp = await sync('empresas');
   if (emp?.estado !== 'completada') throw new Error(emp?.error || 'No se pudo registrar el símbolo (¿existe en Alpaca?).');
   const recursos = [...RECURSOS, ...(institucional ? ['institucional'] : [])];
@@ -108,10 +120,10 @@ export async function sincronizarDatos(simbolo, { institucional = false }, setPa
 }
 
 /** Canalización completa según la configuración resuelta. */
-export async function ejecutarFlujo(simbolo, { sincronizar, institucional, cores, indicadores, ponderaciones }, setPasos, cancelado) {
+export async function ejecutarFlujo(simbolo, { sincronizar, institucional, cores, indicadores, ponderaciones, diasMin, diasMax }, setPasos, cancelado) {
   const { set, paso } = crearPaso(setPasos, cancelado);
   let syncs = [];
-  if (sincronizar) syncs = await sincronizarDatos(simbolo, { institucional }, setPasos, cancelado);
+  if (sincronizar) syncs = await sincronizarDatos(simbolo, { institucional, diasMin, diasMax }, setPasos, cancelado);
 
   const empresa = (await empresas.list({ simbolo, limit: 1 })).items[0];
   if (!empresa) throw new Error('Empresa no encontrada. Trae sus datos primero.');

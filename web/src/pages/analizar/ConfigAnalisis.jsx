@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { useAsync } from '../../hooks/useAsync';
 import { cores as coresApi } from '../../api/resources';
+import { errorRangoDias } from './flujo';
 import { CORES, CORE_LABELS, CORE_DESCRIPCION } from '../../utils/constants';
 
 /** Catálogo de señales; si falla, devuelve null y la UI oculta la selección de señales. */
@@ -23,6 +24,9 @@ export default function ConfigAnalisis({ config, onChange, catalogo, corriendo, 
     const ex = new Set(config.excluidas[core] || []);
     totalM += senales.length; marcadasM += senales.filter(s => !ex.has(s.nombre)).length;
   }
+  const errDias = errorRangoDias(config);
+  const setDias = (k, v) => onChange({ ...config, [k]: v === '' ? NaN : Number(v) });
+  const valDias = v => (Number.isFinite(v) ? v : '');
   const resumen = `${seleccionados.length} ${seleccionados.length === 1 ? 'core' : 'cores'}` + (totalM ? ` · ${marcadasM} de ${totalM} métricas` : '');
 
   return (
@@ -85,9 +89,20 @@ export default function ConfigAnalisis({ config, onChange, catalogo, corriendo, 
         <label className="check"><input type="checkbox" checked={config.sincronizar} onChange={e => onChange({ ...config, sincronizar: e.target.checked })} disabled={corriendo} /><span>Sincronizar datos antes de analizar</span></label>
         <label className="check"><input type="checkbox" checked={config.institucional} onChange={e => onChange({ ...config, institucional: e.target.checked })} disabled={corriendo || !config.sincronizar} /><span>Incluir 13F institucional <small className="muted">(lento: 1–3 min)</small></span></label>
       </div>
+      <fieldset className="cfg-dias" disabled={corriendo}>
+        <legend className="field__label">Rango de vencimientos (días)</legend>
+        <div className="cfg-dias__campos">
+          <label className="cfg-peso"><span className="muted small">Días a vencimiento mín.</span>
+            <input type="number" min="0" max="730" step="1" inputMode="numeric" value={valDias(config.diasMin)} aria-describedby="cfg-dias-ayuda" aria-invalid={errDias ? true : undefined} onChange={e => setDias('diasMin', e.target.value)} /></label>
+          <label className="cfg-peso"><span className="muted small">máx.</span>
+            <input type="number" min="0" max="730" step="1" inputMode="numeric" value={valDias(config.diasMax)} aria-label="Días a vencimiento máx." aria-describedby="cfg-dias-ayuda" aria-invalid={errDias ? true : undefined} onChange={e => setDias('diasMax', e.target.value)} /></label>
+        </div>
+        <small id="cfg-dias-ayuda" className="field__help">Rango de vencimientos de opciones que se descargan y entre los que se elige para operar. Iron Condor suele usarse con 30–45 días.</small>
+        {errDias && <small className="field__error" role="alert">{errDias}</small>}
+      </fieldset>
       <div className="cfg-accion">
         <p className="cfg-resumen" aria-live="polite">{resumen}</p>
-        <button type="button" className="btn btn--primary btn--lg" onClick={onAnalizar} disabled={corriendo || !seleccionados.length}>
+        <button type="button" className="btn btn--primary btn--lg" onClick={onAnalizar} disabled={corriendo || !seleccionados.length || Boolean(errDias)}>
           {corriendo ? 'Analizando…' : 'Analizar'}
         </button>
         {!seleccionados.length && <span className="muted small">Selecciona al menos un core con peso mayor que 0.</span>}

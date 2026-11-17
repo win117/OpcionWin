@@ -49,7 +49,8 @@ export default function Analizar() {
     setError(null); setCorriendo(true);
     setPasosSync(pasosDatos(false));
     const set = p => { if (vigente(sym)) setPasosSync(p); };
-    try { await sincronizarDatos(sym, { institucional: false }, set, () => !vigente(sym)); }
+    const { diasMin, diasMax } = leerConfig();
+    try { await sincronizarDatos(sym, { institucional: false, diasMin, diasMax }, set, () => !vigente(sym)); }
     catch (e) { if (vigente(sym)) setError(e); }
     finally { if (vigente(sym)) { setCorriendo(false); setVersion(v => v + 1); } }
   }, []);
@@ -67,7 +68,7 @@ export default function Analizar() {
     const set = p => { if (vigente(sym)) setPasos(p); };
     setPasos(pasosIniciales({ sincronizar: cfg.sincronizar, institucional: cfg.institucional, cores: r.cores }));
     try {
-      await ejecutarFlujo(sym, { sincronizar: cfg.sincronizar, institucional: cfg.institucional, ...r }, set, () => !vigente(sym));
+      await ejecutarFlujo(sym, { sincronizar: cfg.sincronizar, institucional: cfg.institucional, diasMin: cfg.diasMin, diasMax: cfg.diasMax, ...r }, set, () => !vigente(sym));
       if (vigente(sym)) setTab('analisis');
     } catch (e) { if (vigente(sym)) setError(e); }
     finally { if (vigente(sym)) { setCorriendo(false); setVersion(v => v + 1); } }

@@ -20,12 +20,22 @@ export function spreadPct(item) {
   return (item.ask - item.bid) / m;
 }
 
-/** Vencimiento más cercano con al menos `minDias` días; si no hay, el más cercano futuro (o el primero). */
-export function elegirVencimiento(vencimientos = [], hoy = new Date(), minDias = 7) {
+/** Días (enteros) desde `hoy` hasta el vencimiento YYYY-MM-DD. */
+export function diasHasta(venc, hoy = new Date()) {
   const t0 = Date.UTC(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
-  const dias = v => (Date.parse(v) - t0) / DAY;
+  return Math.round((Date.parse(venc) - t0) / DAY);
+}
+
+/**
+ * Vencimiento más cercano con ≥ `minDias` días (y ≤ `maxDias` si se indica y es posible);
+ * si no, el primero con ≥ minDias, el más cercano futuro o el primero.
+ */
+export function elegirVencimiento(vencimientos = [], hoy = new Date(), minDias = 7, maxDias = null) {
+  const dias = v => diasHasta(v, hoy);
   const futuros = [...vencimientos].filter(v => dias(v) >= 0).sort();
-  return futuros.find(v => dias(v) >= minDias) || futuros[0] || [...vencimientos].sort()[0] || null;
+  const okMin = futuros.filter(v => dias(v) >= minDias);
+  const enRango = isNum(maxDias) ? okMin.find(v => dias(v) <= maxDias) : null;
+  return enRango || okMin[0] || futuros[0] || [...vencimientos].sort()[0] || null;
 }
 
 const delta = it => it?.griegas?.delta;
@@ -71,6 +81,24 @@ export function construirPatas(codigo, items = [], precio) {
     return { legs: [pata('sell', sp), pata('buy', bp), pata('sell', sc), pata('buy', bc)] };
   }
   return { error: 'Estrategia sin armado automático: ' + codigo };
+}
+
+/**
+ * Reconstruye las patas en otra expiración. Con `codigo` usa construirPatas; sin él conserva tipo/acción/intención
+ * de cada pata y elige el strike más cercano al anterior. `previas` = [{accion,intencion,item}] (item de la cadena anterior).
+ */
+export function reconstruirPatas(codigo, previas, items = [], precio) {
+  if (codigo) return construirPatas(codigo, items, precio);
+  const validos = items.filter(i => i.contratoId && isNum(i.strike));
+  const legs = [];
+  for (const p of previas) {
+    const tipo = p.item?.tipo || 'call';
+    const ref = p.item?.strike ?? precio;
+    const it = cercano(validos.filter(i => i.tipo === tipo), ref, (i, v) => Math.abs(i.strike - v));
+    if (!it) return { error: `No hay ${tipo}s en el vencimiento elegido.` };
+    legs.push({ accion: p.accion, intencion: p.intencion, contratoId: it.contratoId });
+  }
+  return { legs };
 }
 
 /** Neto por unidad (Σ ventas − Σ compras, ponderado por proporción). >0 = crédito. null si falta algún precio. */

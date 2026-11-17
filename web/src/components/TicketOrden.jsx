@@ -5,10 +5,10 @@ import { Modal } from './Modal';
 import { Badge } from './Badge';
 import { Field } from './Field';
 import { Spinner } from './States';
-import { acciones, operacion } from '../api/resources';
+import { acciones, mercado, operacion } from '../api/resources';
 import { CORE_LABELS, ESTRATEGIA_LABELS } from '../utils/constants';
 import { fmtDateTime, fmtFixed, fmtMoney, fmtPct, isNum } from '../utils/format';
-import { intencionPara, mid, netoMid, nombreConContexto, nombreOrden, perfilRiesgo, redondearPrecio, spreadPct } from '../utils/estrategiasOrden';
+import { diasHasta, intencionPara, mid, netoMid, nombreConContexto, nombreOrden, perfilRiesgo, reconstruirPatas, redondearPrecio, spreadPct } from '../utils/estrategiasOrden';
 import { uuid } from '../utils/objects';
 
 export const ESTADOS_TERMINALES = ['ejecutada', 'cancelada', 'rechazada', 'expirada'];
@@ -17,8 +17,12 @@ const POLL_MAX_MS = 60000;
 let seq = 0;
 const nuevaPata = p => ({ id: ++seq, accion: p.accion || 'buy', intencion: p.intencion || intencionPara(p.accion), contratoId: p.contratoId });
 
-export default function TicketOrden({ open = true, onClose, empresa, chain, legs: legsIniciales = [], estrategiaCodigo, analisis }) {
+export default function TicketOrden({ open = true, onClose, empresa, chain: chainInicial, legs: legsIniciales = [], estrategiaCodigo, analisis }) {
   const navigate = useNavigate();
+  const [chain, setChain] = useState(chainInicial);
+  const [vencSel, setVencSel] = useState(chainInicial?.vencimiento || '');
+  const [cargaV, setCargaV] = useState({ loading: false, error: null });
+  const reqV = useRef(0);
   const items = useMemo(() => (chain?.items || []).filter(i => i.contratoId && isNum(i.strike)), [chain]);
   const precioSub = chain?.precioSubyacente;
   const [legs, setLegs] = useState(() => legsIniciales.map(nuevaPata));
@@ -46,6 +50,33 @@ export default function TicketOrden({ open = true, onClose, empresa, chain, legs
     if (open) cargarCuenta();
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const vencimientos = useMemo(() => {
+    const l = chain?.vencimientos?.length ? chain.vencimientos : chain?.vencimiento ? [chain.vencimiento] : [];
+    return [...new Set(l)].sort();
+  }, [chain]);
+  const bloqueado = paso === 'enviado' || enviando;
+  const cambiarVencimiento = async v => {
+    if (!v) return;
+    const req = ++reqV.current;
+    setVencSel(v);
+    setCargaV({ loading: true, error: null });
+    try {
+      const d = await mercado.opcionesResumen(empresa.simbolo, { vencimiento: v });
+      if (req !== reqV.current) return;
+      const nuevos = d.items || [];
+      const previas = legs.map(l => ({ accion: l.accion, intencion: l.intencion, item: porId.get(l.contratoId) }));
+      const r = reconstruirPatas(estrategiaCodigo, previas, nuevos, d.precioSubyacente);
+      if (r.error) throw new Error(r.error);
+      setChain({ ...d, vencimientos: d.vencimientos?.length ? d.vencimientos : vencimientos, vencimiento: d.vencimiento || v });
+      setLegs(r.legs.map(nuevaPata));
+      setLimiteTocado(false);
+      setCargaV({ loading: false, error: null });
+    } catch (error) {
+      if (req === reqV.current) setCargaV({ loading: false, error });
+    }
+  };
+  const vencPendiente = vencSel !== (chain?.vencimiento || '');
+
   const porId = useMemo(() => new Map(items.map(i => [i.contratoId, i])), [items]);
   const patas = legs.map(l => ({ ...l, item: porId.get(l.contratoId) }));
   const neto = useMemo(() => netoMid(patas), [legs, porId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -61,6 +92,8 @@ export default function TicketOrden({ open = true, onClose, empresa, chain, legs
   const requerido = credito ? perfil?.maxPerdida : total;
 
   const problemas = [];
+  if (cargaV.loading) problemas.push('Cargando la cadena del vencimiento elegido…');
+  if (cargaV.error || (vencPendiente && !cargaV.loading)) problemas.push('No se pudo cargar el vencimiento elegido.');
   if (!legs.length) problemas.push('Agrega al menos una pata.');
   if (patas.some(p => !p.item)) problemas.push('Una de las patas no existe en la cadena del vencimiento.');
   if (!cantOk) problemas.push('La cantidad debe ser un entero entre 1 y 100.');
@@ -201,7 +234,23 @@ export default function TicketOrden({ open = true, onClose, empresa, chain, legs
 
         {paso === 'editar' && (
           <>
-            <p className="muted small">{empresa?.simbolo} · subyacente {fmtMoney(precioSub)} · vencimiento {chain?.vencimiento || '—'}</p>
+            <p className="muted small">{empresa?.simbolo} · subyacente {fmtMoney(precioSub)} · vencimiento {chain?.vencimiento || '—'}{chain?.vencimiento ? ' · ' + diasTxt(diasHasta(chain.vencimiento)) : ''}</p>
+            {vencimientos.length > 0 && (
+              <div className="ticket__venc" aria-live="polite">
+                <Field label="Vencimiento">
+                  <select value={vencSel} onChange={e => cambiarVencimiento(e.target.value)} disabled={bloqueado || cargaV.loading}>
+                    {vencimientos.map(v => <option key={v} value={v}>{v} · {diasTxt(diasHasta(v))}</option>)}
+                  </select>
+                </Field>
+                {cargaV.loading && <span className="muted small"><Spinner small /> Cargando cadena…</span>}
+                {cargaV.error && (
+                  <div className="alert alert--danger" role="alert">
+                    <div><strong>No se pudo cargar el vencimiento.</strong> {cargaV.error.message}</div>
+                    <button type="button" className="btn btn--sm" onClick={() => cambiarVencimiento(vencSel)}>Reintentar</button>
+                  </div>
+                )}
+              </div>
+            )}
             <div className="table-wrap">
               <table className="table table--dense">
                 <caption className="sr-only">Patas de la orden</caption>
@@ -288,6 +337,8 @@ export default function TicketOrden({ open = true, onClose, empresa, chain, legs
     </Modal>
   );
 }
+
+const diasTxt = d => (d === 1 ? '1 día' : d + ' días');
 
 function Resumen({ credito, total, perfil }) {
   return (

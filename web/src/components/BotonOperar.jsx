@@ -4,6 +4,7 @@ import TicketOrden from './TicketOrden';
 import { ErrorMessage } from './States';
 import { estrategias, evaluaciones, mercado, selecciones } from '../api/resources';
 import { CORES, ESTRATEGIA_LABELS } from '../utils/constants';
+import { leerConfig } from '../pages/analizar/flujo';
 import { construirPatas, contextoAnalisis, elegirVencimiento } from '../utils/estrategiasOrden';
 
 /** Carga selección completada más reciente, catálogo de estrategias y últimas evaluaciones por core. */
@@ -16,10 +17,10 @@ export async function cargarDatosAnalisis(empresa) {
   return { seleccion: sel.items?.[0], estrategiasById: new Map((est.items || []).map(e => [e._id, e])), evaluaciones: Object.fromEntries(evs) };
 }
 
-/** Cadena del vencimiento más cercano con ≥ 7 días (si hay), si no el más cercano. */
-export async function cargarCadena(simbolo) {
+/** Cadena del primer vencimiento con ≥ diasMin días (y ≤ diasMax si es posible), si no el más cercano. */
+export async function cargarCadena(simbolo, { diasMin = 7, diasMax = null } = {}) {
   let d = await mercado.opcionesResumen(simbolo, {});
-  const venc = elegirVencimiento(d.vencimientos || (d.vencimiento ? [d.vencimiento] : []));
+  const venc = elegirVencimiento(d.vencimientos || (d.vencimiento ? [d.vencimiento] : []), new Date(), diasMin, diasMax);
   if (venc && venc !== d.vencimiento) d = await mercado.opcionesResumen(simbolo, { vencimiento: venc });
   return d;
 }
@@ -28,13 +29,15 @@ export async function cargarCadena(simbolo) {
  * Props: empresa, estrategiaCodigo (si falta se usa la mejor clasificada, o LONG_CALL sin selección),
  * datos (opcional, ya cargados: { seleccion, estrategiasById, evaluaciones }), label, className.
  */
-export default function BotonOperar({ empresa, estrategiaCodigo, datos, label, className = 'btn btn--primary', disabled }) {
+export default function BotonOperar({ empresa, estrategiaCodigo, datos, label, className = 'btn btn--primary', disabled, diasMin, diasMax }) {
   const [estado, setEstado] = useState({ busy: false, error: null, ticket: null });
 
   const abrir = async () => {
     setEstado({ busy: true, error: null, ticket: null });
+    const cfg = leerConfig(); // rango de días de la configuración de análisis (localStorage)
+    const rango = { diasMin: diasMin ?? cfg.diasMin, diasMax: diasMax ?? cfg.diasMax };
     try {
-      const [d, chain] = await Promise.all([datos ? Promise.resolve(datos) : cargarDatosAnalisis(empresa), cargarCadena(empresa.simbolo)]);
+      const [d, chain] = await Promise.all([datos ? Promise.resolve(datos) : cargarDatosAnalisis(empresa), cargarCadena(empresa.simbolo, rango)]);
       let codigo = estrategiaCodigo;
       if (!codigo) codigo = contextoAnalisis(d, null).topCodigo || 'LONG_CALL';
       const { legs, error } = construirPatas(codigo, chain.items || [], chain.precioSubyacente);
