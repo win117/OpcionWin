@@ -94,6 +94,13 @@ ejecutar cores → confluencia por estrategia → selección (3 modos) → confi
   build de Render OK, servidor en 0.0.0.0, `/health` y SPA 200, login lee usuarios de la variable (401 con clave incorrecta). 117 pruebas.
   El repositorio es público: secretos solo en el panel de Render. Respaldo `backups/13-render-*.zip`.
 
+- 2026-11-17: Cierre de 4 brechas docs/código. (1) ADR-003: trabajos `pendiente`/`procesando` de >15 min y no activos en la cola se
+  persisten `fallida` al leerlos (`trabajos-huerfanos.service.js`). (2) `diasVencimientoMin/Max` filtran los contratos del core
+  `indicadores` cuando se envían (`iv_promedio` con periodo `min-maxd`). (3) Auditoría automática (`auditoria.service.js`:
+  login/logout, ticket/envío/cancelación de órdenes, cierre de posición, verificación de broker, creación de trabajos; mejor esfuerzo,
+  email enmascarado en fallos). (4) Índice TTL de sesiones creado por el repositorio MongoDB al primer acceso (el del esquema no
+  aplicaba con `autoIndex` apagado); en Supabase, 401 por `expiraEn` y purga de expiradas al iniciar sesión. 122 pruebas.
+
 ## Cómo ejecutar
 - Desarrollo: `npm.cmd run dev` (API :PORT) y en otra terminal `npm.cmd run dev:web` (Vite con proxy).
 - Producción local: `npm.cmd run build:all` y `npm.cmd start` → interfaz en `http://HOST:PORT/`, Swagger en `/api/v1/api-docs`.

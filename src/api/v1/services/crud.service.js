@@ -1,6 +1,7 @@
 import boom from '@hapi/boom';
 import { repository } from '../../../repositories';
 import { resources, resource } from '../../../repositories/resources';
+import { reconciliarTrabajo, reconciliarTrabajos } from './trabajos-huerfanos.service';
 const protectedFields = ['_id', 'id', 'usuarioId', 'createdAt', 'updatedAt', '_revision', 'owner_id'];
 export function object(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw boom.badRequest('Se requiere un objeto JSON.');
@@ -64,8 +65,9 @@ function hasReference(schema, value, targetModel, id) {
     return type.schema && (Array.isArray(item) ? item : [item]).some(v => hasReference(type.schema, v, targetModel, id));
   });
 }
-export function createCrudService(name, factory = repository) {
+export function createCrudService(name, factory = repository, { cola, ahora } = {}) {
   resource(name);
+  const huerfanos = { factory, cola, ahora };
   return {
     async list(context, query = {}) {
       const allowed = new Set(['page', 'limit', 'search', ...Object.keys(resource(name).Model.schema.paths).filter(k => !['tokenHash','credencialRef','_id'].includes(k))]);
@@ -83,13 +85,13 @@ export function createCrudService(name, factory = repository) {
       // Más recientes primero (los _id son UUID aleatorios y no sirven como orden).
       const t = r => new Date(r.document.createdAt || 0).getTime() || 0;
       rows.sort((a, b) => t(b) - t(a) || String(a._id).localeCompare(String(b._id)));
-      return { items: rows.slice((page-1)*limit, page*limit).map(safeDocument), page, limit, total: rows.length };
+      return { items: await reconciliarTrabajos(name, context, rows.slice((page-1)*limit, page*limit).map(safeDocument), huerfanos), page, limit, total: rows.length };
     },
     async get(context, id) {
       if (typeof id !== 'string' || !id) throw boom.badRequest('Identificador inválido.');
       const row = await factory(name, context).get(id);
       if (!row) throw boom.notFound('Registro no encontrado.');
-      return safeDocument(row);
+      return reconciliarTrabajo(name, context, safeDocument(row), huerfanos);
     },
     async create(context, body) {
       input(body);

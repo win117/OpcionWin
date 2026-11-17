@@ -3,7 +3,7 @@ export const authenticate = service => async (req,res,next) => {
   try {
     const match = /^Bearer (\S+)$/.exec(req.get('Authorization') || '');
     if (!match) throw boom.unauthorized('Envía Authorization: Bearer <token>.');
-    req.context = await service.authenticate(match[1]);
+    req.context = { ...await service.authenticate(match[1]), requestId: req.requestId };
     res.set('Cache-Control', 'no-store');
     next();
   } catch (error) { next(error); }

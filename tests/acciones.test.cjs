@@ -154,6 +154,11 @@ test('Flujo funcional: sincronizar → cores → confluencia → selección → 
     // Errores del proveedor → HTTP
     await call('GET','/mercado/cotizaciones/NOKEY/en-vivo',undefined,503);
     assert.equal((await call('GET','/mercado/opciones/cadena/TEST')).items[0].griegas.delta,0.55);
+
+    // Auditoría automática (mejor esfuerzo)
+    const eventos=(await call('GET','/auditoria?limit=100')).items;
+    for(const a of ['login','sincronizacion.crear','evaluacion.crear','seleccion.crear','confluencia.crear','orden.cancelar','conexion.verificar']) assert.ok(eventos.some(e=>e.accion===a),'auditoría: '+a);
+    assert.ok(eventos.some(e=>e.accion==='conexion.verificar'&&e.resultado==='error'),'verificación live fallida queda como error');
   } finally { server.close(); }
 });
 

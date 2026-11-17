@@ -5,6 +5,7 @@ import boom from '@hapi/boom';
 import config from '../../../config/config';
 import { repository } from '../../../repositories';
 import { object, validated } from './crud.service';
+import { registrarEvento, enmascararEmail } from './auditoria.service';
 const scrypt = promisify(scryptCallback);
 const hash = token => createHash('sha256').update(token).digest('hex');
 // Usuarios: AUTH_USERS_JSON (variable de entorno, despliegue) tiene prioridad sobre AUTH_USERS_FILE (local).
@@ -18,6 +19,14 @@ export async function fileUsers(settings = config) {
   catch { throw boom.serverUnavailable('Configura usuarios con scripts/create-user.cjs (local) o la variable AUTH_USERS_JSON (despliegue).'); }
 }
 export function createSessionService(factory = repository, users = fileUsers) {
+  // Supabase no tiene TTL: la expiración se aplica en authenticate (expiraEn <= ahora → 401) y aquí se purgan
+  // las expiradas al iniciar sesión (mejor esfuerzo; en MongoDB lo hace además el índice TTL).
+  async function limpiarExpiradas(context) {
+    try {
+      const repo = factory('sesiones', context), ahora = new Date();
+      for (const row of await repo.list({ limit: 100 })) if (new Date(row.document.expiraEn) <= ahora) await repo.remove(row._id, row.revision).catch(() => {});
+    } catch { /* mejor esfuerzo */ }
+  }
   return {
     async login(body) {
       object(body);
@@ -27,13 +36,19 @@ export function createSessionService(factory = repository, users = fileUsers) {
       const salt = user?.salt || 'invalid-user';
       const derived = await scrypt(password, salt, 64);
       const expected = Buffer.from(user?.passwordHash || '00'.repeat(64), 'hex');
-      if (!user || expected.length !== derived.length || !timingSafeEqual(expected, derived)) throw boom.unauthorized('Credenciales inválidas.');
+      if (!user || expected.length !== derived.length || !timingSafeEqual(expected, derived)) {
+        // Sin contraseña; con usuario conocido queda en su propio registro, si no en 'anonimo'.
+        await registrarEvento({ userId: user?.id || 'anonimo', database: baseDatos }, { accion: 'login', recurso: 'sesiones', resultado: 'error', detalle: 'Credenciales inválidas: ' + enmascararEmail(email) }, factory);
+        throw boom.unauthorized('Credenciales inválidas.');
+      }
       const context = { userId: user.id, database: baseDatos };
       const id = randomUUID();
       const token = [baseDatos, user.id, id, randomBytes(32).toString('hex')].join('.');
       const expiraEn = new Date(Date.now() + config.SESSION_TTL_SECONDS * 1000);
       const document = await validated('sesiones', { _id: id, usuarioId: user.id, baseDatos, tokenHash: hash(token), expiraEn, createdAt: new Date(), updatedAt: new Date() });
       await factory('sesiones', context).create(document);
+      await registrarEvento(context, { accion: 'login', recurso: 'sesiones', recursoId: id }, factory);
+      await limpiarExpiradas(context);
       return { token, tokenType: 'Bearer', usuarioId: user.id, baseDatos, expiraEn };
     },
     async authenticate(token) {
@@ -54,6 +69,7 @@ export function createSessionService(factory = repository, users = fileUsers) {
     async logout(context) {
       const repo = factory('sesiones', context), row = await repo.get(context.sessionId);
       if (row) await repo.replace(row._id, { ...row.document, revocadaEn: new Date() }, row.revision);
+      await registrarEvento(context, { accion: 'logout', recurso: 'sesiones', recursoId: context.sessionId }, factory);
     },
   };
 }

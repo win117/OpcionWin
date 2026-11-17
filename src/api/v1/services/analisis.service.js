@@ -17,6 +17,12 @@ function metricasValidas(lista = []) {
   return lista.filter(m => m && m.nombre && Number.isFinite(m.valor))
     .map(m => ({ nombre: String(m.nombre), valor: m.valor, unidad: m.unidad || 'indice', ...(m.periodo ? { periodo: String(m.periodo) } : {}) }));
 }
+// iv_promedio calculada solo con contratos dentro del rango de días a vencimiento: se refleja en el periodo de la métrica.
+export function etiquetarVencimiento(metricas, rango) {
+  if (!rango) return metricas;
+  const etiqueta = rango.min + '-' + (Number.isFinite(rango.max) ? rango.max : '') + 'd';
+  return metricas.map(m => m.nombre === 'iv_promedio' ? { ...m, periodo: etiqueta } : m);
+}
 const metrica = (registro, nombre) => registro.metricas?.find(m => m.nombre === nombre)?.valor;
 
 function ultimaFuente(registros, tipo) {
@@ -30,6 +36,7 @@ export function createAnalisis({ cola, factory = repository }) {
   async function insumos(ctx, empresa, requiere, parametros = {}) {
     const input = { simbolo: empresa.simbolo, velas: [], fundamentales: [], reportes: [], noticias: [], opciones: [] };
     const fuentes = [];
+    let rangoVencimiento;
     const necesita = k => requiere.some(r => r.replace(/\?$/, '') === k); // 'x?' = insumo opcional
     if (necesita('velas')) {
       const intervalo = parametros.intervalo || '1Day';
@@ -63,13 +70,19 @@ export function createAnalisis({ cola, factory = repository }) {
       // Cerca del dinero (±5 % del último cierre): la IV de contratos muy ITM/OTM distorsiona el promedio.
       const cierre = input.velas.at(-1)?.cierre;
       const cerca = c => !Number.isFinite(cierre) || Math.abs(c.strike / cierre - 1) <= 0.05;
-      input.opciones = [...ultimos.values()].filter(s => contratos.has(s.contratoId) && cerca(contratos.get(s.contratoId))).map(s => {
+      // Días a vencimiento mín/máx (parametros): solo cuando se proveen; sin ellos se conserva el comportamiento anterior.
+      const min = Number.isFinite(parametros.diasVencimientoMin) ? parametros.diasVencimientoMin : undefined;
+      const max = Number.isFinite(parametros.diasVencimientoMax) ? parametros.diasVencimientoMax : undefined;
+      if (min !== undefined || max !== undefined) rangoVencimiento = { min: min ?? 0, max: max ?? Infinity };
+      const hoy = new Date().setUTCHours(0, 0, 0, 0);
+      const enRango = c => !rangoVencimiento || (d => d >= rangoVencimiento.min && d <= rangoVencimiento.max)((fecha(c.vencimiento) - hoy) / 86400000);
+      input.opciones = [...ultimos.values()].filter(s => contratos.has(s.contratoId) && cerca(contratos.get(s.contratoId)) && enRango(contratos.get(s.contratoId))).map(s => {
         const c = contratos.get(s.contratoId);
         return { tipo: c.tipo, strike: c.strike, vencimiento: c.vencimiento, bid: s.bid, ask: s.ask, volatilidadImplicita: s.volatilidadImplicita, griegas: s.griegas };
       });
       fuentes.push(...ultimaFuente([...ultimos.values()], 'opciones'));
     }
-    return { input, fuentes };
+    return { input, fuentes, rangoVencimiento };
   }
 
   // Ejecuta un core y devuelve datos + cambios listos para la Evaluacion.
@@ -78,11 +91,11 @@ export function createAnalisis({ cola, factory = repository }) {
     const parametros = { ...(perfil?.parametros || {}), ...parametrosExtra };
     const reglas = (perfil?.reglas || []).filter(r => r.core === core && r.activo !== false);
     const datos = { core, empresaId: empresa._id, ...(perfil ? { perfilId: perfil._id } : {}), versionAlgoritmo: modulo.VERSION, parametros, reglasAplicadas: reglas };
-    const { input, fuentes } = await insumos(ctx, empresa, modulo.REQUIERE || [], parametros);
+    const { input, fuentes, rangoVencimiento } = await insumos(ctx, empresa, modulo.REQUIERE || [], parametros);
     const r = modulo.evaluar({ ...input, fechaReferencia: new Date().toISOString(), parametros, reglas });
     const cambios = {
       ...(r.puntaje != null ? { puntaje: r.puntaje } : {}), cobertura: r.cobertura ?? 0,
-      metricas: metricasValidas(r.metricas), motivos: (r.motivos || []).map(String).slice(0, 50),
+      metricas: etiquetarVencimiento(metricasValidas(r.metricas), rangoVencimiento), motivos: (r.motivos || []).map(String).slice(0, 50),
       datosFaltantes: (r.datosFaltantes || []).map(String).slice(0, 50), fuentes,
     };
     return { datos, cambios };

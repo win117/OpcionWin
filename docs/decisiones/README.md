@@ -36,7 +36,7 @@ Para debatir una decisión: cambiar su estado a Propuesta, anotar el argumento e
 
 ## ADR-003 · Trabajos asíncronos en proceso
 **Contexto.** Sincronizar y evaluar puede tardar segundos. El inventario A define 202 + consulta.
-**Decisión.** POST guarda el registro `pendiente`, responde 202 y ejecuta en el mismo proceso (cola en memoria, concurrencia 2). Estados en la base: pendiente → procesando → completada/fallida. Al reiniciar, los trabajos `procesando` antiguos se marcan `fallida` al consultarse (>15 min).
+**Decisión.** POST guarda el registro `pendiente`, responde 202 y ejecuta en el mismo proceso (cola en memoria, concurrencia 2). Estados en la base: pendiente → procesando → completada/fallida. Al reiniciar, los trabajos `procesando` antiguos se marcan `fallida` al consultarse (>15 min). **Implementado** (`trabajos-huerfanos.service.js`: CRUD get/list; no aplica a trabajos activos en la cola del proceso).
 **Alternativas.** Cola externa (BullMQ/Redis) — correcta para microservicios del tema 3, pero agrega infraestructura.
 **Consecuencias.** Una sola instancia. Migrable a cola externa sin cambiar el contrato HTTP.
 

@@ -1,10 +1,23 @@
 import boom from '@hapi/boom';
 import { connectMongo } from '../../config/database.config';
 import { resource, filtroSeguro } from '../resources';
+// TTL de sesiones: los documentos viven bajo `document.`, así que el índice del esquema (autoIndex apagado) no
+// aplica. Se crea una vez por proceso en el primer acceso a la colección, sin bloquear ni fallar la operación.
+let ttlSesiones = false;
+async function asegurarTtlSesiones(c) {
+  if (ttlSesiones) return;
+  ttlSesiones = true;
+  try { await c.createIndex({ 'document.expiraEn': 1 }, { expireAfterSeconds: 0 }); }
+  catch { ttlSesiones = false; }
+}
 export function mongoRepository(name, owner, connect = connectMongo) {
   const table = resource(name).table;
   const collection = async () => {
-    try { return (await connect()).db.collection(table); }
+    try {
+      const c = (await connect()).db.collection(table);
+      if (table === resource('sesiones').table) await asegurarTtlSesiones(c);
+      return c;
+    }
     catch { throw boom.serverUnavailable('MongoDB no está disponible.'); }
   };
   return {
