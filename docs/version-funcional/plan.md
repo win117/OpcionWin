@@ -72,6 +72,15 @@ ejecutar cores → confluencia por estrategia → selección (3 modos) → confi
   Resultado simulado −80 USD (spread bid/ask 5.80/6.75). Sin posición residual en Alpaca.
   Corregido: la sincronización de posiciones nunca marcaba como `cerrada` una posición que el broker ya no reporta;
   la sincronización de órdenes ahora registra el precio de ejecución en eventos. 98 pruebas. Respaldo `backups/09-ejecucion-paper-*.zip`.
+- 2026-11-17: Órdenes desde la interfaz (2 subagentes; ADR-011). Backend: `POST /broker/paper/conexion` (asegura broker + conexión
+  paper y verifica), `GET /broker/paper/resumen` (cuenta, posiciones con P/L en vivo, órdenes), `POST /ordenes/ticket`
+  (configuración + orden + envío en un paso, Idempotency-Key), `POST /posiciones/:id/cierre`. Crédito multi-pata: `precioLimite`
+  positivo + `credito:true` → `limit_price` negativo (referencia de Alpaca postorder). Frontend: TicketOrden (revisar → confirmar,
+  seguimiento hasta ejecución), «Operar» en la estrategia recomendada (patas armadas desde la cadena; contexto del análisis y avisos:
+  sin análisis, >24 h, no es la top, cores contradictorios), clic en Bid/Ask de la cadena, Cartera paper (Inicio y Broker) con Cerrar/Cancelar.
+  Integración corregida: `patrimonio` en cartera, `plPct` viene en %, venta de una pata desde la cadena sin estrategia (400 → se asocia por tipo).
+  Verificado real: Iron Condor a crédito aceptado/cancelado (subagente); Long Call y venta de put vía ticket aceptadas/canceladas;
+  reintento con la misma key no duplica. 105 pruebas. Respaldo `backups/10-ordenes-interfaz-*.zip`.
 
 ## Cómo ejecutar
 - Desarrollo: `npm.cmd run dev` (API :PORT) y en otra terminal `npm.cmd run dev:web` (Vite con proxy).

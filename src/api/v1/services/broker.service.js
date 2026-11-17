@@ -48,7 +48,7 @@ export function createBroker({ integraciones, factory = repository }) {
       let remoto;
       try {
         remoto = await alpaca.enviarOrden({ clientOrderId: idempotencyKey, tipo: orden.tipo, vigencia: orden.vigencia, cantidad: orden.cantidad,
-          ...(orden.precioLimite != null ? { precioLimite: orden.precioLimite } : {}), componentes });
+          ...(orden.precioLimite != null ? { precioLimite: orden.precioLimite } : {}), ...(orden.credito ? { credito: true } : {}), componentes });
       } catch (error) {
         await parchar('ordenes', ctx, orden._id, d => ({ ...d, eventos: [...(d.eventos || []), { tipo: 'error_envio', mensaje: String(error?.mensaje || 'Error al enviar').slice(0, 1900) }] }), factory).catch(() => {});
         throw error;

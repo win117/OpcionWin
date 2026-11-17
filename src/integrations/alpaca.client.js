@@ -120,18 +120,37 @@ export const normalizarPosicion = p => {
     precioActual: num(p.current_price),
     valorMercado: num(p.market_value),
     claseActivo: p.asset_class || null,
+    plNoRealizado: num(p.unrealized_pl),
+    plPctNoRealizado: num(p.unrealized_plpc), // fracción (0.05 = 5 %)
   };
+};
+
+// Convención de precio límite (única traducción, aquí):
+// - Nuestra API: `precioLimite` es SIEMPRE el precio neto positivo por unidad; `credito: true` marca una orden multi-pata de crédito neto.
+// - Alpaca (referencia POST /v2/orders, CreateOrderRequest.limit_price, orden mleg): valor positivo = débito neto; valor NEGATIVO = crédito neto.
+//   Por eso un crédito (p. ej. iron condor vendido) se envía como limit_price negativo. Órdenes de una pata: siempre positivo.
+// - Alpaca exige 2 decimales si |precio| >= 1 y hasta 4 si < 1.
+const formatearPrecio = n => String(Number(n.toFixed(Math.abs(n) >= 1 ? 2 : 4)));
+export const precioLimiteAlpaca = (precioLimite, credito, multipata) => {
+  if (!Number.isFinite(precioLimite) || precioLimite === 0) throw validacion('precioLimite debe ser un número distinto de cero.');
+  if (credito && !multipata) throw validacion('credito solo aplica a órdenes multi-pata.');
+  if (precioLimite < 0) { // compatibilidad: valor ya expresado en la convención de Alpaca (crédito negativo), solo multi-pata
+    if (credito || !multipata) throw validacion('precioLimite debe ser positivo; usa credito: true para crédito neto.');
+    return formatearPrecio(precioLimite);
+  }
+  return formatearPrecio(credito ? -precioLimite : precioLimite);
 };
 
 // Construye el cuerpo de POST /v2/orders a partir de una orden neutral.
 export const construirCuerpoOrden = orden => {
   if (!orden || typeof orden !== 'object') throw validacion('Orden requerida.');
-  const { clientOrderId, tipo, vigencia = 'day', cantidad, precioLimite, componentes } = orden;
+  const { clientOrderId, tipo, vigencia = 'day', cantidad, precioLimite, componentes, credito = false } = orden;
   if (typeof clientOrderId !== 'string' || !clientOrderId.trim() || clientOrderId.length > 128) throw validacion('clientOrderId requerido (máximo 128 caracteres).');
   if (!['market', 'limit'].includes(tipo)) throw validacion('tipo debe ser market o limit.');
   if (!['day', 'gtc'].includes(vigencia)) throw validacion('vigencia debe ser day o gtc.');
   if (!Number.isSafeInteger(cantidad) || cantidad < 1) throw validacion('cantidad debe ser un entero positivo.');
   if (tipo === 'limit' && !Number.isFinite(precioLimite)) throw validacion('precioLimite requerido para orden limit.');
+  if (credito && tipo !== 'limit') throw validacion('credito requiere una orden limit.');
   if (tipo === 'market' && precioLimite != null) throw validacion('Una orden market no lleva precioLimite.');
   if (!Array.isArray(componentes) || componentes.length < 1 || componentes.length > 4) throw validacion('Se requieren de 1 a 4 componentes.');
   for (const c of componentes) {
@@ -144,7 +163,7 @@ export const construirCuerpoOrden = orden => {
     type: tipo,
     time_in_force: vigencia,
     client_order_id: clientOrderId,
-    ...(tipo === 'limit' ? { limit_price: String(precioLimite) } : {}),
+    ...(tipo === 'limit' ? { limit_price: precioLimiteAlpaca(precioLimite, credito === true, Array.isArray(componentes) && componentes.length > 1) } : {}),
   };
   if (componentes.length === 1) {
     const [c] = componentes;

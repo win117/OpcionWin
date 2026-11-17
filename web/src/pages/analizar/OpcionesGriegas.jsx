@@ -1,5 +1,7 @@
 // Cadena de opciones con griegas (GET /mercado/opciones/resumen/:simbolo) y sonrisa de volatilidad.
 import { useMemo, useState } from 'react';
+import TicketOrden from '../../components/TicketOrden';
+import { intencionPara } from '../../utils/estrategiasOrden';
 import { SyncButton } from '../../components/SyncButton';
 import { Empty, ErrorMessage, Loading, Notice } from '../../components/States';
 import { Select } from '../../components/Field';
@@ -56,13 +58,26 @@ function Sonrisa({ filas, precio }) {
   );
 }
 
-function Lado({ o, lado }) {
+function Lado({ o, lado, onOperar }) {
   const g = o?.griegas || {};
-  const celdas = [iv(o?.volatilidadImplicita), f(g.delta), f(g.gamma, 4), f(g.theta), f(g.vega), px(o?.bid), px(o?.ask)];
-  return celdas.map((c, i) => <td key={lado + i} className={'num ' + lado}>{c}</td>);
+  const celdas = [iv(o?.volatilidadImplicita), f(g.delta), f(g.gamma, 4), f(g.theta), f(g.vega)];
+  const boton = (accion, valor) => {
+    const etiqueta = `${accion === 'buy' ? 'Comprar' : 'Vender'} ${o?.tipo === 'put' ? 'put' : 'call'} strike ${o?.strike} a ${accion === 'buy' ? 'ask' : 'bid'} ${valor}`;
+    return o && o.contratoId && onOperar && isNum(valor)
+      ? <button type="button" className="chain__px" onClick={() => onOperar(o, accion)} aria-label={etiqueta} title={etiqueta}>{px(valor)}</button>
+      : px(valor);
+  };
+  return (
+    <>
+      {celdas.map((c, i) => <td key={lado + i} className={'num ' + lado}>{c}</td>)}
+      <td className={'num ' + lado}>{boton('sell', o?.bid)}</td>
+      <td className={'num ' + lado}>{boton('buy', o?.ask)}</td>
+    </>
+  );
 }
 
-export default function OpcionesGriegas({ simbolo }) {
+export default function OpcionesGriegas({ simbolo, empresa }) {
+  const [ticket, setTicket] = useState(null);
   const [venc, setVenc] = useState('');
   const state = useAsync(() => mercado.opcionesResumen(simbolo, { vencimiento: venc }), [simbolo, venc]);
   const d = state.data;
@@ -87,6 +102,7 @@ export default function OpcionesGriegas({ simbolo }) {
     );
   }
   const vencs = d.vencimientos || [];
+  const operar = (o, accion) => setTicket({ legs: [{ accion, intencion: intencionPara(accion), contratoId: o.contratoId }], chain: d });
   return (
     <div className="stack">
       <div className="toolbar">
@@ -110,14 +126,15 @@ export default function OpcionesGriegas({ simbolo }) {
           <tbody>
             {filas.map(r => (
               <tr key={r.strike} className={r.strike === atm ? 'chain__atm' : ''}>
-                <Lado o={r.call} lado={isNum(precio) && r.strike < precio ? 'itm' : ''} />
+                <Lado o={r.call} lado={isNum(precio) && r.strike < precio ? 'itm' : ''} onOperar={empresa ? operar : null} />
                 <th scope="row" className="num chain__strike">{fmtFixed(r.strike, 2)}</th>
-                <Lado o={r.put} lado={isNum(precio) && r.strike > precio ? 'itm' : ''} />
+                <Lado o={r.put} lado={isNum(precio) && r.strike > precio ? 'itm' : ''} onOperar={empresa ? operar : null} />
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      {ticket && empresa && <TicketOrden open empresa={empresa} chain={ticket.chain} legs={ticket.legs} onClose={() => setTicket(null)} />}
     </div>
   );
 }

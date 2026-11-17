@@ -1,6 +1,7 @@
 // Panel de inicio de «Buscar y analizar»: mercado, empresas registradas, exploración y actividad.
 import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
+import CarteraPaper from './CarteraPaper';
 import Sparkline from '../../components/Sparkline';
 import { Badge } from '../../components/Badge';
 import { ErrorMessage } from '../../components/States';
@@ -209,6 +210,7 @@ function Actividad() {
 export default function Inicio() {
   return (
     <div className="inicio">
+      <CarteraPaper />
       <Mercado />
       <TusEmpresas />
       <Explora />

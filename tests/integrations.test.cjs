@@ -189,7 +189,7 @@ test('Alpaca: mapeo de estados, consulta, cancelación y posiciones', async () =
   assert.equal(cancelada.estado, 'cancelada');
   await assert.rejects(cliente.consultarOrden('../v2/account'), e => e.codigo === 'VALIDACION');
   const [p] = await cliente.posiciones();
-  assert.deepEqual(p, { posicionExternaId: 'a1', simbolo: 'AAPL260116C00200000', lado: 'short', cantidad: 2, precioPromedio: 1.5, precioActual: 1.2, valorMercado: -240, claseActivo: 'us_option' });
+  assert.deepEqual(p, { posicionExternaId: 'a1', simbolo: 'AAPL260116C00200000', lado: 'short', cantidad: 2, precioPromedio: 1.5, precioActual: 1.2, valorMercado: -240, claseActivo: 'us_option', plNoRealizado: null, plPctNoRealizado: null });
 });
 
 test('HTTP: 429 se reintenta con espera y luego tiene éxito', async () => {

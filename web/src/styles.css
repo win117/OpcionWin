@@ -540,3 +540,15 @@ a.inicio-card:focus-visible { outline: 2px solid var(--focus); outline-offset: 2
 .skel { display: block; border-radius: 6px; background: var(--surface-3); animation: skel 1.2s ease-in-out infinite; }
 @keyframes skel { 50% { opacity: .5; } }
 @media (prefers-reduced-motion: reduce) { .skel { animation: none; } a.inicio-card { transition: none; } }
+
+/* Ticket de orden paper y cartera */
+.ticket__cuenta { min-height: 1.4em; }
+.ticket__form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 12px; }
+.ticket__estado { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-weight: 600; }
+.ticket__analisis { background: var(--info-bg); color: var(--info-fg); border-radius: var(--radius-sm); padding: 8px 12px; overflow-wrap: anywhere; }
+.ticket select { min-width: 0; max-width: 100%; }
+.chain__px { background: transparent; border: 0; border-bottom: 1px dotted var(--accent); color: inherit; font: inherit; font-variant-numeric: tabular-nums; padding: 2px 4px; min-height: 0; cursor: pointer; border-radius: 3px; }
+.chain__px:hover { background: var(--accent-soft); color: var(--accent-strong); }
+.chain__px:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.cartera__body > * + * { margin-top: 12px; }
+.cartera h3 { margin: 0; font-size: .95rem; }

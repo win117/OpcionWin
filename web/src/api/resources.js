@@ -134,3 +134,12 @@ export const sesiones = {
   actual: () => api.get('/sesiones/actual'),
   logout: () => api.del('/sesiones/actual'),
 };
+
+// Operación directa en Alpaca PAPER (ticket de orden, cartera y cierre de posiciones).
+export const operacion = {
+  asegurarConexion: () => api.post('/broker/paper/conexion'),
+  resumen: () => api.get('/broker/paper/resumen'),
+  ticket: (body, key) => api.post('/ordenes/ticket', body, { headers: { 'Idempotency-Key': key } }),
+  cerrarPosicion: (id, body, key) => api.post(`/posiciones/${enc(id)}/cierre`, body, { headers: { 'Idempotency-Key': key } }),
+  orden: id => api.get(`/ordenes/${enc(id)}`),
+};

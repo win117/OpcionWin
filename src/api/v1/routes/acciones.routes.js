@@ -8,6 +8,7 @@ import { iniciarTrabajo } from '../services/trabajos.service';
 import { createSincronizador } from '../services/sincronizacion.service';
 import { createAnalisis } from '../services/analisis.service';
 import { createBroker } from '../services/broker.service';
+import { createOperacion } from '../services/operacion.service';
 import { createBusquedaActivos } from '../services/activos.service';
 import { cores as modulosCores } from '../../../cores';
 
@@ -19,6 +20,7 @@ export default ({ factory, integraciones, cola, ahora, cacheActivos }) => {
   const sync = createSincronizador({ integraciones, factory });
   const analisis = createAnalisis({ cola, factory });
   const broker = createBroker({ integraciones, factory });
+  const operacion = createOperacion({ integraciones, factory, cola, ahora });
   const busqueda = createBusquedaActivos({ integraciones, factory, ahora, cache: cacheActivos });
   const aceptado = (res, data) => respond(res, data, 202, 'Trabajo en proceso. Consulta el registro hasta completada o fallida.');
 
@@ -49,5 +51,17 @@ export default ({ factory, integraciones, cola, ahora, cacheActivos }) => {
   router.post('/ordenes/:id/envio', handle(async (req, res) => respond(res, await broker.enviar(req.context, req.params.id, req.get('Idempotency-Key')), 200, 'Orden enviada a Alpaca paper.')));
   router.post('/ordenes/:id/cancelacion', handle(async (req, res) => respond(res, await broker.cancelar(req.context, req.params.id))));
   router.post('/conexiones-broker/:id/verificacion', handle(async (req, res) => respond(res, await broker.verificar(req.context, req.params.id))));
+
+  // Operación paper en un paso (ADR-011).
+  router.post('/broker/paper/conexion', handle(async (req, res) => respond(res, await operacion.ensureConexion(req.context))));
+  router.get('/broker/paper/resumen', handle(async (req, res) => respond(res, await operacion.resumen(req.context))));
+  router.post('/ordenes/ticket', handle(async (req, res) => {
+    const { repetida, ...data } = await operacion.ticket(req.context, req.body, req.get('Idempotency-Key'));
+    respond(res, data, repetida ? 200 : 201, repetida ? 'Orden ya existente para esa Idempotency-Key.' : 'Orden creada y enviada a Alpaca paper.');
+  }));
+  router.post('/posiciones/:id/cierre', handle(async (req, res) => {
+    const { repetida, ...data } = await operacion.cierre(req.context, req.params.id, req.body, req.get('Idempotency-Key'));
+    respond(res, data, repetida ? 200 : 201, repetida ? 'Orden ya existente para esa Idempotency-Key.' : 'Orden de cierre enviada a Alpaca paper.');
+  }));
   return router;
 };

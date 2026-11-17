@@ -1,5 +1,6 @@
 // Pestaña «Último análisis»: recomendación por estrategia + tarjetas de cada core.
 import { DirectionalGauge, ScoreBar, direccion } from '../../components/Gauge';
+import BotonOperar from '../../components/BotonOperar';
 import { Empty, ErrorMessage, Loading } from '../../components/States';
 import { useAsync } from '../../hooks/useAsync';
 import { estrategias, evaluaciones, selecciones } from '../../api/resources';
@@ -7,7 +8,7 @@ import { CORES, CORE_LABELS, CORE_DESCRIPCION, ESTRATEGIA_LABELS } from '../../u
 import { fmtDateTime, fmtNum, fmtPct, isNum } from '../../utils/format';
 import { metrica } from '../../utils/objects';
 
-function Recomendacion({ seleccion, estrategiasById }) {
+function Recomendacion({ seleccion, estrategiasById, empresa, datos }) {
   if (!seleccion) return <Empty title="Sin selección">Configura y pulsa «Analizar con esta configuración».</Empty>;
   const rows = [...(seleccion.resultados || [])].sort((a, b) => b.puntaje - a.puntaje);
   const top = rows[0];
@@ -19,12 +20,13 @@ function Recomendacion({ seleccion, estrategiasById }) {
           <span className="muted small">Estrategia más compatible</span>
           <strong className="reco__name">{ESTRATEGIA_LABELS[codigo(top)] || codigo(top) || '—'}</strong>
           <span className="muted small">Compatibilidad {fmtNum(top.puntaje, 0)}/100 · cobertura {fmtPct(top.cobertura)}</span>
+          {codigo(top) && <div><BotonOperar empresa={empresa} estrategiaCodigo={codigo(top)} datos={datos} label={'Operar ' + (ESTRATEGIA_LABELS[codigo(top)] || codigo(top))} /></div>}
         </div>
       )}
       <ul className="ranking">
         {rows.map((r, i) => (
           <li key={r._id || i}>
-            <div className="ranking__head"><span><strong>#{i + 1}</strong> {ESTRATEGIA_LABELS[codigo(r)] || codigo(r)}</span></div>
+            <div className="ranking__head"><span><strong>#{i + 1}</strong> {ESTRATEGIA_LABELS[codigo(r)] || codigo(r)}</span>{i > 0 && codigo(r) && <BotonOperar empresa={empresa} estrategiaCodigo={codigo(r)} datos={datos} className="btn btn--sm" label={'Operar ' + (ESTRATEGIA_LABELS[codigo(r)] || codigo(r))} />}</div>
             <ScoreBar value={r.puntaje} />
             {r.motivos?.length > 0 && <details className="details"><summary>Motivos</summary><ul className="list list--compact">{r.motivos.map((m, j) => <li key={j}>{m}</li>)}</ul></details>}
           </li>
@@ -75,7 +77,7 @@ export default function Resultados({ empresa, version }) {
   if (!d) return null;
   return (
     <div className="stack">
-      <section className="card"><h3>Recomendación</h3><Recomendacion seleccion={d.seleccion} estrategiasById={d.estrategiasById} /></section>
+      <section className="card"><h3>Recomendación</h3><Recomendacion seleccion={d.seleccion} estrategiasById={d.estrategiasById} empresa={empresa} datos={d} /></section>
       <div className="grid grid--cores">{CORES.map(core => <CoreCard key={core} core={core} evaluacion={d.evaluaciones[core]} />)}</div>
     </div>
   );

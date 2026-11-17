@@ -8,6 +8,7 @@ import { toCandles } from '../mercado/GraficoTab';
 import FundamentalesTab from '../mercado/FundamentalesTab';
 import InstitucionalTab from '../mercado/InstitucionalTab';
 import NoticiasTab from '../mercado/NoticiasTab';
+import BotonOperar from '../../components/BotonOperar';
 import OpcionesGriegas from './OpcionesGriegas';
 import Resultados from './Resultados';
 import GraficoPanel from './GraficoPanel';
@@ -34,7 +35,8 @@ function Encabezado({ empresa, velas, cotizacion, onActualizar, corriendo }) {
         <div>
           <h2 className="ticker">{empresa.simbolo} <span className="muted ticker__name">{empresa.nombre}</span></h2>
           <p className="muted small">{empresa.mercado}{empresa.cik ? ' · CIK ' + empresa.cik : ''}</p>
-          <button type="button" className="btn btn--sm" onClick={onActualizar} disabled={corriendo}>{corriendo ? 'Actualizando…' : 'Actualizar datos'}</button>
+          <button type="button" className="btn btn--sm" onClick={onActualizar} disabled={corriendo}>{corriendo ? 'Actualizando…' : 'Actualizar datos'}</button>{' '}
+          <BotonOperar empresa={empresa} label="Operar (paper)" className="btn btn--sm btn--primary" />
         </div>
         <div className="price">
           <span className="price__value">{fmtMoney(precio)}</span>
@@ -77,7 +79,7 @@ export default function DetalleEmpresa({ empresa, simbolo, version, tab, onTab, 
         <Tabs tabs={TABS} value={tab} onChange={onTab} label="Detalle de la empresa" />
         <div role="tabpanel" className="tabpanel">
           {tab === 'grafico' && <GraficoPanel simbolo={simbolo} onCambio={state.reload} />}
-          {tab === 'opciones' && <OpcionesGriegas simbolo={simbolo} />}
+          {tab === 'opciones' && <OpcionesGriegas simbolo={simbolo} empresa={empresa} />}
           {tab === 'fundamentales' && <FundamentalesTab {...props} />}
           {tab === 'institucional' && <InstitucionalTab {...props} />}
           {tab === 'noticias' && <NoticiasTab {...props} />}

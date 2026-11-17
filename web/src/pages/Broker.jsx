@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { PageHeader } from '../components/Layout';
 import { ResourceManager } from '../components/ResourceManager';
+import CarteraPaper from './analizar/CarteraPaper';
 import { Tabs } from '../components/Tabs';
 import { Badge } from '../components/Badge';
 import { Modal, ConfirmDialog } from '../components/Modal';
@@ -232,7 +233,7 @@ function PosicionesTab({ conexionesL }) {
 }
 
 export default function Broker() {
-  const [tab, setTab] = useState('ordenes');
+  const [tab, setTab] = useState('cartera');
   const brokersL = useLookup(brokers);
   const conexionesL = useLookup(conexiones);
   const configsL = useLookup(configuraciones);
@@ -242,13 +243,14 @@ export default function Broker() {
       <PaperBanner />
       <section className="card">
         <Tabs
-          tabs={[{ value: 'ordenes', label: 'Órdenes' }, { value: 'posiciones', label: 'Posiciones' }, { value: 'conexiones', label: 'Conexiones' }, { value: 'brokers', label: 'Brokers' }]}
+          tabs={[{ value: 'cartera', label: 'Cartera' }, { value: 'ordenes', label: 'Órdenes' }, { value: 'posiciones', label: 'Posiciones' }, { value: 'conexiones', label: 'Conexiones' }, { value: 'brokers', label: 'Brokers' }]}
           value={tab}
           onChange={v => { setTab(v); brokersL.reload(); conexionesL.reload(); }}
           label="Secciones del broker"
         />
       </section>
       <div role="tabpanel">
+        {tab === 'cartera' && <CarteraPaper titulo="Cartera paper" />}
         {tab === 'ordenes' && <OrdenesTab conexionesL={conexionesL} configsL={configsL} />}
         {tab === 'posiciones' && <PosicionesTab conexionesL={conexionesL} />}
         {tab === 'conexiones' && <ConexionesTab brokersL={brokersL} />}
