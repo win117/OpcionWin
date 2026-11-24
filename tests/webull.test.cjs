@@ -24,7 +24,7 @@ test('OCC ↔ pata de Webull', () => {
 test('estados de orden y client_order_id', () => {
   const m = { PENDING: 'enviada', SUBMITTED: 'aceptada', PARTIAL_FILLED: 'parcial', FILLED: 'ejecutada', CANCELLED: 'cancelada', FAILED: 'rechazada' };
   for (const [k, v] of Object.entries(m)) assert.equal(mapearEstadoOrden(k), v);
-  assert.equal(idClienteWebull('abc123'), 'abc123');
+  assert.equal(idClienteWebull('abc1234567'), 'abc1234567'); assert.equal(idClienteWebull('abc123').length, 32); // Webull exige al menos 10 caracteres
   const h = idClienteWebull('key-' + 'x'.repeat(40));
   assert.equal(h.length, 32); assert.equal(h, idClienteWebull('key-' + 'x'.repeat(40)));
 });
@@ -105,6 +105,18 @@ test('flujo con fetch simulado: cuenta, orden, consulta, cancelación y posicion
   const p = await w.posiciones();
   assert.equal(p.length, 2); assert.equal(p[0].simbolo, L('C', 200)); assert.equal(p[0].cantidad, 2); assert.equal(p[0].lado, 'long'); assert.equal(p[0].valorMercado, 600); assert.equal(p[1].simbolo, 'MSFT');
   await assert.rejects(w.consultarOrden('../x'), e => e.codigo === 'VALIDACION');
+});
+
+test('WEBULL_ACCOUNT_ID acepta account_id o número de cuenta; uno desconocido no llega a operar', async () => {
+  const rutas = [];
+  const fetch = async u => { const url = new URL(u); rutas.push(url.pathname + ':' + (url.searchParams.get('account_id') || ''));
+    return new Response(JSON.stringify(url.pathname === '/trading/accounts/list' ? [{ account_id: 'OTRA', account_number: 'N0' }, { account_id: 'IDLARGO', account_number: 'N1' }] : []), { status: 200, headers: { 'Content-Type': 'application/json' } }); };
+  const nuevo = accountId => createWebullClient({ appKey: 'APPKEY123', appSecret: 'SECRET456', accountId, fetch });
+  for (const valor of ['IDLARGO', 'N1']) { await nuevo(valor).posiciones(); assert.equal(rutas.at(-1), '/trading/assets/positions/list:IDLARGO'); }
+  const antes = rutas.length;
+  await assert.rejects(nuevo('N9').posiciones(), e => e.codigo === 'VALIDACION');
+  assert.deepEqual(rutas.slice(antes), ['/trading/accounts/list:']);
+  await assert.rejects(nuevo('').posiciones(), e => e.codigo === 'VALIDACION');
 });
 
 test('errores del proveedor se normalizan sin filtrar secretos', async () => {

@@ -61,10 +61,10 @@ export const pataWebullAOcc = (simbolo, pata) => {
   return `${String(simbolo).toUpperCase()}${f[1].slice(2)}${f[2]}${f[3]}${pata.option_type === 'CALL' ? 'C' : 'P'}${String(Math.round(strike * 1000)).padStart(8, '0')}`;
 };
 
-// client_order_id de Webull: máx. 32 caracteres. Se conserva si es alfanumérico ≤32; si no, hash determinista (idempotencia).
+// client_order_id de Webull: el servidor exige de 10 a 40 y la documentación, máx. 32. Se conserva si es alfanumérico de 10 a 32; si no, hash determinista (idempotencia).
 export const idClienteWebull = clave => {
   const c = String(clave || '');
-  if (/^[A-Za-z0-9]{1,32}$/.test(c)) return c;
+  if (/^[A-Za-z0-9]{10,32}$/.test(c)) return c;
   if (!c) throw validacion('clientOrderId requerido.');
   return createHash('sha256').update(c).digest('hex').slice(0, 32);
 };
@@ -216,13 +216,20 @@ export const createWebullClient = ({
       headers: { ...enviar, 'x-signature': firma, 'x-version': 'v3', ...(token ? { 'x-access-token': token } : {}) } });
   };
 
-  let cuentaIdCache = cuentaCfg || null;
   const listaCuentas = async () => { const l = await trading('/trading/accounts/list'); return Array.isArray(l) ? l : (Array.isArray(l?.accounts) ? l.accounts : []); };
+  // WEBULL_ACCOUNT_ID admite el account_id de la API o el número de cuenta que muestra la web (account_number).
+  let cuentaIdCache = null;
   const idCuenta = async () => {
     if (cuentaIdCache) return cuentaIdCache;
     const l = await listaCuentas();
-    if (l.length !== 1) throw validacion('Define WEBULL_ACCOUNT_ID: la cuenta de Webull no se pudo determinar de forma única.');
-    cuentaIdCache = l[0].account_id;
+    if (cuentaCfg) {
+      const c = l.find(x => x.account_id === cuentaCfg) || l.find(x => x.account_number === cuentaCfg);
+      if (!c) throw validacion('WEBULL_ACCOUNT_ID no coincide con ninguna cuenta de pruebas de Webull (usa el account_id o el número de cuenta).');
+      cuentaIdCache = c.account_id;
+    } else {
+      if (l.length !== 1) throw validacion('Define WEBULL_ACCOUNT_ID: la cuenta de Webull no se pudo determinar de forma única.');
+      cuentaIdCache = l[0].account_id;
+    }
     return cuentaIdCache;
   };
 

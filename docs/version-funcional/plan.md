@@ -156,4 +156,6 @@ Pendiente: validar en vivo con credenciales reales de Webull (crédito multi-pat
 - Ranking: los empates (Iron Condor topado en 100) se resuelven por el factor principal de la estrategia y después el alfabeto.
 - Universo: se retiran FI, HES, ANSS, JNPR, IPG, WBA y CTLT (sin velas suficientes en Alpaca); quedan 485 y 0 fallidos.
 - `api_screener` creada en Supabase y screener verificado ahí. Orden paper real (Iron Condor AAPL) aceptada y cancelada en Alpaca.
-- Webull: rutas, firma y crédito (side SELL, precio positivo) contrastados con developer.webull.com. Pendiente: credenciales paperTrade y prueba real.
+- Webull sandbox verificado con credenciales reales: cuenta, posiciones y resumen (MongoDB y Supabase); `/trading/orders/preview` acepta Call e Iron Condor.
+  `WEBULL_ACCOUNT_ID` admite account_id o número de cuenta; `client_order_id` de 10 a 32 caracteres (si no, hash). `smoke-ticket.cjs <base> <broker>`.
+  Pendiente: envío, cancelación y ejecución en horario de mercado (Webull rechaza fuera de 9:30-16:00 ET).
