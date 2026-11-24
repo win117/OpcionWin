@@ -1,19 +1,32 @@
-import { useMemo, useState } from 'react';
-import { fmtMoney, fmtNum } from '../utils/format';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { ticksRedondos } from '../utils/analisis';
+import { fmtMoney, fmtNum, isNum } from '../utils/format';
 
 // El cálculo (puro y probado) vive en utils/estrategiasOrden.
 export { analyzePayoff, payoffAt } from '../utils/estrategiasOrden';
 
-const W = 640, H = 300, M = { top: 16, right: 16, bottom: 34, left: 64 };
+const H = 240, M = { top: 18, right: 12, bottom: 26, left: 52 };
 
-function ticks(min, max, count = 5) {
-  const step = (max - min) / count;
-  return Array.from({ length: count + 1 }, (_, i) => min + step * i);
+/** Ancho real del contenedor: el dibujo se hace a tamaño 1:1 y el texto no se escala. */
+function useAncho(inicial) {
+  const ref = useRef(null);
+  const [ancho, setAncho] = useState(inicial);
+  useEffect(() => {
+    const obs = new ResizeObserver(([e]) => { const w = Math.round(e.contentRect.width); if (w > 0) setAncho(w); });
+    obs.observe(ref.current);
+    return () => obs.disconnect();
+  }, []);
+  return [ref, Math.max(220, ancho)];
 }
 
-export function PayoffChart({ analysis, spot }) {
+const redondo = v => fmtNum(v, Math.abs(v) < 10 && !Number.isInteger(v) ? 2 : 1);
+
+/** Ganancia o pérdida al vencimiento. `movimiento` = { monto, abajo, arriba }: rango que el mercado espera. */
+export function PayoffChart({ analysis, spot, movimiento }) {
+  const [caja, W] = useAncho(340);
   const [hover, setHover] = useState(null);
-  const geometry = useMemo(() => {
+  const id = useId();
+  const g = useMemo(() => {
     if (!analysis) return null;
     const { points, min, max } = analysis;
     const ys = points.map(p => p[1]);
@@ -25,51 +38,51 @@ export function PayoffChart({ analysis, spot }) {
     const y = v => M.top + (1 - (v - yMin) / (yMax - yMin)) * (H - M.top - M.bottom);
     const line = points.map(([s, v], i) => `${i ? 'L' : 'M'}${x(s).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
     const area = `${line} L${x(max).toFixed(1)},${y(0).toFixed(1)} L${x(min).toFixed(1)},${y(0).toFixed(1)} Z`;
-    return { x, y, line, area, yMin, yMax, y0: y(0) };
-  }, [analysis]);
+    return { x, y, line, area, y0: y(0), ticksY: ticksRedondos(yMin, yMax, 5), ticksX: ticksRedondos(min, max, Math.max(3, Math.floor((W - M.left - M.right) / 62))) };
+  }, [analysis, W]);
 
-  if (!analysis || !geometry) return null;
-  const { x, y, line, area, yMin, yMax, y0 } = geometry;
+  if (!analysis || !g) return null;
+  const { x, y, line, area, y0, ticksY, ticksX } = g;
   const { min, max } = analysis;
+  const dentro = v => Math.max(min, Math.min(max, v));
+  const banda = movimiento && movimiento.arriba > min && movimiento.abajo < max ? [x(dentro(movimiento.abajo)), x(dentro(movimiento.arriba))] : null;
+  const conPrecio = isNum(spot) && spot > min && spot < max;
+  const derecha = conPrecio && x(spot) > W - 90; // la etiqueta no se sale por la derecha
 
   const onMove = event => {
     const rect = event.currentTarget.getBoundingClientRect();
-    const px = ((event.clientX - rect.left) / rect.width) * W;
-    const s = min + ((px - M.left) / (W - M.left - M.right)) * (max - min);
+    const s = min + ((event.clientX - rect.left - M.left) / (W - M.left - M.right)) * (max - min);
     if (s < min || s > max) { setHover(null); return; }
     setHover({ s, v: analysis.points.reduce((best, p) => (Math.abs(p[0] - s) < Math.abs(best[0] - s) ? p : best))[1] });
   };
 
   return (
-    <figure className="payoff">
-      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Gráfico de pago al vencimiento" onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
+    <figure className="payoff" ref={caja}>
+      <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} role="img" aria-label="Ganancia o pérdida al vencimiento según el precio de la acción" onPointerMove={onMove} onPointerLeave={() => setHover(null)}>
         <defs>
-          <clipPath id="payoff-above"><rect x="0" y="0" width={W} height={Math.max(0, y0)} /></clipPath>
-          <clipPath id="payoff-below"><rect x="0" y={y0} width={W} height={Math.max(0, H - y0)} /></clipPath>
+          <clipPath id={id + 'a'}><rect x="0" y="0" width={W} height={Math.max(0, y0)} /></clipPath>
+          <clipPath id={id + 'b'}><rect x="0" y={y0} width={W} height={Math.max(0, H - y0)} /></clipPath>
         </defs>
-        {ticks(yMin, yMax).map(t => (
+        {banda && <rect x={banda[0]} width={Math.max(0, banda[1] - banda[0])} y={M.top} height={H - M.top - M.bottom} className="payoff__banda" />}
+        {ticksY.map(t => (
           <g key={'y' + t}>
-            <line x1={M.left} x2={W - M.right} y1={y(t)} y2={y(t)} className="chart__grid" />
-            <text x={M.left - 8} y={y(t) + 4} textAnchor="end" className="chart__tick">{fmtNum(t, 0)}</text>
+            {t !== 0 && <line x1={M.left} x2={W - M.right} y1={y(t)} y2={y(t)} className="chart__grid" />}
+            <text x={M.left - 6} y={y(t) + 4} textAnchor="end" className={'chart__tick' + (t === 0 ? ' chart__tick--cero' : '')}>{t === 0 ? '$0' : redondo(t)}</text>
           </g>
         ))}
-        {ticks(min, max).map(t => (
-          <text key={'x' + t} x={x(t)} y={H - 12} textAnchor="middle" className="chart__tick">{fmtNum(t, 2)}</text>
-        ))}
-        <path d={area} className="payoff__area payoff__area--gain" clipPath="url(#payoff-above)" />
-        <path d={area} className="payoff__area payoff__area--loss" clipPath="url(#payoff-below)" />
+        {ticksX.map(t => <text key={'x' + t} x={x(t)} y={H - 8} textAnchor="middle" className="chart__tick">{redondo(t)}</text>)}
+        <path d={area} className="payoff__area payoff__area--gain" clipPath={`url(#${id}a)`} />
+        <path d={area} className="payoff__area payoff__area--loss" clipPath={`url(#${id}b)`} />
         <line x1={M.left} x2={W - M.right} y1={y0} y2={y0} className="chart__zero" />
-        {analysis.strikes.map((k, i) => (
-          <line key={'k' + i} x1={x(k)} x2={x(k)} y1={M.top} y2={H - M.bottom} className="payoff__strike" />
-        ))}
-        {spot > min && spot < max && (
+        {analysis.strikes.map((k, i) => <line key={'k' + i} x1={x(k)} x2={x(k)} y1={M.top} y2={H - M.bottom} className="payoff__strike" />)}
+        {conPrecio && (
           <g>
             <line x1={x(spot)} x2={x(spot)} y1={M.top} y2={H - M.bottom} className="payoff__spot" />
-            <text x={x(spot) + 4} y={M.top + 10} className="chart__tick">subyacente</text>
+            <text x={x(spot)} y={M.top - 6} textAnchor={derecha ? 'end' : 'middle'} className="chart__tick">hoy {redondo(spot)}</text>
           </g>
         )}
         <path d={line} className="payoff__line" />
-        {analysis.breakevens.map(b => <circle key={'b' + b} cx={x(b)} cy={y0} r="4" className="payoff__be" />)}
+        {analysis.breakevens.filter(b => b >= min && b <= max).map(b => <circle key={'b' + b} cx={x(b)} cy={y0} r="4" className="payoff__be" />)}
         {hover && (
           <g>
             <line x1={x(hover.s)} x2={x(hover.s)} y1={M.top} y2={H - M.bottom} className="chart__cursor" />
@@ -77,10 +90,13 @@ export function PayoffChart({ analysis, spot }) {
           </g>
         )}
       </svg>
-      <figcaption className="muted">
-        {hover
-          ? <>Subyacente {fmtMoney(hover.s)} → P/L {fmtMoney(hover.v)}</>
-          : <>Eje X: precio del subyacente al vencimiento · Eje Y: ganancia/pérdida (USD). Líneas punteadas: strikes; puntos: breakevens.</>}
+      <figcaption className="muted small">
+        <span className="payoff__lectura">{hover ? <>Si la acción vence en {fmtMoney(hover.s)}: {fmtMoney(hover.v)}</> : 'Ganancia o pérdida en dólares al vencimiento, según el precio de la acción.'}</span>
+        <span className="payoff__leyenda">
+          <span><i className="payoff__clave payoff__clave--be" /> equilibrio</span>
+          <span><i className="payoff__clave payoff__clave--strike" /> strike</span>
+          {movimiento && <span><i className="payoff__clave payoff__clave--banda" /> movimiento esperado ±{fmtMoney(movimiento.monto)}</span>}
+        </span>
       </figcaption>
     </figure>
   );
