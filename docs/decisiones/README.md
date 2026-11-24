@@ -121,7 +121,20 @@ El sector es una agrupación del código SIC, menos fina que GICS. Con dos clase
 **Propuesta.** (a) Iron Condor centrado en 50 y multiplicado por el acuerdo; IV/HV centrado en 1.15. (b) Cada core devuelve su neutralidad propia.
 (c) Ajuste IV/HV ≤ 0 si hay resultados antes del vencimiento (falta una fuente de fechas). (d) Penalizar Call/Put cuando la IV es alta.
 (e) Acercar el puntaje a 50 según la confianza. Se calibran juntas porque interactúan.
-**Estado.** Requiere decisión del usuario: cambia todos los puntajes y el Top 5.
+**Estado: NO SE APLICA (2026-11-24).** El usuario pidió aplicarla solo si la mejora es real. Se probó con datos históricos y no lo es.
+
+**Prueba** (`scripts/backtest/datos.cjs` y `analisis.py`; reproducible: `node scripts/backtest/datos.cjs CARPETA fund` y `python scripts/backtest/analisis.py CARPETA`).
+500 empresas, 105 fines de mes de 2018-01 a 2026-09, 48 715 observaciones; cada core se evaluó solo con lo conocido ese día. Resultado a 25 sesiones en
+unidades de volatilidad esperada (media geométrica de HV20 y HV60): Call y Put gana si se mueve más de 0.40 σ a su favor; Iron Condor, si queda dentro de ±0.84 σ.
+- Correlación entre puntaje y resultado (por fecha): Call −0.014 / +0.001, Put −0.004 / −0.007, Iron Condor +0.013 / **−0.026** (2018-22 / 2023-26).
+  Con la propuesta: −0.014 / +0.001, −0.004 / −0.007, +0.018 / −0.024. Es decir, prácticamente cero en ambas.
+- Ventaja de la estrategia elegida con puntaje ≥ 60: actual −0.016 / −0.036 σ; propuesta −0.026 / −0.039 σ. Ninguna es positiva.
+- Agregar Fundamental no cambia la conclusión. Ningún core por separado muestra correlación distinta de cero (|t| < 1).
+- La mediana histórica de la neutralidad es 0.48; el 0.60 de la propuesta era una elección sin respaldo.
+**Límites de la prueba.** Solo técnico, indicadores y fundamental (no hay IV histórica; noticias y 13F no se reconstruyeron); empresas actuales (sesgo de
+supervivencia); fundamentales fechados de forma conservadora; un solo horizonte. No demuestra que los cinco juntos no sirvan: demuestra que no hay evidencia
+de que los probados predigan, y que la recalibración no mejora.
+**Consecuencia.** El puntaje describe qué tan alineados están los factores hoy; no es una probabilidad de ganar.
 
 ## ADR-015 · El ranking y el análisis deciden con los cinco cores
 **Contexto.** El Top 5 usaba solo técnico e indicadores, y Análisis omitía Institucional por defecto mostrando cobertura 100 %. La decisión debe salir del conjunto.

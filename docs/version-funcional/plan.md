@@ -191,3 +191,6 @@ Tres auditorías (funcionalidad/seguridad, cores/finanzas, diseño) y mejoras en
 
 ### 2026-11-24 · Ajustes pedidos tras revisar Render
 Inicio con las 5 mejores antes del mapa; buscador con coincidencias (tolera errores; Enter no analiza a ciegas); historico del consolidado desde 2016 con carga automatica por rango; soportes y resistencias con extremos del periodo y visitas; rotulos de la grafica sin encimarse.
+
+### 2026-11-24 · Backtest de la recalibración (ADR-014)
+La propuesta no mejora la predicción frente a la fórmula vigente y no se aplica. Detalle y método en el ADR.
