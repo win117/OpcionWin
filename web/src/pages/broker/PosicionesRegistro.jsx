@@ -31,7 +31,7 @@ export function PosicionesRegistro({ conexionesL, conexionId }) {
       )}
       columns={[
         { key: 'contrato', label: 'Contrato', render: r => contratoLabel(contratosL.byId.get(r.contratoId)) || <code>{shortId(r.contratoId)}</code> },
-        { key: 'lado', label: 'Lado', render: r => <Badge value={r.lado} tone={r.lado === 'long' ? 'success' : 'danger'} /> },
+        { key: 'lado', label: 'Lado', render: r => (r.lado ? <Badge value={r.lado} tone={r.lado === 'long' ? 'success' : 'danger'} /> : '—') },
         { key: 'cantidad', label: 'Cantidad', align: 'right', render: r => fmtNum(r.cantidad, 2) },
         { key: 'precio', label: 'Precio promedio', align: 'right', render: r => fmtMoney(r.precioPromedio) },
         { key: 'conexion', label: 'Conexión', render: r => conexionesL.byId.get(r.conexionId)?.alias || '—' },

@@ -6,6 +6,7 @@ import { ordenes, configuraciones, contratos, acciones } from '../../api/resourc
 import { ESTADOS_ORDEN } from '../../utils/constants';
 import { fmtDateTime, fmtMoney, shortId } from '../../utils/format';
 import { uuid } from '../../utils/objects';
+import { ejecutado } from './ejecutado';
 
 /* ---------- Órdenes ---------- */
 async function construirOrden(payload, record) {
@@ -41,6 +42,8 @@ export function OrdenesRegistro({ conexionesL, configsL, conexionId }) {
   };
 
   const pendiente = r => r.estado === 'pendiente';
+  const editable = r => pendiente(r) && !r.eventos?.length; // tras el primer envío ya no se edita
+  const terminal = r => ['ejecutada', 'cancelada', 'rechazada', 'expirada'].includes(r.estado);
   return (
     <>
       <ResourceManager
@@ -50,8 +53,8 @@ export function OrdenesRegistro({ conexionesL, configsL, conexionId }) {
         sortDesc="createdAt"
         searchable={false}
         nameOf={r => 'la orden ' + shortId(r._id)}
-        canEdit={pendiente}
-        canDelete={pendiente}
+        canEdit={editable}
+        canDelete={terminal}
         filters={[{ name: 'estado', label: 'Estado', options: ESTADOS_ORDEN.map(e => ({ value: e, label: e })) }]}
         transform={construirOrden}
         fields={[
@@ -68,6 +71,7 @@ export function OrdenesRegistro({ conexionesL, configsL, conexionId }) {
           { key: 'conexion', label: 'Conexión', render: r => conexionesL.byId.get(r.conexionId)?.alias || '—' },
           { key: 'tipo', label: 'Tipo', render: r => `${r.tipo}${r.tipo === 'limit' ? ' ' + fmtMoney(r.precioLimite) : ''} · ${r.vigencia}` },
           { key: 'cantidad', label: 'Cant.', align: 'right' },
+          { key: 'ejecutado', label: 'Ejecutado', align: 'right', render: ejecutado },
           { key: 'patas', label: 'Patas', align: 'right', render: r => r.componentes?.length ?? 0 },
           { key: 'estado', label: 'Estado', render: r => <Badge value={r.estado} /> },
           { key: 'externa', label: 'ID broker', render: r => r.ordenExternaId ? <code>{shortId(r.ordenExternaId)}</code> : '—' },
@@ -75,14 +79,14 @@ export function OrdenesRegistro({ conexionesL, configsL, conexionId }) {
         rowActions={(row, reload) => (
           <>
             {pendiente(row) && <button type="button" className="btn btn--sm btn--primary" onClick={() => setConfirm({ tipo: 'envio', orden: row, reload })}>Enviar (paper)</button>}
-            {['enviada', 'aceptada', 'parcial'].includes(row.estado) && <button type="button" className="btn btn--sm btn--danger-ghost" onClick={() => setConfirm({ tipo: 'cancelacion', orden: row, reload })}>Cancelar</button>}
+            {!terminal(row) && <button type="button" className="btn btn--sm btn--danger-ghost" onClick={() => setConfirm({ tipo: 'cancelacion', orden: row, reload })}>Cancelar</button>}
             <button type="button" className="btn btn--sm" onClick={() => setEventos(row)}>Detalle</button>
           </>
         )}
       />
       <ConfirmDialog
         open={Boolean(confirm)}
-        title={confirm?.tipo === 'envio' ? 'Enviar orden a Alpaca paper' : 'Cancelar orden'}
+        title={confirm?.tipo === 'envio' ? 'Enviar orden al broker (paper)' : 'Cancelar orden'}
         tone={confirm?.tipo === 'envio' ? 'primary' : 'danger'}
         confirmLabel={confirm?.tipo === 'envio' ? 'Enviar (paper)' : 'Cancelar orden'}
         busy={state.busy}
@@ -91,7 +95,7 @@ export function OrdenesRegistro({ conexionesL, configsL, conexionId }) {
         onClose={() => { setConfirm(null); setState({ busy: false, error: null }); }}
         message={confirm?.tipo === 'envio'
           ? <>Se enviará la orden a la cuenta <strong>paper</strong> (sin dinero real). Clave de idempotencia: <code>{confirm.orden.idempotencyKey}</code>. Reintentar con la misma clave no duplica la orden.</>
-          : <>Se solicitará al broker la cancelación de la orden {shortId(confirm?.orden._id)}.</>}
+          : <>Se comprobará la orden {shortId(confirm?.orden._id)} en el broker y se cancelará.</>}
       />
       <Modal open={Boolean(eventos)} title="Detalle de la orden" onClose={() => setEventos(null)} size="lg">
         {eventos && (
@@ -104,6 +108,7 @@ export function OrdenesRegistro({ conexionesL, configsL, conexionId }) {
             {eventos.eventos?.length ? (
               <ul className="list">{eventos.eventos.map(e => <li key={e._id}>{fmtDateTime(e.fecha)} · <strong>{e.tipo}</strong>{e.mensaje ? ' · ' + e.mensaje : ''}</li>)}</ul>
             ) : <p className="muted">Sin eventos registrados.</p>}
+            <p className="small">Ejecutado: <strong>{ejecutado(eventos)}</strong></p>
             <p className="muted small">Idempotency-Key: <code>{eventos.idempotencyKey}</code></p>
           </div>
         )}

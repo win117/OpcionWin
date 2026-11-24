@@ -172,5 +172,7 @@ export const operacion = {
   resumen: broker => api.get('/broker/paper/resumen' + qs({ broker })),
   ticket: (body, key) => api.post('/ordenes/ticket', body, { headers: { 'Idempotency-Key': key } }),
   cerrarPosicion: (id, body, key) => api.post(`/posiciones/${enc(id)}/cierre`, body, { headers: { 'Idempotency-Key': key } }),
+  cerrarGrupo: (body, key) => api.post('/posiciones/cierre-grupo', body, { headers: { 'Idempotency-Key': key } }),
   orden: id => api.get(`/ordenes/${enc(id)}`),
+  actualizarOrden: id => api.post(`/ordenes/${enc(id)}/actualizacion`), // refresca solo esa orden contra el broker
 };

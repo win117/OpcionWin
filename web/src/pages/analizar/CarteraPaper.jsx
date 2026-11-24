@@ -1,5 +1,5 @@
-// Cartera paper: cuenta, posiciones abiertas (con cierre) y órdenes recientes (con cancelación).
-import { useEffect, useRef, useState } from 'react';
+// Cartera paper: cuenta, posiciones abiertas (cierre por pata o por estructura) y órdenes recientes (con cancelación).
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { Badge } from '../../components/Badge';
 import { Field } from '../../components/Field';
 import { Modal } from '../../components/Modal';
@@ -8,6 +8,7 @@ import { useAsync } from '../../hooks/useAsync';
 import { acciones, operacion } from '../../api/resources';
 import { fmtDate, fmtDateTime, fmtFixed, fmtMoney, fmtPct, isNum } from '../../utils/format';
 import { uuid } from '../../utils/objects';
+import { ejecutado } from '../broker/ejecutado';
 
 const CANCELABLES = ['pendiente', 'enviada', 'aceptada', 'parcial'];
 const REFRESH_MS = 30000;
@@ -19,59 +20,108 @@ function resumenPatas(o) {
   return (o.componentes || []).map(c => `${c.accion === 'sell' ? 'Vender' : 'Comprar'} ${c.simbolo}`).join(' · ') || '—';
 }
 
-function CerrarModal({ posicion, onClose, onDone }) {
-  const [tipo, setTipo] = useState('market');
-  const [limite, setLimite] = useState('');
+const mcd = (a, b) => (b ? mcd(b, a % b) : a);
+const netoSigno = p => (p.lado === 'short' ? -1 : 1); // cerrar un largo cobra; cerrar un corto paga
+
+/** Agrupa las patas de una misma estructura: grupo del broker o mismo subyacente y vencimiento. */
+function agrupar(posiciones) {
+  const grupos = new Map();
+  posiciones.forEach((p, i) => {
+    const clave = p.grupoId ? 'g:' + p.grupoId : p.tipo && p.vencimiento ? p.subyacente + '|' + p.vencimiento : 'u:' + i;
+    grupos.set(clave, [...(grupos.get(clave) || []), p]);
+  });
+  return [...grupos.values()];
+}
+
+/** Cerrar solo esta pata larga dejaría más opciones cortas que largas del mismo tipo. */
+function dejaCortaDescubierta(p, grupo) {
+  if (p.lado !== 'long') return false;
+  const resto = grupo.filter(x => x !== p && x.tipo === p.tipo);
+  const suma = lado => resto.filter(x => x.lado === lado).reduce((n, x) => n + (x.cantidad || 0), 0);
+  return suma('short') > suma('long');
+}
+
+const puedeCerrarGrupo = g => g.length >= 2 && g.length <= 4 && new Set(g.map(p => p.contratoId)).size === g.length && g.every(p => p.posicionId && p.cerrable !== false);
+const motivoNoCerrable = p => (!p.posicionId ? 'Posición no sincronizada: sincroniza posiciones para poder cerrarla'
+  : p.cerrable === false ? 'El broker no informa el lado o la cantidad de esta pata: ciérrala en su plataforma' : undefined);
+
+/** Cierre de una posición o de una estructura completa (una sola orden). `cierre`: { posiciones, grupo }. */
+function CerrarModal({ cierre, onClose, onDone }) {
+  const { posiciones, grupo } = cierre;
+  const esGrupo = posiciones.length > 1;
+  const unidades = posiciones.map(p => p.cantidad).reduce(mcd);
+  const conPrecio = posiciones.every(p => isNum(p.precioActual));
+  const neto = conPrecio ? posiciones.reduce((n, p) => n + netoSigno(p) * p.precioActual * p.cantidad, 0) / unidades : null;
+  const [tipo, setTipo] = useState(esGrupo ? 'limit' : 'market');
+  const [limite, setLimite] = useState(esGrupo && isNum(neto) && Math.abs(neto) >= 0.01 ? Math.abs(neto).toFixed(2) : '');
+  const [sentido, setSentido] = useState(isNum(neto) ? (neto >= 0 ? 'credito' : 'debito') : '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [ok, setOk] = useState(null);
   const clave = useRef(null);
-  const p = posicion;
-  const largo = p?.lado !== 'short';
-  const unit = tipo === 'limit' && Number(limite) > 0 ? Number(limite) : p?.precioActual;
-  const monto = isNum(unit) && p ? unit * 100 * p.cantidad : null;
+  const editar = fn => v => { clave.current = null; setError(null); fn(v); }; // otros datos = otra clave de idempotencia
+  const cobra = esGrupo ? sentido === 'credito' : posiciones[0].lado !== 'short';
+  const unit = tipo === 'limit' && Number(limite) > 0 ? Number(limite) : isNum(neto) ? Math.abs(neto) : null;
+  const monto = isNum(unit) ? unit * 100 * unidades : null;
   const limiteOk = tipo === 'market' || Number(limite) > 0;
+  const listo = limiteOk && (!esGrupo || sentido);
+  const descubre = !esGrupo && dejaCortaDescubierta(posiciones[0], grupo);
 
   const confirmar = async () => {
     if (!clave.current) clave.current = uuid(); // se reutiliza en reintentos
     setBusy(true); setError(null);
+    const body = { tipo, ...(tipo === 'limit' ? { precioLimite: Number(limite) } : {}) };
     try {
-      const orden = await operacion.cerrarPosicion(p.posicionId, { tipo, ...(tipo === 'limit' ? { precioLimite: Number(limite) } : {}) }, clave.current);
-      setOk(orden?.orden || orden);
+      const r = esGrupo
+        ? await operacion.cerrarGrupo({ ...body, posicionIds: posiciones.map(p => p.posicionId), credito: sentido === 'credito' }, clave.current)
+        : await operacion.cerrarPosicion(posiciones[0].posicionId, body, clave.current);
+      setOk(r?.orden || r);
       onDone?.();
     } catch (e) { setError(e); } finally { setBusy(false); }
   };
 
   return (
-    <Modal open={Boolean(p)} title="Cerrar posición" onClose={onClose} size="sm"
+    <Modal open title={esGrupo ? 'Cerrar estructura' : 'Cerrar posición'} onClose={onClose} size="sm"
       footer={ok ? <button type="button" className="btn btn--primary" onClick={onClose}>Cerrar ventana</button> : (
         <>
           <button type="button" className="btn" onClick={onClose} disabled={busy}>Cancelar</button>
-          <button type="button" className="btn btn--danger" onClick={confirmar} disabled={busy || !limiteOk}>{busy ? 'Enviando…' : 'Confirmar cierre (paper)'}</button>
+          <button type="button" className="btn btn--danger" onClick={confirmar} disabled={busy || !listo}>{busy ? 'Enviando…' : 'Confirmar cierre (paper)'}</button>
         </>
       )}>
-      {p && (
-        <div className="stack">
-          <div className="banner-paper" role="note"><strong>PAPER · dinero simulado.</strong></div>
-          {ok ? (
-            <div className="alert alert--success" role="status">Orden de cierre enviada. Estado: <Badge value={ok.estado || 'enviada'} />.</div>
-          ) : (
-            <>
-              <p>{largo ? 'Vender' : 'Comprar'} {p.cantidad} × <strong>{p.simbolo}</strong> para cerrar la posición {p.lado}.</p>
-              <Field label="Tipo de orden">
-                <select value={tipo} onChange={e => setTipo(e.target.value)}><option value="market">Mercado</option><option value="limit">Límite</option></select>
+      <div className="stack">
+        <div className="banner-paper" role="note"><strong>PAPER · dinero simulado.</strong></div>
+        {ok ? (
+          <div className={'alert ' + (ok.estado === 'rechazada' ? 'alert--danger' : 'alert--success')} role="status">
+            {ok.estado === 'rechazada' ? 'El broker rechazó la orden de cierre.' : 'Orden de cierre enviada.'} Estado: <Badge value={ok.estado || 'enviada'} />.
+          </div>
+        ) : (
+          <>
+            {esGrupo && <p>Una sola orden cierra las {posiciones.length} patas:</p>}
+            <ul className="list">
+              {posiciones.map(p => <li key={p.posicionId}>{p.lado === 'short' ? 'Comprar' : 'Vender'} {p.cantidad} × <strong>{p.simbolo}</strong> para cerrar la posición {p.lado}.</li>)}
+            </ul>
+            {descubre && <div className="alert alert--warning" role="alert">Esta pata cubre una opción vendida del mismo vencimiento: si la cierras sola, la pata corta queda descubierta. Considera «Cerrar estructura».</div>}
+            <Field label="Tipo de orden">
+              <select value={tipo} onChange={e => editar(setTipo)(e.target.value)}><option value="market">Mercado</option><option value="limit">Límite</option></select>
+            </Field>
+            {esGrupo && (
+              <Field label="Neto del cierre" error={sentido ? null : 'Elige si cobras o pagas'}>
+                <select value={sentido} onChange={e => editar(setSentido)(e.target.value)}>
+                  {!sentido && <option value="">Elige…</option>}
+                  <option value="credito">Crédito (cobras)</option><option value="debito">Débito (pagas)</option>
+                </select>
               </Field>
-              {tipo === 'limit' && (
-                <Field label="Precio límite por contrato" error={limiteOk ? null : 'Mayor que cero'}>
-                  <input type="number" min="0.01" step="0.01" value={limite} onChange={e => setLimite(e.target.value)} inputMode="decimal" />
-                </Field>
-              )}
-              <p className="small">{largo ? 'Producto estimado' : 'Costo estimado'}: <strong>{isNum(monto) ? fmtMoney(monto) : '—'}</strong> <span className="muted">(precio {isNum(unit) ? fmtFixed(unit) : '—'} × 100 × {p.cantidad})</span></p>
-              {error && <div className="alert alert--danger" role="alert">{error.message} Puedes reintentar con seguridad (misma clave de idempotencia).</div>}
-            </>
-          )}
-        </div>
-      )}
+            )}
+            {tipo === 'limit' && (
+              <Field label={esGrupo ? 'Precio límite neto por unidad' : 'Precio límite por contrato'} error={limiteOk ? null : 'Mayor que cero'}>
+                <input type="number" min="0.01" step="0.01" value={limite} onChange={e => editar(setLimite)(e.target.value)} inputMode="decimal" />
+              </Field>
+            )}
+            <p className="small">{cobra ? 'Producto estimado' : 'Costo estimado'}: <strong>{isNum(monto) ? fmtMoney(monto) : '—'}</strong> <span className="muted">(precio {isNum(unit) ? fmtFixed(unit) : '—'} × 100 × {unidades})</span></p>
+            {error && <div className="alert alert--danger" role="alert">{error.message} Puedes reintentar con seguridad (misma clave de idempotencia).</div>}
+          </>
+        )}
+      </div>
     </Modal>
   );
 }
@@ -111,6 +161,7 @@ export default function CarteraPaper({ titulo = 'Cartera paper', broker, vista =
         {st.error && !d && <ErrorMessage error={st.error} onRetry={st.reload} title="No se pudo cargar la cartera" />}
         {st.loading && !d && <p className="muted" role="status"><Spinner small /> Cargando cartera…</p>}
         {st.error && d && <p className="small down" role="alert">No se pudo actualizar: {st.error.message}</p>}
+        {d?.avisoSincronizacion && <div className="alert alert--warning" role="alert">{d.avisoSincronizacion}</div>}
         {errAccion && <ErrorMessage error={errAccion} title="No se pudo cancelar" />}
         {d && (
           <>
@@ -131,21 +182,31 @@ export default function CarteraPaper({ titulo = 'Cartera paper', broker, vista =
                   <caption className="sr-only">Posiciones abiertas</caption>
                   <thead><tr><th scope="col">Contrato</th><th scope="col">Subyac.</th><th scope="col">Tipo</th><th scope="col" className="num">Strike</th><th scope="col">Venc.</th><th scope="col">Lado</th><th scope="col" className="num">Cant.</th><th scope="col" className="num">Prom.</th><th scope="col" className="num">Actual</th><th scope="col" className="num">P/L</th><th scope="col" className="num">P/L %</th><th scope="col"><span className="sr-only">Acciones</span></th></tr></thead>
                   <tbody>
-                    {posiciones.map((p, i) => (
+                    {agrupar(posiciones).map((g, gi) => (
+                    <Fragment key={gi}>
+                    {g.length > 1 && (
+                      <tr>
+                        <th scope="rowgroup" colSpan={11}>{g[0].subyacente} · {fmtDate(g[0].vencimiento)} · {g.length} patas</th>
+                        <td><button type="button" className="btn btn--sm btn--primary" onClick={() => setCerrar({ posiciones: g, grupo: g })} disabled={!puedeCerrarGrupo(g)} title={puedeCerrarGrupo(g) ? undefined : g.length > 4 ? 'Más de 4 patas: ciérralas por separado' : 'Alguna pata no se puede cerrar desde aquí'} aria-label={`Cerrar estructura ${g[0].subyacente} ${g[0].vencimiento}`}>Cerrar estructura</button></td>
+                      </tr>
+                    )}
+                    {g.map((p, i) => (
                       <tr key={p.posicionId || p.simbolo + i}>
                         <td><code>{p.simbolo}</code></td>
                         <td>{p.subyacente}</td>
-                        <td>{p.tipo === 'put' ? 'Put' : 'Call'}</td>
+                        <td>{p.tipo === 'put' ? 'Put' : p.tipo === 'call' ? 'Call' : '—'}</td>
                         <td className="num">{fmtFixed(p.strike)}</td>
                         <td>{fmtDate(p.vencimiento)}</td>
-                        <td><Badge value={p.lado} tone={p.lado === 'short' ? 'warning' : 'info'} /></td>
-                        <td className="num">{p.cantidad}</td>
+                        <td>{p.lado ? <Badge value={p.lado} tone={p.lado === 'short' ? 'warning' : 'info'} /> : '—'}</td>
+                        <td className="num">{p.cantidad ?? '—'}</td>
                         <td className="num">{fmtMoney(p.precioPromedio)}</td>
                         <td className="num">{fmtMoney(p.precioActual)}</td>
                         <td className={'num ' + cls(p.pl)}>{pl(p.pl)}</td>
                         <td className={'num ' + cls(p.plPct)}>{isNum(p.plPct) ? (p.plPct >= 0 ? '+' : '−') + fmtPct(Math.abs(p.plPct) / 100, 1) : '—'}</td>
-                        <td><button type="button" className="btn btn--sm" onClick={() => setCerrar(p)} disabled={!p.posicionId} title={p.posicionId ? undefined : 'Posición no sincronizada: sincroniza posiciones para poder cerrarla'} aria-label={'Cerrar ' + p.simbolo}>Cerrar</button></td>
+                        <td><button type="button" className="btn btn--sm" onClick={() => setCerrar({ posiciones: [p], grupo: g })} disabled={Boolean(motivoNoCerrable(p))} title={motivoNoCerrable(p)} aria-label={'Cerrar ' + p.simbolo}>Cerrar</button></td>
                       </tr>
+                    ))}
+                    </Fragment>
                     ))}
                   </tbody>
                 </table>
@@ -157,7 +218,7 @@ export default function CarteraPaper({ titulo = 'Cartera paper', broker, vista =
               <div className="table-wrap">
                 <table className="table table--dense">
                   <caption className="sr-only">Órdenes recientes</caption>
-                  <thead><tr><th scope="col">Estado</th><th scope="col">Patas</th><th scope="col" className="num">Cant.</th><th scope="col" className="num">Límite</th><th scope="col">Fecha</th><th scope="col">Último evento</th><th scope="col"><span className="sr-only">Acciones</span></th></tr></thead>
+                  <thead><tr><th scope="col">Estado</th><th scope="col">Patas</th><th scope="col" className="num">Cant.</th><th scope="col" className="num">Límite</th><th scope="col" className="num">Ejecutado</th><th scope="col">Fecha</th><th scope="col">Último evento</th><th scope="col"><span className="sr-only">Acciones</span></th></tr></thead>
                   <tbody>
                     {ordenes.map(o => {
                       const ev = o.eventos?.length ? o.eventos[o.eventos.length - 1] : null;
@@ -167,6 +228,7 @@ export default function CarteraPaper({ titulo = 'Cartera paper', broker, vista =
                           <td>{resumenPatas(o)}</td>
                           <td className="num">{o.cantidad ?? '—'}</td>
                           <td className="num">{isNum(o.precioLimite) ? fmtMoney(o.precioLimite) : o.tipo === 'market' ? 'Mercado' : '—'}</td>
+                          <td className="num">{ejecutado(o)}</td>
                           <td>{fmtDateTime(o.createdAt)}</td>
                           <td className="small">{ev?.mensaje || '—'}</td>
                           <td>{CANCELABLES.includes(o.estado) && <button type="button" className="btn btn--sm" onClick={() => cancelar(o)} disabled={cancelando === o._id} aria-label={'Cancelar orden ' + resumenPatas(o)}>{cancelando === o._id ? 'Cancelando…' : 'Cancelar'}</button>}</td>
@@ -180,7 +242,7 @@ export default function CarteraPaper({ titulo = 'Cartera paper', broker, vista =
           </>
         )}
       </div>
-      {cerrar && <CerrarModal posicion={cerrar} onClose={() => setCerrar(null)} onDone={st.reload} />}
+      {cerrar && <CerrarModal cierre={cerrar} onClose={() => setCerrar(null)} onDone={st.reload} />}
     </section>
   );
 }
