@@ -97,6 +97,8 @@ export const mercado = {
   cadena: (simbolo, params) => api.get(`/mercado/opciones/cadena/${sym(simbolo)}` + qs(params)),
   opcionesResumen: (simbolo, params) => api.get(`/mercado/opciones/resumen/${sym(simbolo)}` + qs(params)),
   estado: () => api.get('/mercado/estado'),
+  mapa: () => api.get('/mercado/mapa'),
+  ficha: simbolo => api.get(`/mercado/mapa/${sym(simbolo)}`),
 };
 
 /**
@@ -117,10 +119,8 @@ export async function cargarEstadoMercado() {
   }
 }
 
-// Screener sobre el universo precargado (~500 empresas): sincronización y ranking por estrategia.
+// Ranking por estrategia del universo; el servidor lo calcula y actualiza solo.
 export const screener = {
-  sincronizarUniverso: body => api.post('/screener/universo/sincronizaciones', body),
-  sincronizacion: id => api.get(`/screener/universo/sincronizaciones/${enc(id)}`),
   ranking: params => api.get('/screener/ranking' + qs(params)),
 };
 

@@ -3,10 +3,12 @@ import controller from '../controllers/mercado.controller';
 import { forRepository as empresas } from '../controllers/empresas.controller';
 import { forRepository as contratos } from '../controllers/contratos.controller';
 import { forRepository as noticias } from '../controllers/noticias.controller';
-export default ({factory, integraciones}={})=>{
-  const router=Router(), c=controller(factory, integraciones);
+export default ({factory, integraciones, universo}={})=>{
+  const router=Router(), c=controller(factory, integraciones, universo);
   router.get('/empresas',empresas(factory).list);
   router.get('/estado',c.estado);
+  router.get('/mapa',c.mapa);
+  router.get('/mapa/:simbolo',c.ficha);
   router.get('/panorama',c.panorama);
   router.get('/cotizaciones/:simbolo/en-vivo',c.liveQuote);
   router.get('/cotizaciones/:simbolo',c.quotes);

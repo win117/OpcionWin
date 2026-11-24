@@ -304,14 +304,14 @@ export const createAlpacaClient = ({
   };
 
   // Velas de varios símbolos en pocas solicitudes (endpoint multi-símbolo). Devuelve { SIMBOLO: [vela] } (solo con datos).
-  const velasLote = async (simbolos, { intervalo = '1Day', desde, hasta, ajuste = 'split' } = {}) => {
+  const velasLote = async (simbolos, { intervalo = '1Day', desde, hasta, ajuste = 'split', feed: feedVelas = feed } = {}) => {
     const lista = [...new Set((Array.isArray(simbolos) ? simbolos : []).map(exigirSimbolo))];
     const salida = {};
     if (!lista.length) return salida;
     const pares = await paginar(
       token => datos('/v2/stocks/bars', {
         symbols: lista, timeframe: intervalo, start: desde, end: hasta,
-        limit: 10000, feed, adjustment: ajuste, sort: 'asc', page_token: token,
+        limit: 10000, feed: feedVelas, adjustment: ajuste, sort: 'asc', page_token: token,
       }),
       cuerpo => Object.entries(cuerpo.bars || {}).flatMap(([s, barras]) => (barras || []).map(b => [s, normalizarVela(b)])),
       Infinity, 60,
@@ -321,16 +321,17 @@ export const createAlpacaClient = ({
   };
 
   // Snapshots de varios símbolos en una solicitud. Devuelve { SIMBOLO: { ultimo, cierreAnterior, cierre, volumen, fechaDato } }.
-  const cotizacionesLote = async simbolos => {
+  const cotizacionesLote = async (simbolos, { feed: feedCotizacion = feed } = {}) => {
     const lista = [...new Set((Array.isArray(simbolos) ? simbolos : []).map(exigirSimbolo))];
     const salida = {};
     if (!lista.length) return salida;
-    const cuerpo = await datos('/v2/stocks/snapshots', { symbols: lista, feed });
+    const cuerpo = await datos('/v2/stocks/snapshots', { symbols: lista, feed: feedCotizacion });
     for (const [s, snap] of Object.entries(cuerpo || {})) {
       if (!snap) continue;
       salida[s] = {
         ultimo: num(snap.latestTrade?.p), cierre: num(snap.dailyBar?.c), cierreAnterior: num(snap.prevDailyBar?.c),
         volumen: num(snap.dailyBar?.v), fechaDato: snap.latestTrade?.t || snap.dailyBar?.t || null,
+        apertura: num(snap.dailyBar?.o), maximo: num(snap.dailyBar?.h), minimo: num(snap.dailyBar?.l), fechaSesion: snap.dailyBar?.t || null,
       };
     }
     return salida;

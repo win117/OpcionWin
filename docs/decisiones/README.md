@@ -99,3 +99,12 @@ que es el comportamiento buscado. El modelo Confluencia no guarda `metricas`: la
 **Debate abierto.** El factor A es lineal en D; podría usarse A² para castigar más el desacuerdo. Calibrar con resultados históricos
 cuando exista un registro de evaluaciones y precios posteriores. El centro del ajuste IV/HV en 1.0 ignora la prima de riesgo de
 varianza (IV/HV ≈ 1.1–1.2 es habitual), lo que favorece levemente al Iron Condor.
+
+## ADR-013 · Universo obtenido de los proveedores y calculado por el servidor
+**Contexto.** El screener partía de una lista fija de símbolos, que envejeció (empresas que ya no cotizan), y cada usuario debía cargarla a mano.
+**Decisión.** El universo se obtiene: activos con opciones (Alpaca) cuyo CIK presenta 10-Q (SEC), ordenados por capitalización. Se calcula una vez
+por servidor, en segundo plano, y se comparte. Capitalización = acciones (XBRL frames) × precio, o valor en manos del público si falta; si ambas
+cifras difieren fuera de [0.25, 25], gana la que cuadra con el dinero negociado (rotación típica 0.6 %), porque hay emisores que reportan con error de unidades.
+**Consecuencias.** Entran solas las empresas nuevas y salen las que dejan de cotizar. Quedan fuera las extranjeras (20-F/40-F) y los fondos.
+El sector es una agrupación del código SIC, menos fina que GICS. Con dos clases de acciones, el total se reparte por igual.
+**A debate.** Pagar una fuente GICS y datos SIP en tiempo real.

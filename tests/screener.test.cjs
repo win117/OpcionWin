@@ -8,7 +8,6 @@ const { createSessionService } = require('../dist/api/v1/services/sesiones.servi
 const { createApp } = require('../dist/app');
 const { createCola } = require('../dist/jobs/cola');
 const { puntuarSimbolo, parsearOcc, createScreener } = require('../dist/api/v1/services/screener.service');
-const { UNIVERSO_DEFECTO } = require('../dist/data/universo');
 const { createAlpacaClient } = require('../dist/integrations/alpaca.client');
 const prefix = require('../dist/config/config').default.API_URL;
 
@@ -75,7 +74,6 @@ test('puntuarSimbolo: la tendencia alcista favorece LONG_CALL y la bajista LONG_
 test('parsearOcc y universo por defecto', () => {
   assert.deepEqual(parsearOcc('AAPL251219C00200000'), { tipo: 'call', strike: 200, vencimiento: '2025-12-19' });
   assert.equal(parsearOcc('basura'), null);
-  assert.ok(UNIVERSO_DEFECTO.length >= 450 && new Set(UNIVERSO_DEFECTO).size === UNIVERSO_DEFECTO.length);
 });
 
 test('Screener: los empates de puntaje se resuelven por el factor principal y no por orden alfabético', async () => {

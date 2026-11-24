@@ -1,0 +1,338 @@
+// Universo vivo: mapa del mercado y puntajes por estrategia, en memoria y compartidos por todos los usuarios (son datos de
+// mercado, no del usuario). Nadie tiene que pulsar nada: src/index.js lo inicia al arrancar el servidor.
+//
+// 0) Catálogo: qué empresas hay (catalogo-universo.service.js; todo obtenido de Alpaca y la SEC). Se rehace cada 24 h.
+// 1) Cotizaciones (mapa): por lotes de 100. Se piden solo si alguien mira y vence la caché.
+// 2) Puntajes: velas por lotes → ranking completo en segundos, aún sin volatilidad implícita.
+// 3) En segundo plano: volatilidad implícita (1 solicitud por empresa a ritmo limitado, primero las candidatas a Iron Condor,
+//    que es la estrategia que usa IV/HV) y perfil SEC de cada empresa (giro). Cada dato reemplaza al provisional.
+// El resultado se guarda con un propietario interno para que un reinicio muestre algo al instante.
+import boom from '@hapi/boom';
+import { conReintento, parsearOcc, puntuarSimbolo, VERSION } from './screener.service';
+import { createCatalogo } from './catalogo-universo.service';
+import { createMercadoReloj } from './mercado-reloj.service';
+import { ESTRATEGIAS } from '../models/shared';
+import { guardarLote, idDeterminista, todos } from './registros';
+
+const DIA = 86400000, MIN = 60000;
+export const PROPIETARIO_SISTEMA = 'sistema-universo';
+const LOTE_COTIZACIONES = 100;
+const LOTE_VELAS = 40;
+const MIN_VELAS = 30;
+const DIAS_VELAS = 400;
+// El plan gratuito solo entrega el consolidado (SIP) con más de 15 minutos de antigüedad.
+const RETRASO_SIP_MS = 16 * MIN;
+// Un símbolo sin operaciones en 7 días dejó de cotizar: no se muestra ni se recomienda.
+const MAX_DIAS_SIN_OPERAR = 7;
+export const TTL_ABIERTO_MS = 10000;
+export const TTL_CERRADO_MS = MIN;
+export const REPUNTUAR_ABIERTO_MS = 15 * MIN;
+export const REPUNTUAR_CERRADO_MS = 6 * 60 * MIN;
+// 600 ms entre solicitudes = 100/min: deja la mitad del cupo de Alpaca (200/min) para lo que hagan los usuarios.
+export const RITMO_IV_MS = 600;
+const IV_VIGENTE_MS = 2 * 60 * MIN;
+
+const redondear = (x, d = 4) => (Number.isFinite(x) ? Math.round(x * 10 ** d) / 10 ** d : null);
+const formatoNY = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
+const diaNY = t => formatoNY.format(new Date(t));
+const variacion = (velas, n) => {
+  const a = velas.at(-1 - n)?.cierre, b = velas.at(-1)?.cierre;
+  return a > 0 && Number.isFinite(b) ? redondear(b / a - 1, 6) : null;
+};
+const lotes = (lista, n) => Array.from({ length: Math.ceil(lista.length / n) }, (_, i) => lista.slice(i * n, (i + 1) * n));
+const pausa = ms => new Promise(r => { setTimeout(r, ms); });
+const nombreCorto = (nombre, simbolo) => String(nombre || simbolo).replace(/\s+(Class [A-Z] )?(Common Stock|Ordinary Shares?|Common Shares?|Capital Stock).*$/i, '').replace(/,?\s+Class [A-Z]$/i, '').trim() || simbolo;
+
+/**
+ * Precio y variación del día a partir de IEX (tiempo real, una sola bolsa) y del consolidado retrasado (cierre y volumen oficiales).
+ * Con el mercado abierto manda la última operación de IEX; cerrado, el cierre oficial de la sesión.
+ */
+export function combinarCotizacion(iex, sip, { abierto, hoy }) {
+  const base = sip || iex;
+  if (!base) return null;
+  const sesionHoy = base.fechaSesion ? diaNY(base.fechaSesion) === hoy : true;
+  // En los primeros minutos el consolidado aún muestra la sesión de ayer: entonces su cierre ES el cierre anterior.
+  const anterior = abierto && !sesionHoy ? base.cierre : base.cierreAnterior;
+  const precio = abierto ? iex?.ultimo ?? base.ultimo ?? base.cierre : base.cierre ?? iex?.ultimo ?? null;
+  const vigente = !abierto || sesionHoy;
+  const extremo = (fn, x) => (!vigente || x == null ? null : abierto && precio != null ? fn(x, precio) : x);
+  return {
+    precio: redondear(precio), cierreAnterior: redondear(anterior),
+    cambioPct: precio != null && anterior > 0 ? redondear(precio / anterior - 1, 6) : null,
+    volumen: vigente ? base.volumen ?? null : null, apertura: vigente ? base.apertura ?? null : null,
+    maximo: extremo(Math.max, base.maximo), minimo: extremo(Math.min, base.minimo),
+    fechaDato: (abierto ? iex?.fechaDato : null) || base.fechaDato || null,
+  };
+}
+
+export function createUniversoVivo({ integraciones, factory, catalogo, tamano = 500, ahora = Date.now, ritmoIvMs = RITMO_IV_MS, esperar = pausa, esperarLimite = pausa, bases = ['mongodb', 'supabase'] } = {}) {
+  const alpaca = () => integraciones.alpaca;
+  const reloj = createMercadoReloj({ integraciones, ahora });
+  const fuente = catalogo || createCatalogo({ integraciones, ahora, tamano });
+  const empresas = new Map(); // símbolo → { nombre, cik, acciones, capitalizacion, sector, industria, sic, porConfirmar }
+  const puntajes = new Map(); // símbolo → fila del ranking
+  const iv = new Map();       // símbolo → { t, opciones }
+  const fichas = new Map();   // símbolo → { t, velas }
+  const rechazadas = new Set(); // CIK que no son empresas con reportes trimestrales
+  let recuperado = false, fase = 'sin_iniciar', error = null, puntuadoEn = null, catalogoEn = null, baseGuardado = null;
+  let cacheMapa = null, mapaPendiente = null, catalogoPendiente = null, pasadaPendiente = null, temporizador = null, activo = false;
+
+  // Con el universo ya perfilado, una recién llegada se oculta hasta confirmar que es una empresa operativa (y no un fideicomiso).
+  const visibles = () => {
+    const lista = [...empresas.values()].filter(e => !e.porConfirmar), perfiladas = lista.filter(e => e.sic !== undefined);
+    return (perfiladas.length >= tamano * 0.8 ? perfiladas : lista).slice(0, tamano);
+  };
+  const velasDe = lista => {
+    const t = ahora(), desde = new Date(t - DIAS_VELAS * DIA).toISOString();
+    // Consolidado (todas las bolsas); si el plan no lo permite, IEX.
+    return alpaca().velasLote(lista, { desde, hasta: new Date(t - RETRASO_SIP_MS).toISOString(), feed: 'sip' })
+      .catch(() => alpaca().velasLote(lista, { desde, hasta: new Date(t).toISOString() }));
+  };
+
+  // ---- Catálogo
+  async function construirCatalogo() {
+    const lista = (await fuente.construir()).filter(c => !rechazadas.has(c.cik));
+    if (!lista.length) throw boom.serverUnavailable('No se obtuvo ninguna empresa de los proveedores.');
+    const previas = new Map(empresas);
+    empresas.clear();
+    for (const c of lista) {
+      const p = previas.get(c.simbolo) || {};
+      const perfilado = p.sic !== undefined && p.cik === c.cik;
+      empresas.set(c.simbolo, { ...c, nombre: nombreCorto(c.nombre, c.simbolo), porConfirmar: c.porConfirmar && !perfilado,
+        sector: perfilado ? p.sector : 'Sin clasificar', industria: perfilado ? p.industria : 'Sin clasificar', ...(perfilado ? { sic: p.sic } : {}) });
+    }
+    catalogoEn = ahora();
+    cacheMapa = null;
+  }
+  async function asegurarCatalogo() {
+    const vencido = catalogoEn == null || ahora() - catalogoEn > DIA;
+    if (!vencido) return;
+    if (!catalogoPendiente) catalogoPendiente = construirCatalogo().finally(() => { catalogoPendiente = null; });
+    // Si ya hay un catálogo (aunque sea de ayer), se usa mientras llega el nuevo.
+    if (empresas.size) { catalogoPendiente.catch(() => {}); return; }
+    await catalogoPendiente;
+  }
+  async function completarPerfiles(solo) {
+    const porCik = new Map();
+    for (const e of empresas.values()) if (e.sic === undefined && (!solo || solo.has(e.simbolo))) porCik.set(e.cik, [...(porCik.get(e.cik) || []), e.simbolo]);
+    let seguidos = 0;
+    for (const [cik, lista] of porCik) {
+      if (!activo || seguidos >= 10) break;
+      try {
+        const p = await fuente.perfil(cik);
+        seguidos = 0;
+        for (const s of lista) {
+          const e = empresas.get(s);
+          if (!e) continue;
+          if (!p.valida) { rechazadas.add(cik); empresas.delete(s); puntajes.delete(s); continue; }
+          Object.assign(e, { sic: p.sic ?? null, sector: p.sector, industria: p.industria, porConfirmar: false });
+          const m = cacheMapa?.porSimbolo.get(s);
+          if (m) Object.assign(m, { sector: p.sector, industria: p.industria });
+        }
+      } catch { seguidos += 1; }
+    }
+  }
+
+  // Antes de publicar el primer ranking se confirma que sus primeros lugares son empresas operativas.
+  async function confirmarPrimeros() {
+    for (let vuelta = 0; vuelta < 5; vuelta += 1) {
+      const pendientes = new Set(ESTRATEGIAS.flatMap(e => [...puntajes.values()].filter(p => Number.isFinite(p.puntajes[e])).sort((a, b) => b.puntajes[e] - a.puntajes[e]).slice(0, 8).map(p => p.simbolo))
+        .filter(x => empresas.has(x) && empresas.get(x).sic === undefined));
+      if (!pendientes.size) return;
+      await completarPerfiles(pendientes);
+    }
+  }
+
+  // ---- Cotizaciones
+  async function cotizar(lista, feed) {
+    const partes = await Promise.all(lotes(lista, LOTE_COTIZACIONES).map(l => alpaca().cotizacionesLote(l, feed ? { feed } : {})));
+    return Object.assign({}, ...partes);
+  }
+  async function refrescarMapa() {
+    await asegurarCatalogo();
+    const { abierto } = await reloj();
+    const lista = visibles(), simbolos = lista.map(e => e.simbolo);
+    const [iex, sip] = await Promise.all([cotizar(simbolos), cotizar(simbolos, 'delayed_sip').catch(() => ({}))]);
+    const hoy = diaNY(ahora()), items = [];
+    for (const e of lista) {
+      const s = e.simbolo, fechaOperacion = iex[s]?.fechaDato || sip[s]?.fechaDato;
+      if (fechaOperacion && ahora() - Date.parse(fechaOperacion) > MAX_DIAS_SIN_OPERAR * DIA) continue;
+      const q = combinarCotizacion(iex[s], sip[s], { abierto, hoy });
+      if (q?.precio == null) continue;
+      items.push({ simbolo: s, nombre: e.nombre, sector: e.sector, industria: e.industria, ...q, capitalizacion: e.acciones ? Math.round(e.acciones * q.precio) : e.capitalizacion });
+      const p = puntajes.get(s);
+      if (p) { p.precio = q.precio; p.cambioPct = q.cambioPct; }
+    }
+    const t = ahora();
+    cacheMapa = { expira: t + (abierto ? TTL_ABIERTO_MS : TTL_CERRADO_MS), abierto, actualizadoEn: new Date(t), items, porSimbolo: new Map(items.map(i => [i.simbolo, i])) };
+    return cacheMapa;
+  }
+  // Una sola actualización a la vez; si falla, se sirve lo último conocido marcado como desactualizado.
+  async function obtenerMapa() {
+    if (cacheMapa && ahora() < cacheMapa.expira) return cacheMapa;
+    if (!mapaPendiente) mapaPendiente = refrescarMapa().finally(() => { mapaPendiente = null; });
+    try { return await mapaPendiente; } catch (e) {
+      if (!cacheMapa) throw e;
+      return { ...cacheMapa, desactualizado: true };
+    }
+  }
+
+  // ---- Puntajes
+  function puntuarFila(s, velas) {
+    const q = cacheMapa?.porSimbolo.get(s), dato = iv.get(s);
+    const r = puntuarSimbolo({ simbolo: s, velas, opciones: dato && ahora() - dato.t < DIA ? dato.opciones : [], fechaReferencia: new Date(ahora()).toISOString() });
+    const vols = velas.slice(-20).map(v => v.volumen).filter(Number.isFinite);
+    const anio = velas.slice(-252), esteAnio = new Date(ahora()).getUTCFullYear();
+    const cierrePrevio = velas.filter(v => new Date(v.fecha).getUTCFullYear() < esteAnio).at(-1)?.cierre;
+    puntajes.set(s, {
+      simbolo: s, nombre: empresas.get(s)?.nombre || s, precio: q?.precio ?? redondear(velas.at(-1).cierre), cambioPct: q?.cambioPct ?? variacion(velas, 1),
+      cambio5d: variacion(velas, 5), cambio21d: variacion(velas, 21), cambioAnio: cierrePrevio > 0 ? redondear(velas.at(-1).cierre / cierrePrevio - 1, 6) : null,
+      maximo52: Math.max(...anio.map(v => v.maximo)), minimo52: Math.min(...anio.map(v => v.minimo)),
+      volumenPromedio: vols.length ? Math.round(vols.reduce((a, b) => a + b, 0) / vols.length) : null,
+      ivPromedio: redondear(r.ivActual), hv20: redondear(r.hv20), puntajes: r.puntajes, factores: r.factores, resumenes: r.resumenes,
+      versionAlgoritmo: VERSION, actualizadoEn: new Date(ahora()),
+    });
+  }
+  async function traerIv(s, precio) {
+    if (!(precio > 0)) return;
+    const dia = n => new Date(ahora() + n * DIA).toISOString().slice(0, 10);
+    const filtro = { vencimientoDesde: dia(20), vencimientoHasta: dia(50), strikeMin: redondear(precio * 0.95, 2), strikeMax: redondear(precio * 1.05, 2), limite: 200, paginas: 1 };
+    const snaps = await conReintento(() => alpaca().snapshotsOpciones(s, filtro), { esperar: esperarLimite });
+    iv.set(s, { t: ahora(), opciones: snaps.map(x => ({ ...parsearOcc(x.contratoExternoId), volatilidadImplicita: x.volatilidadImplicita, bid: x.bid, ask: x.ask, griegas: x.griegas })).filter(o => o.tipo && o.strike) });
+  }
+  async function completarIv(series) {
+    const orden = [...series.keys()].filter(s => !(iv.get(s) && ahora() - iv.get(s).t < IV_VIGENTE_MS))
+      .sort((a, b) => (puntajes.get(b)?.puntajes.IRON_CONDOR ?? 0) - (puntajes.get(a)?.puntajes.IRON_CONDOR ?? 0));
+    let seguidos = 0;
+    for (const s of orden) {
+      if (!activo) return;
+      if (!empresas.has(s)) continue;
+      const inicio = Date.now();
+      try { await traerIv(s, puntajes.get(s)?.precio); puntuarFila(s, series.get(s)); seguidos = 0; } catch { seguidos += 1; }
+      if (seguidos >= 10) { error = 'La volatilidad implícita no está disponible por ahora; el ranking usa solo precios.'; return; }
+      await esperar(Math.max(0, ritmoIvMs - (Date.now() - inicio)));
+    }
+  }
+  async function pasada() {
+    error = null;
+    if (!puntajes.size) fase = 'catalogo';
+    await asegurarCatalogo();
+    const mapa = await obtenerMapa();
+    if (!puntajes.size) fase = 'puntuando';
+    const series = new Map();
+    for (const lote of lotes(mapa.items.map(i => i.simbolo), LOTE_VELAS)) {
+      const v = await velasDe(lote);
+      for (const s of lote) {
+        if ((v[s]?.length || 0) < MIN_VELAS) continue;
+        try { puntuarFila(s, v[s]); series.set(s, v[s]); } catch { /* sin datos suficientes: queda fuera del ranking */ }
+      }
+    }
+    for (const s of [...puntajes.keys()]) if (!series.has(s)) puntajes.delete(s);
+    await confirmarPrimeros();
+    puntuadoEn = ahora();
+    fase = 'volatilidad';
+    await guardar();
+    await Promise.all([completarIv(series), completarPerfiles().then(() => guardar())]);
+    fase = 'lista';
+    await guardar();
+  }
+  function lanzar() {
+    if (!pasadaPendiente) {
+      pasadaPendiente = pasada()
+        .catch(e => { error = e?.mensaje || 'No se pudo calcular el ranking; se reintentará.'; fase = puntajes.size ? 'lista' : 'error'; })
+        .finally(() => { pasadaPendiente = null; });
+    }
+    return pasadaPendiente;
+  }
+  async function revisar() {
+    if (!activo) return;
+    try {
+      const { abierto } = await reloj();
+      const edad = puntuadoEn == null ? Infinity : ahora() - puntuadoEn;
+      if (edad > (abierto ? REPUNTUAR_ABIERTO_MS : REPUNTUAR_CERRADO_MS)) lanzar();
+    } catch (e) {
+      error = e?.mensaje || 'Proveedor no disponible; se reintentará.';
+      if (!puntajes.size) fase = 'error';
+    }
+  }
+
+  // ---- Persistencia (mejor esfuerzo): mismo recurso `screener`, propietario interno.
+  const CAMPOS_EMPRESA = ['cik', 'sic', 'sector', 'industria', 'acciones', 'capitalizacion'];
+  async function guardar() {
+    const items = [...puntajes.values()].filter(p => empresas.get(p.simbolo)?.sic != null).map(p => { // solo empresas confirmadas
+      const e = empresas.get(p.simbolo);
+      return { id: idDeterminista(PROPIETARIO_SISTEMA, p.simbolo), datos: { ...p, ...Object.fromEntries(CAMPOS_EMPRESA.filter(c => e[c] != null).map(c => [c, e[c]])) } };
+    });
+    for (const database of baseGuardado ? [baseGuardado] : bases) {
+      try { await guardarLote('screener', { userId: PROPIETARIO_SISTEMA, database }, items, factory); baseGuardado = database; return; } catch { /* se intenta la otra base */ }
+    }
+  }
+  async function recuperar() {
+    for (const database of bases) {
+      try {
+        const filas = await todos('screener', { userId: PROPIETARIO_SISTEMA, database }, undefined, factory);
+        // Solo lo reciente: un resultado de hace días engañaría más de lo que ayuda.
+        const recientes = filas.filter(f => ahora() - new Date(f.actualizadoEn).getTime() < 4 * DIA && f.cik && f.sic != null);
+        if (!recientes.length) continue;
+        for (const f of recientes.sort((a, b) => (b.capitalizacion ?? 0) - (a.capitalizacion ?? 0))) {
+          if (empresas.has(f.simbolo)) continue;
+          empresas.set(f.simbolo, { simbolo: f.simbolo, nombre: f.nombre, cik: f.cik, acciones: f.acciones ?? null, capitalizacion: f.capitalizacion ?? null,
+            sector: f.sector || 'Sin clasificar', industria: f.industria || 'Sin clasificar', sic: f.sic, porConfirmar: false });
+          if (!puntajes.has(f.simbolo)) puntajes.set(f.simbolo, f);
+        }
+        baseGuardado = database;
+        recuperado = true;
+        if (fase === 'sin_iniciar') fase = 'lista';
+        return;
+      } catch { /* base no disponible */ }
+    }
+  }
+
+  return {
+    iniciar() {
+      if (activo || alpaca()?.configurado === false) return;
+      activo = true;
+      fase = 'catalogo';
+      recuperar().then(revisar);
+      temporizador = setInterval(revisar, MIN);
+      temporizador.unref?.();
+    },
+    detener() { activo = false; clearInterval(temporizador); },
+    listo: () => puntajes.size > 0 && (puntuadoEn != null || recuperado),
+    filas: () => [...puntajes.values()].filter(p => empresas.has(p.simbolo)),
+    async simbolos() { await asegurarCatalogo(); return visibles().map(e => e.simbolo); },
+    estado: () => ({ automatico: activo, fase, conIv: [...puntajes.values()].filter(p => p.ivPromedio != null).length, ...(error ? { aviso: error } : {}) }),
+    // Una pasada completa (para pruebas y scripts).
+    async actualizarAhora() { const previo = activo; activo = true; await lanzar(); activo = previo; },
+    recuperar,
+
+    async mapa() {
+      const m = await obtenerMapa();
+      const items = m.items.filter(i => empresas.has(i.simbolo)).map(i => {
+        const p = puntajes.get(i.simbolo);
+        return { simbolo: i.simbolo, nombre: i.nombre, sector: i.sector, industria: i.industria, precio: i.precio, cambioPct: i.cambioPct,
+          volumen: i.volumen, capitalizacion: i.capitalizacion, cambio5d: p?.cambio5d ?? null, cambio21d: p?.cambio21d ?? null, puntajes: p?.puntajes ?? null };
+      });
+      return { abierto: m.abierto, actualizadoEn: m.actualizadoEn, desactualizado: Boolean(m.desactualizado), total: items.length, items,
+        fuente: { proveedor: 'alpaca', tiempoReal: alpaca().feed || 'iex', consolidado: 'delayed_sip', empresas: 'sec' } };
+    },
+
+    async ficha(simbolo) {
+      if (!/^[A-Z][A-Z0-9.]{0,9}$/.test(simbolo)) throw boom.badRequest('Símbolo inválido.');
+      const m = await obtenerMapa();
+      const i = m.porSimbolo.get(simbolo);
+      if (!i || !empresas.has(simbolo)) throw boom.notFound('La empresa no está en el universo del mapa.');
+      const previa = fichas.get(simbolo);
+      let velas = previa && ahora() - previa.t < 5 * MIN ? previa.velas : null;
+      if (!velas) {
+        velas = (await velasDe([simbolo]))[simbolo] || [];
+        fichas.delete(simbolo);
+        fichas.set(simbolo, { t: ahora(), velas });
+        if (fichas.size > 100) fichas.delete(fichas.keys().next().value);
+      }
+      const p = puntajes.get(simbolo) || {};
+      const campos = ['maximo52', 'minimo52', 'volumenPromedio', 'ivPromedio', 'hv20', 'cambio5d', 'cambio21d', 'cambioAnio', 'puntajes', 'resumenes'];
+      return { ...i, abierto: m.abierto, actualizadoEn: m.actualizadoEn, ...Object.fromEntries(campos.map(c => [c, p[c] ?? null])), velas };
+    },
+  };
+}

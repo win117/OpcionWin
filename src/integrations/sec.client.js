@@ -171,6 +171,29 @@ export const createSecClient = ({
     return { ...encontrado };
   };
 
+  const listaTickers = async () => new Map(await cargarTickers());
+
+  // Un dato de todas las empresas en un periodo (API XBRL "frames"): [{ cik, valor }]. Sin datos para el periodo → [].
+  const marco = async ({ concepto, unidad, periodo }) => {
+    if (!/^[a-z-]+\/[A-Za-z]+$/.test(concepto) || !/^[A-Za-z-]+$/.test(unidad) || !/^CY\d{4}(Q[1-4]I?)?$/.test(periodo)) {
+      throw new IntegrationError({ proveedor: PROVEEDOR, codigo: 'VALIDACION', mensaje: 'Concepto, unidad o periodo XBRL inválido.' });
+    }
+    try {
+      const cuerpo = await pedir(`${SEC_DATA}/api/xbrl/frames/${concepto}/${unidad}/${periodo}.json`);
+      return (cuerpo?.data || []).filter(d => Number.isFinite(Number(d.val))).map(d => ({ cik: formatearCik(d.cik), valor: Number(d.val) }));
+    } catch (e) {
+      if (e?.codigo === 'NO_ENCONTRADO') return [];
+      throw e;
+    }
+  };
+
+  // Perfil del emisor: giro (SIC) y si presenta reportes trimestrales 10-Q (empresa estadounidense operativa).
+  const perfil = async cik => {
+    const cuerpo = await pedir(`${SEC_DATA}/submissions/CIK${formatearCik(cik)}.json`);
+    return { cik: formatearCik(cik), nombre: cuerpo?.name || null, sic: cuerpo?.sic ? Number(cuerpo.sic) : null, industria: cuerpo?.sicDescription || null,
+      presenta10Q: (cuerpo?.filings?.recent?.form || []).some(f => f === '10-Q' || f === '10-Q/A') };
+  };
+
   const fundamentales = async (cik, { maxPeriodos = MAX_PERIODOS } = {}) => {
     const cuerpo = await pedir(`${SEC_DATA}/api/xbrl/companyfacts/CIK${formatearCik(cik)}.json`);
     return construirFundamentales(cuerpo, maxPeriodos);
@@ -248,5 +271,5 @@ export const createSecClient = ({
       }));
   };
 
-  return { proveedor: PROVEEDOR, configurado, cikDeSimbolo, fundamentales, tenencias13F };
+  return { proveedor: PROVEEDOR, configurado, cikDeSimbolo, fundamentales, tenencias13F, tickers: listaTickers, marco, perfil };
 };

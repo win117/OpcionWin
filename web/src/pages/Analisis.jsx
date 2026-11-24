@@ -18,6 +18,9 @@ import { cargarDatosAnalisis } from '../components/BotonOperar';
 import { DISCLAIMER } from '../utils/constants';
 import { errorRangoDias, ejecutarFlujo, guardarConfig, leerConfig, pasosDatos, pasosIniciales, recursosNecesarios, resolverConfig, sincronizarDatos } from './analizar/flujo';
 
+// Una vela diaria se fecha a las 00:00 de Nueva York: pasadas 30 h ya existe una más reciente (salvo fin de semana).
+const HORAS_VIGENCIA = 30;
+
 export default function Analisis() {
   const { simbolo: param } = useParams();
   const simbolo = (param || '').toUpperCase();
@@ -72,6 +75,14 @@ export default function Analisis() {
     lanzados.current.add(simbolo);
     traerDatos(simbolo);
   }, [simbolo, registro.loading, registro.data, traerDatos]);
+
+  // Empresa ya registrada con datos de otro día: se actualizan solos, una vez por visita.
+  useEffect(() => {
+    if (!simbolo || !empresa || !velas.cargado || lanzados.current.has(simbolo)) return;
+    lanzados.current.add(simbolo);
+    const ultima = velas.diarias.at(-1)?.time;
+    if (!ultima || Date.now() / 1000 - ultima > HORAS_VIGENCIA * 3600) traerDatos(simbolo);
+  }, [simbolo, empresa, velas.cargado, velas.diarias, traerDatos]);
 
   const analizar = useCallback(async () => {
     const sym = activo.current;

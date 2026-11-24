@@ -10,6 +10,9 @@ export const schema = entitySchema({
   puntajes: porEstrategia(number(false, 0, 100)),
   factores: porEstrategia({ type: [factorSchema], default: [] }),
   resumenes: porEstrategia(text(false)),
+  // Datos del emisor y variaciones (los llena el universo vivo; obtenidos de la SEC y Alpaca).
+  cik: text(false), sic: number(false), sector: text(false), industria: text(false), acciones: number(false), capitalizacion: number(false),
+  cambio5d: number(false), cambio21d: number(false), cambioAnio: number(false), maximo52: number(false), minimo52: number(false), hv20: number(false),
   versionAlgoritmo: text(false), actualizadoEn: { type: Date, required: true },
 });
 schema.index({ usuarioId: 1, simbolo: 1 });

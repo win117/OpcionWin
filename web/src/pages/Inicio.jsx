@@ -1,20 +1,17 @@
-// Inicio: estado del mercado, buscador de empresas y screener (Top 5 por estrategia) sobre el universo precargado.
-import { useCallback, useEffect, useRef, useState } from 'react';
+// Inicio: índices, mapa del mercado en vivo, las 5 mejores por estrategia (automático) y buscador de empresas.
 import { Link, useNavigate, useOutletContext } from 'react-router-dom';
 import { PageHeader } from '../components/Layout';
 import { ScoreBar } from '../components/Gauge';
 import { Empty, ErrorMessage, Notice } from '../components/States';
 import Buscador from './analizar/Buscador';
 import { MercadoEstado } from '../components/MercadoEstado';
-import { useAsync } from '../hooks/useAsync';
+import MapaMercado from './mercado/MapaMercado';
+import { useSondeo } from '../hooks/useSondeo';
 import { screener } from '../api/resources';
-import { esNoDisponible } from '../api/client';
 import { ESTRATEGIAS, ESTRATEGIA_LABELS, DISCLAIMER } from '../utils/constants';
 import { fmtDateTime, fmtInt, fmtMoney, fmtNum, fmtPct, isNum } from '../utils/format';
 
 const NOMBRES_INDICE = { SPY: 'S&P 500', QQQ: 'Nasdaq 100', IWM: 'Russell 2000', DIA: 'Dow Jones' };
-const CLAVE_JOB = 'opciones.universo.job';
-const SONDEO_MS = 2000;
 const DESCRIPCION = {
   LONG_CALL: 'Compra de call: sesgo alcista y volatilidad razonable.',
   LONG_PUT: 'Compra de put: sesgo bajista y volatilidad razonable.',
@@ -55,65 +52,6 @@ function Indices({ mercado }) {
   );
 }
 
-/* ---------- Sincronización del universo ---------- */
-function leerJob() { try { return sessionStorage.getItem(CLAVE_JOB) || null; } catch { return null; } }
-function guardarJob(id) { try { if (id) sessionStorage.setItem(CLAVE_JOB, id); else sessionStorage.removeItem(CLAVE_JOB); } catch { /* sin almacenamiento */ } }
-
-/** Lanza y sondea la sincronización del universo; retoma una en curso al volver a la página. */
-function useSincronizacionUniverso(onTerminada) {
-  const [job, setJob] = useState(null);
-  const [error, setError] = useState(null);
-  const [lanzando, setLanzando] = useState(false);
-  const vivo = useRef(true);
-  const timer = useRef(null);
-  const cb = useRef(onTerminada);
-  cb.current = onTerminada;
-
-  const sondear = useCallback(async id => {
-    try {
-      const j = await screener.sincronizacion(id);
-      if (!vivo.current) return;
-      setJob(j);
-      if (['completada', 'fallida'].includes(j?.estado)) { guardarJob(null); cb.current?.(j); return; }
-      timer.current = setTimeout(() => sondear(id), SONDEO_MS);
-    } catch (e) {
-      if (!vivo.current) return;
-      guardarJob(null); setError(e);
-    }
-  }, []);
-
-  useEffect(() => {
-    vivo.current = true;
-    const id = leerJob();
-    if (id) sondear(id);
-    return () => { vivo.current = false; clearTimeout(timer.current); };
-  }, [sondear]);
-
-  const iniciar = async () => {
-    setError(null); setLanzando(true);
-    try {
-      const j = await screener.sincronizarUniverso({ limite: 500 });
-      setJob(j);
-      if (j?._id) { guardarJob(j._id); sondear(j._id); }
-    } catch (e) { setError(e); } finally { setLanzando(false); }
-  };
-  const activa = lanzando || (job && !['completada', 'fallida'].includes(job.estado));
-  return { job, error, activa, iniciar };
-}
-
-function ProgresoUniverso({ job }) {
-  const total = job?.total || 0, hechos = job?.procesados || 0;
-  const pct = total ? Math.min(100, Math.round((100 * hechos) / total)) : 0;
-  return (
-    <div aria-live="polite">
-      <div className="progress" role="progressbar" aria-label="Sincronización del universo" aria-valuemin={0} aria-valuemax={total || 100} aria-valuenow={hechos}>
-        <div className="progress__fill" style={{ width: pct + '%' }} />
-      </div>
-      <p className="muted small">{total ? `${fmtInt(hechos)} de ${fmtInt(total)} empresas procesadas (${pct}%)` : 'Preparando la sincronización…'}{job?.fallidos ? ` · ${fmtInt(job.fallidos)} con error` : ''}</p>
-    </div>
-  );
-}
-
 /* ---------- Screener ---------- */
 function Tarjeta({ codigo, items }) {
   return (
@@ -145,49 +83,28 @@ function Tarjeta({ codigo, items }) {
   );
 }
 
+const FASES = {
+  sin_iniciar: 'Preparando el universo…', catalogo: 'Buscando las empresas del mercado…', puntuando: 'Calculando el ranking…',
+  volatilidad: 'Afinando con la volatilidad implícita', error: 'Reintentando con el proveedor…',
+};
+const esperaRanking = d => (!d || !d.universo?.total ? 3000 : d.universo.fase === 'volatilidad' ? 15000 : 60000);
+
 function Screener() {
-  const ranking = useAsync(() => screener.ranking({ limite: 5 }), []);
-  const sync = useSincronizacionUniverso(() => ranking.reload());
-  const d = ranking.data;
-  const total = d?.universo?.total ?? 0;
-  const actualizado = d?.universo?.actualizadoEn;
-  const sinUniverso = d && total === 0;
-  const noDisp = ranking.error && esNoDisponible(ranking.error);
-
-  const boton = (
-    <button type="button" className="btn btn--primary" onClick={sync.iniciar} disabled={sync.activa}>
-      {sync.activa ? 'Actualizando universo…' : sinUniverso ? 'Cargar universo (~500 empresas)' : 'Actualizar universo'}
-    </button>
-  );
-
+  const { data: d, error, loading } = useSondeo(() => screener.ranking({ limite: 5 }), esperaRanking);
+  const u = d?.universo || {};
+  const listo = u.total > 0;
   return (
-    <section className="inicio-sec" aria-label="Screener de estrategias">
+    <section className="inicio-sec" aria-label="Mejores empresas por estrategia">
       <div className="inicio-sec__head">
-        <h2>Mejores empresas por estrategia</h2>
-        <div className="screener-head">
-          <span className="muted small">
-            {d ? `Universo: ${fmtInt(total)} empresas · ${actualizado ? 'actualizado ' + fmtDateTime(actualizado) : 'sin fecha de actualización'}` : ''}
-          </span>
-          {boton}
-        </div>
+        <h2>Las 5 mejores por estrategia</h2>
+        <span className="muted small" aria-live="polite">
+          {listo ? `De ${fmtInt(u.total)} empresas, ${fmtDateTime(u.actualizadoEn)}${u.fase === 'volatilidad' ? `. ${FASES.volatilidad}: ${fmtInt(u.conIv)} de ${fmtInt(u.total)}` : ''}` : d ? FASES[u.fase] || '' : ''}
+        </span>
       </div>
-      {sync.activa && <div className="card"><ProgresoUniverso job={sync.job} /></div>}
-      {sync.job?.estado === 'fallida' && <ErrorMessage error={sync.job.error || 'La sincronización del universo falló.'} title="Sincronización fallida" />}
-      {sync.job?.estado === 'completada' && !sync.activa && <Notice tone="success">Universo actualizado: {fmtInt(sync.job.procesados)} empresas procesadas{sync.job.fallidos ? `, ${fmtInt(sync.job.fallidos)} con error` : ''}.</Notice>}
-      {sync.error && <ErrorMessage error={sync.error} title="No se pudo sincronizar el universo" />}
-      {noDisp && <Notice tone="warning" title="Screener no disponible todavía.">El servidor aún no ofrece el ranking del universo. Cuando esté habilitado aparecerán aquí las 5 mejores empresas por estrategia.</Notice>}
-      {ranking.error && !d && !noDisp && <ErrorMessage error={ranking.error} onRetry={ranking.reload} title="No se pudo cargar el ranking" />}
-      {ranking.loading && !d && <div className="screener-grid">{ESTRATEGIAS.map(c => <div key={c} className="card"><span className="skel" style={{ height: 18, width: '50%' }} /><span className="skel" style={{ height: 120 }} /></div>)}</div>}
-      {sinUniverso && !sync.activa && (
-        <Empty title="El universo aún no se ha sincronizado">
-          Pulsa «Cargar universo» para descargar y puntuar ~500 empresas. Tarda unos minutos; verás el avance y después el Top 5 de cada estrategia.
-        </Empty>
-      )}
-      {d && !sinUniverso && (
-        <div className="screener-grid">
-          {ESTRATEGIAS.map(c => <Tarjeta key={c} codigo={c} items={d.estrategias?.[c] || []} />)}
-        </div>
-      )}
+      {error && !d && <ErrorMessage error={error} title="No se pudo cargar el ranking; se reintenta solo" />}
+      {u.aviso && <Notice tone="warning">{u.aviso}</Notice>}
+      {(loading || (d && !listo)) && <div className="screener-grid">{ESTRATEGIAS.map(c => <div key={c} className="card"><span className="skel" style={{ height: 18, width: '50%' }} /><span className="skel" style={{ height: 120 }} /></div>)}</div>}
+      {listo && <div className="screener-grid">{ESTRATEGIAS.map(c => <Tarjeta key={c} codigo={c} items={d.estrategias?.[c] || []} />)}</div>}
       <p className="muted small">Ranking informativo y educativo, calculado con datos del proveedor; no es una recomendación de inversión.</p>
     </section>
   );
@@ -200,6 +117,7 @@ export default function Inicio() {
     <div className="inicio">
       <PageHeader title="Inicio" subtitle="Mira el mercado, descubre las mejores empresas por estrategia o busca una para analizarla." />
       <Indices mercado={mercado} />
+      <MapaMercado />
       <Screener />
       <section className="inicio-sec" aria-label="Buscar empresa">
         <Buscador seleccionado="" version={0} onSelect={s => navigate('/analisis/' + encodeURIComponent(s))} />

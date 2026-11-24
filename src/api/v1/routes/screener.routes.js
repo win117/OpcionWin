@@ -5,9 +5,9 @@ import { input } from '../services/crud.service';
 import { registrarEvento } from '../services/auditoria.service';
 import { createScreener } from '../services/screener.service';
 
-export default ({ factory, integraciones, cola, ahora } = {}) => {
+export default ({ factory, integraciones, cola, ahora, universo } = {}) => {
   const router = Router();
-  const screener = createScreener({ integraciones, factory, cola, ahora });
+  const screener = createScreener({ integraciones, factory, cola, ahora, universo });
   router.post('/universo/sincronizaciones', handle(async (req, res) => {
     const trabajo = await screener.iniciarSincronizacion(req.context, input(req.body ?? {}));
     await registrarEvento(req.context, { accion: 'screener.sincronizar', recurso: 'sincronizaciones', recursoId: trabajo._id }, factory);

@@ -159,3 +159,16 @@ Pendiente: validar en vivo con credenciales reales de Webull (crédito multi-pat
 - Webull sandbox verificado con credenciales reales: cuenta, posiciones y resumen (MongoDB y Supabase); `/trading/orders/preview` acepta Call e Iron Condor.
   `WEBULL_ACCOUNT_ID` admite account_id o número de cuenta; `client_order_id` de 10 a 32 caracteres (si no, hash). `smoke-ticket.cjs <base> <broker>`.
   Pendiente: envío, cancelación y ejecución en horario de mercado (Webull rechaza fuera de 9:30-16:00 ET).
+
+### 2026-11-23 · Mapa del mercado en vivo y universo automático
+- **Sin datos de empresas en el código** (petición del usuario): se eliminó `src/data/`. `catalogo-universo.service.js` arma el universo
+  (500 mayores por capitalización con opciones y reportes 10-Q) con Alpaca (activos, cotización) y SEC (CIK, acciones, flotante, SIC). Ver ADR-013.
+- `universo-vivo.service.js`: se inicia solo al arrancar (`src/index.js`), compartido en memoria. `GET /mercado/mapa`, `GET /mercado/mapa/:simbolo`;
+  `GET /screener/ranking` lo usa. Ranking en ~11 s la primera vez y ~4 s después (se guarda con propietario `sistema-universo`).
+- Cotización: IEX en vivo + consolidado `delayed_sip` (cierre y volumen oficiales). Velas del ranking: SIP con 16 min de retraso.
+- Corrección: 36 de 485 empresas perdían la IV en silencio por el límite de Alpaca (429). Ahora ritmo de 100/min y `conReintento`.
+- Corrección: la lista anterior incluía 12 empresas que ya no cotizan (WBD, CTRA, MMC...); algunas salían en el Top 5.
+- Frontend: `MapaMercado` (treemap propio, color por variación o compatibilidad, sectores, tabla, búsqueda), `FichaEmpresa`, `ResumenSector`,
+  `useSondeo`; Top 5 sin botones; al abrir una empresa con datos viejos se actualizan solos.
+- Pendiente: probar con el mercado abierto; las velas de «Análisis» siguen siendo IEX (el ranking usa SIP); sector según SIC (p. ej. Visa y
+  Mastercard figuran en servicios); los índices de referencia (SPY, QQQ, IWM, DIA) y los filers 13F siguen configurados en código.

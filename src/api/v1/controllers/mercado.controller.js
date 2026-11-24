@@ -34,7 +34,7 @@ async function panoramaSimbolo(alpaca, simbolo, ahora = Date.now()) {
   return dato;
 }
 
-export default (factory, integraciones) => {
+export default (factory, integraciones, universo) => {
   const crud = name => createCrudService(name, factory);
   const estadoMercado = createMercadoEstado({ integraciones });
   const forCompany = (name, extra = {}) => handle(async(req,res) => {
@@ -53,6 +53,8 @@ export default (factory, integraciones) => {
   });
   return {
     estado: handle(async (_req, res) => respond(res, await estadoMercado())),
+    mapa: handle(async (_req, res) => respond(res, await universo.mapa())),
+    ficha: handle(async (req, res) => respond(res, await universo.ficha(String(req.params.simbolo).toUpperCase()))),
     quotes: serie('cotizacion'),
     history: serie('vela'),
     fundamentals: forCompany('fundamentales'),

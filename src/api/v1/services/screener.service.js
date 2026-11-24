@@ -4,7 +4,6 @@ import boom from '@hapi/boom';
 import { repository } from '../../../repositories';
 import { cores, confluencia } from '../../../cores';
 import { ESTRATEGIAS } from '../models/shared';
-import { UNIVERSO_DEFECTO } from '../../../data/universo';
 import { todos, idDeterminista, guardarLote, parchar, obtener } from './registros';
 import { iniciarTrabajo } from './trabajos.service';
 import { reconciliarTrabajo } from './trabajos-huerfanos.service';
@@ -73,7 +72,18 @@ export function puntuarSimbolo({ simbolo, velas, opciones = [], fechaReferencia 
   return { puntajes, factores, resumenes, ivActual: ivActual ?? null, hv20: hv20 ?? null };
 }
 
-export function createScreener({ integraciones, factory = repository, cola, ahora = () => new Date(), concurrenciaOpciones = 4, pausaMs = 0 } = {}) {
+// Reintenta cuando el proveedor responde con su límite de solicitudes (429): antes ese dato se perdía sin avisar.
+const pausa = ms => new Promise(r => { setTimeout(r, ms); });
+export async function conReintento(fn, { intentos = 4, esperaMs = 15000, esperar = pausa } = {}) {
+  for (let i = 1; ; i += 1) {
+    try { return await fn(); } catch (e) {
+      if (e?.codigo !== 'LIMITE' || i >= intentos) throw e;
+      await esperar(esperaMs);
+    }
+  }
+}
+
+export function createScreener({ integraciones, factory = repository, cola, ahora = () => new Date(), concurrenciaOpciones = 4, pausaMs = 0, universo, esperarLimite } = {}) {
   const reloj = () => { const v = ahora(); return v instanceof Date ? v : new Date(v); };
   const dormir = ms => (ms ? new Promise(r => { setTimeout(r, ms); }) : Promise.resolve());
 
@@ -91,7 +101,7 @@ export function createScreener({ integraciones, factory = repository, cola, ahor
   async function ivOpciones(alpaca, simbolo, precio, hoy) {
     if (!(precio > 0)) return [];
     const dia = n => new Date(hoy.getTime() + n * DIA).toISOString().slice(0, 10);
-    const snaps = await alpaca.snapshotsOpciones(simbolo, { vencimientoDesde: dia(20), vencimientoHasta: dia(50), strikeMin: redondear(precio * 0.95, 2), strikeMax: redondear(precio * 1.05, 2), limite: 200, paginas: 1 });
+    const snaps = await conReintento(() => alpaca.snapshotsOpciones(simbolo, { vencimientoDesde: dia(20), vencimientoHasta: dia(50), strikeMin: redondear(precio * 0.95, 2), strikeMax: redondear(precio * 1.05, 2), limite: 200, paginas: 1 }), { esperar: esperarLimite });
     return snaps.map(s => ({ ...parsearOcc(s.contratoExternoId), bid: s.bid, ask: s.ask, volatilidadImplicita: s.volatilidadImplicita, griegas: s.griegas })).filter(o => o.tipo && o.strike);
   }
 
@@ -146,7 +156,8 @@ export function createScreener({ integraciones, factory = repository, cola, ahor
       } else {
         const limite = body.limite === undefined ? 500 : Number(body.limite);
         if (!Number.isSafeInteger(limite) || limite < 1 || limite > 1000) throw boom.badRequest('limite debe ser un entero entre 1 y 1000.');
-        simbolos = UNIVERSO_DEFECTO.slice(0, limite);
+        if (!universo) throw boom.badRequest('simbolos requerido.');
+        simbolos = (await universo.simbolos()).slice(0, limite);
       }
       // Una sola sincronización de universo a la vez por usuario: se devuelve la activa.
       for (const previo of await todos('sincronizaciones', ctx, { recurso: 'universo' }, factory)) {
@@ -165,15 +176,16 @@ export function createScreener({ integraciones, factory = repository, cola, ahor
       if (estrategia !== undefined && !ESTRATEGIAS.includes(estrategia)) throw boom.badRequest('estrategia: ' + ESTRATEGIAS.join(', ') + '.');
       const n = Number(limite);
       if (!Number.isSafeInteger(n) || n < 1 || n > 50) throw boom.badRequest('limite debe estar entre 1 y 50.');
-      const registros = await todos('screener', ctx, undefined, factory);
+      // Universo vivo (se calcula solo al arrancar el servidor); si no está activo, lo último guardado por el usuario.
+      const registros = universo?.listo() ? universo.filas() : await todos('screener', ctx, undefined, factory);
       const top = e => registros.filter(r => Number.isFinite(r.puntajes?.[e]))
         .sort((a, b) => b.puntajes[e] - a.puntajes[e] || desempate(b, e) - desempate(a, e) || a.simbolo.localeCompare(b.simbolo)).slice(0, n)
         .map(r => ({ simbolo: r.simbolo, nombre: r.nombre || r.simbolo, precio: r.precio ?? null, cambioPct: r.cambioPct ?? null, puntaje: r.puntajes[e],
           factores: (r.factores?.[e] || []).map(({ nombre, valor, puntaje }) => ({ nombre, valor: valor ?? null, puntaje })), resumen: r.resumenes?.[e] || '', actualizadoEn: r.actualizadoEn }));
       const ultima = registros.reduce((m, r) => (r.actualizadoEn && (!m || new Date(r.actualizadoEn) > new Date(m)) ? r.actualizadoEn : m), null);
-      const universo = { total: registros.length, actualizadoEn: ultima };
-      if (estrategia) return { items: top(estrategia), universo };
-      return { estrategias: Object.fromEntries(ESTRATEGIAS.map(e => [e, top(e)])), universo };
+      const resumenUniverso = { total: registros.length, actualizadoEn: ultima, ...(universo ? universo.estado() : {}) };
+      if (estrategia) return { items: top(estrategia), universo: resumenUniverso };
+      return { estrategias: Object.fromEntries(ESTRATEGIAS.map(e => [e, top(e)])), universo: resumenUniverso };
     },
   };
 }
