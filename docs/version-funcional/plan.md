@@ -194,3 +194,9 @@ Inicio con las 5 mejores antes del mapa; buscador con coincidencias (tolera erro
 
 ### 2026-11-24 · Backtest de la recalibración (ADR-014)
 La propuesta no mejora la predicción frente a la fórmula vigente y no se aplica. Detalle y método en el ADR.
+
+### 2026-11-24 · Prueba con el mercado abierto (paper)
+- Mapa en vivo: abierto, 500 empresas, 154-244 precios cambian entre lecturas de 12 s; coincide con el consolidado retrasado.
+- Webull: envio y cancelacion correctos. Iron Condor AAPL de 1 contrato abierto a 0.41 y cerrado desde la app a 1.28 (perdida simulada ~87 USD); 0 posiciones.
+- Hallazgos corregidos: Webull no informa lado ni cantidad por pata (se deducen con evidencia numerica, `deducirLados`), repite `leg_id` en todas,
+  no admite estructuras a mercado y confirma la cancelacion con retraso. `scripts/smoke-cierre-condor.cjs` reproduce la prueba.

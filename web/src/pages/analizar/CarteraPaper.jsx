@@ -46,9 +46,10 @@ const motivoNoCerrable = p => (!p.posicionId ? 'Posición no sincronizada: sincr
   : p.cerrable === false ? 'El broker no informa el lado o la cantidad de esta pata: ciérrala en su plataforma' : undefined);
 
 /** Cierre de una posición o de una estructura completa (una sola orden). `cierre`: { posiciones, grupo }. */
-function CerrarModal({ cierre, onClose, onDone }) {
+function CerrarModal({ cierre, broker, onClose, onDone }) {
   const { posiciones, grupo } = cierre;
   const esGrupo = posiciones.length > 1;
+  const sinMercado = esGrupo && broker === 'webull'; // Webull solo admite estructuras a limite
   const unidades = posiciones.map(p => p.cantidad).reduce(mcd);
   const conPrecio = posiciones.every(p => isNum(p.precioActual));
   const neto = conPrecio ? posiciones.reduce((n, p) => n + netoSigno(p) * p.precioActual * p.cantidad, 0) / unidades : null;
@@ -102,7 +103,7 @@ function CerrarModal({ cierre, onClose, onDone }) {
             </ul>
             {descubre && <div className="alert alert--warning" role="alert">Esta pata cubre una opción vendida del mismo vencimiento: si la cierras sola, la pata corta queda descubierta. Considera «Cerrar estructura».</div>}
             <Field label="Tipo de orden">
-              <select value={tipo} onChange={e => editar(setTipo)(e.target.value)}><option value="market">Mercado</option><option value="limit">Límite</option></select>
+              <select value={tipo} onChange={e => editar(setTipo)(e.target.value)}><option value="market" disabled={sinMercado}>Mercado{sinMercado ? ' (no disponible en Webull)' : ''}</option><option value="limit">Límite</option></select>
             </Field>
             {esGrupo && (
               <Field label="Neto del cierre" error={sentido ? null : 'Elige si cobras o pagas'}>
@@ -242,7 +243,7 @@ export default function CarteraPaper({ nombre = 'el broker', broker, vista = 'to
           </>
         )}
       </div>
-      {cerrar && <CerrarModal cierre={cerrar} onClose={() => setCerrar(null)} onDone={st.reload} />}
+      {cerrar && <CerrarModal broker={broker} cierre={cerrar} onClose={() => setCerrar(null)} onDone={st.reload} />}
     </section>
   );
 }

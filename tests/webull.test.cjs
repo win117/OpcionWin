@@ -46,9 +46,6 @@ test('cuerpo de orden: una pata y estrategias multi-pata', () => {
   assert.equal(detectarEstrategia([L('C', 100), L('C', 100, '261127')].map(occAPataWebull)), 'CALENDAR');
   assert.throws(() => detectarEstrategia([L('C', 100), L('C', 105), L('P', 90)].map(occAPataWebull)), e => e.codigo === 'VALIDACION');
   const bad = x => assert.throws(() => construirCuerpoOrden({ clientOrderId: 'k', tipo: 'limit', precioLimite: 1, cantidad: 1, componentes: [{ simbolo: L('C', 1), accion: 'buy' }], ...x }), e => e.codigo === 'VALIDACION');
-  // market de crédito neto: sin precio y side SELL
-  const m = construirCuerpoOrden({ clientOrderId: 'k3', tipo: 'market', cantidad: 1, credito: true, componentes: ic }).new_orders[0];
-  assert.equal(m.side, 'SELL'); assert.equal(m.order_type, 'MARKET'); assert.equal(m.limit_price, undefined);
   bad({ precioLimite: -1 }); bad({ credito: true }); bad({ cantidad: 0 }); bad({ tipo: 'market' });
 });
 
@@ -137,10 +134,43 @@ test('normalizarOrden no devuelve otra orden de la lista', () => {
 });
 
 const pataPos = (id, t, k, quantity, extra = {}) => ({ leg_id: id, symbol: 'AAPL', quantity, option_type: t, option_expire_date: '2026-11-20', option_exercise_price: String(k), ...extra });
+// Respuesta real de Webull paper (2026-11-24) para un Iron Condor vendido: las patas no traen side ni quantity.
+const condorReal = () => ({ currency: 'USD', quantity: '-1', cost: '-41.00', position_id: 'PX', symbol: 'AAPL', option_strategy: 'IRON_CONDOR', instrument_type: 'OPTION', cost_price: '0.41', last_price: '0.82', unrealized_profit_loss: '-40.50',
+  legs: [['1.45', '1.40', '-5.00', 'PUT', '340'], ['1.67', '1.79', '-12.00', 'PUT', '342.5'], ['0.81', '0.93', '-12.00', 'CALL', '365'], ['0.62', '0.505', '-11.50', 'CALL', '367.5']].map(([cost, last, pl, t, k]) => ({
+    symbol: 'AAPL', cost, leg_id: 'PX', instrument_type: 'OPTION', last_price: last, unrealized_profit_loss: pl, option_type: t, option_expire_date: '2026-12-02', option_exercise_price: k, option_contract_multiplier: '100' })) });
+
+test('posiciones: los lados de un Iron Condor real se deducen con evidencia y, si falta, no se suponen', () => {
+  const r = normalizarPosiciones(condorReal());
+  assert.deepEqual(r.map(x => [x.simbolo, x.lado, x.cantidad, x.cerrable]), [['AAPL261202P00340000', 'long', 1, true], ['AAPL261202P00342500', 'short', 1, true], ['AAPL261202C00365000', 'short', 1, true], ['AAPL261202C00367500', 'long', 1, true]]);
+  assert.deepEqual(r.map(x => x.precioPromedio), [1.45, 1.67, 0.81, 0.62]); assert.equal(new Set(r.map(x => x.posicionExternaId)).size, 4); assert.ok(r.every(x => x.grupoId === 'PX'));
+  // Condor comprado (todo al revés).
+  const inv = condorReal(); inv.quantity = '1'; inv.cost = '41.00'; inv.legs.forEach(l => { l.unrealized_profit_loss = String(-Number(l.unrealized_profit_loss)); });
+  assert.deepEqual(normalizarPosiciones(inv).map(x => x.lado), ['short', 'long', 'long', 'short']);
+  // Recién abierta (sin P/L): basta la suma de costos si solo una combinación cuadra.
+  const nueva = condorReal(); nueva.legs.forEach(l => { l.last_price = l.cost; l.unrealized_profit_loss = '0'; });
+  assert.deepEqual(normalizarPosiciones(nueva).map(x => x.lado), ['long', 'short', 'short', 'long']);
+  const malo = cambio => { const c = condorReal(); cambio(c); return normalizarPosiciones(c).every(x => x.cerrable === false); };
+  assert.ok(malo(c => { c.cost = '-60.00'; }), 'los costos no cuadran');
+  assert.ok(malo(c => { c.legs[0].unrealized_profit_loss = '-10.00'; }), 'el resultado indica otra cantidad por pata');
+  assert.ok(malo(c => { c.legs[0].unrealized_profit_loss = '5.00'; }), 'resultado y costos se contradicen');
+  assert.ok(malo(c => { c.legs.forEach(l => { l.cost = '1.00'; l.last_price = '1.00'; l.unrealized_profit_loss = '0'; }); c.cost = '0'; }), 'varias combinaciones posibles');
+  assert.ok(malo(c => { delete c.legs[1].cost; }), 'falta un costo');
+});
+
+test('Webull: estructuras a mercado se rechazan con mensaje claro y la cancelación espera la confirmación', async () => {
+  const ic = [['P', 90, 'buy'], ['P', 95, 'sell'], ['C', 110, 'sell'], ['C', 115, 'buy']].map(([t, k, a]) => ({ simbolo: L(t, k), accion: a }));
+  assert.throws(() => construirCuerpoOrden({ clientOrderId: 'abcdefghij1', tipo: 'market', cantidad: 1, componentes: ic }), e => e.codigo === 'VALIDACION' && /límite/.test(e.mensaje));
+  let n = 0;
+  const fetch = async u => { const ruta = new URL(u).pathname; const cuerpo = ruta.endsWith('accounts/list') ? [{ account_id: 'A', account_number: 'N' }] : ruta.endsWith('orders/get') ? { orders: [{ client_order_id: 'abcdefghij1', status: ++n < 3 ? 'SUBMITTED' : 'CANCELLED' }] } : {};
+    return new Response(JSON.stringify(cuerpo), { status: 200, headers: { 'Content-Type': 'application/json' } }); };
+  const w = createWebullClient({ appKey: 'APPKEY123', appSecret: 'SECRET456', accountId: 'A', fetch, esperar: async () => {} });
+  assert.equal((await w.cancelarOrden('abcdefghij1')).estado, 'cancelada'); assert.equal(n, 3);
+});
+
 test('posiciones multi-pata: lado por pata, id único, sin repartir costo ni resultado del conjunto', () => {
   const padre = { position_id: 'P9', symbol: 'AAPL', instrument_type: 'OPTION', quantity: '1', last_price: '1.2', cost_price: '1', unrealized_profit_loss: '20' };
   const conSide = normalizarPosiciones({ ...padre, legs: [pataPos('L1', 'PUT', 90, '1', { side: 'BUY' }), pataPos(null, 'PUT', 95, '1', { side: 'SELL' })] });
-  assert.deepEqual(conSide.map(p => [p.posicionExternaId, p.lado, p.cantidad, p.cerrable, p.grupoId]), [['P9:L1', 'long', 1, true, 'P9'], ['P9:' + L('P', 95), 'short', 1, true, 'P9']]);
+  assert.deepEqual(conSide.map(p => [p.posicionExternaId, p.lado, p.cantidad, p.cerrable, p.grupoId]), [['P9:AAPL261120P00090000', 'long', 1, true, 'P9'], ['P9:' + L('P', 95), 'short', 1, true, 'P9']]);
   for (const p of conSide) assert.deepEqual([p.precioPromedio, p.precioActual, p.valorMercado, p.plNoRealizado], [null, null, null, null]);
   const conSigno = normalizarPosiciones({ ...padre, quantity: '-2', legs: [pataPos('L1', 'CALL', 100, '-2'), pataPos('L2', 'CALL', 105, '2')] });
   assert.deepEqual(conSigno.map(p => [p.lado, p.cantidad, p.cerrable]), [['short', 2, true], ['long', 2, true]]);
@@ -151,7 +181,7 @@ test('posiciones multi-pata: lado por pata, id único, sin repartir costo ni res
   const proporcion = normalizarPosiciones({ ...padre, quantity: '5', legs: [pataPos('L1', 'CALL', 100, '1', { side: 'BUY' }), pataPos('L2', 'CALL', 105, '1', { side: 'SELL' })] });
   assert.ok(proporcion.every(p => !p.cerrable)); // ¿1 contrato o proporción 1 de 5 estructuras?
   const [una] = normalizarPosiciones({ ...padre, quantity: '3', legs: [pataPos('L1', 'CALL', 100, '3', { side: 'SELL' })] });
-  assert.deepEqual([una.posicionExternaId, una.lado, una.cantidad, una.plNoRealizado, una.grupoId, una.cerrable], ['P9:L1', 'short', 3, 20, null, true]);
+  assert.deepEqual([una.posicionExternaId, una.lado, una.cantidad, una.plNoRealizado, una.grupoId, una.cerrable], ['P9:AAPL261120C00100000', 'short', 3, 20, null, true]);
 });
 
 test('reintentos: firma y nonce nuevos en cada intento; un POST con 5xx no se repite', async () => {

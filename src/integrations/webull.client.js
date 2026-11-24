@@ -107,6 +107,8 @@ export const construirCuerpoOrden = (orden, accountId) => {
   if (!Number.isSafeInteger(cantidad) || cantidad < 1) throw validacion('cantidad debe ser un entero positivo.');
   if (tipo === 'limit' && !(Number.isFinite(precioLimite) && precioLimite > 0)) throw validacion('precioLimite (positivo) requerido para orden limit.');
   if (tipo === 'market' && precioLimite != null) throw validacion('Una orden market no lleva precioLimite.');
+  // Verificado en paper: la misma estructura se acepta a límite y a mercado responde «No matching options strategy found».
+  if (tipo === 'market' && Array.isArray(componentes) && componentes.length > 1) throw validacion('Webull no admite estructuras de varias patas a mercado: usa una orden límite.');
   if (!Array.isArray(componentes) || componentes.length < 1 || componentes.length > 4) throw validacion('Se requieren de 1 a 4 componentes.');
   for (const c of componentes) {
     if (!['buy', 'sell'].includes(c?.accion)) throw validacion('accion debe ser buy o sell.');
@@ -175,26 +177,56 @@ const ladoDe = (evidencias, porDefecto) => {
   return vistas.size ? [...vistas][0] : porDefecto;
 };
 
-// Posición → una entrada por pata. La forma real de la respuesta multi-pata no está documentada: lo que no se pueda
-// determinar (lado o cantidad) queda con cerrable:false, nunca supuesto.
+/**
+ * Lados de una estructura cuyas patas no traen side ni quantity (así responde Webull; verificado en paper el 2026-11-24).
+ * No se supone nada por el nombre de la estrategia: se exige evidencia numérica coincidente.
+ *  1) Resultado: una pata comprada gana lo que sube su precio y una vendida lo pierde → el signo de P/L ÷ (último − costo); además el
+ *     monto debe cuadrar con `unidades` contratos por pata.
+ *  2) Costos: Σ ±costo de las patas = costo neto por acción del conjunto.
+ * Devuelve los lados solo si una única combinación cumple ambas; si no, null.
+ */
+export function deducirLados(p, patas) {
+  const unidades = Math.abs(num(p.quantity) ?? 0), total = num(p.cost);
+  const costos = patas.map(l => num(l.cost ?? l.cost_price));
+  if (!unidades || total == null || costos.some(c => c == null) || patas.length > 4) return null;
+  const mult = num(patas[0].option_contract_multiplier) || 100, neto = total / (mult * unidades);
+  const pistas = [];
+  for (let i = 0; i < patas.length; i += 1) {
+    const dif = (num(patas[i].last_price) ?? NaN) - costos[i], pl = num(patas[i].unrealized_profit_loss), bruto = Math.abs(dif) * mult * unidades;
+    if (!(Math.abs(dif) >= 0.01) || pl == null) { pistas.push(0); continue; }
+    if (Math.abs(Math.abs(pl) - bruto) > Math.max(1, bruto * 0.15)) return null; // no son `unidades` contratos por pata
+    pistas.push(Math.sign(pl) === Math.sign(dif) ? 1 : -1);
+  }
+  const validas = [];
+  for (let m = 0; m < 2 ** patas.length; m += 1) {
+    const signos = patas.map((_, i) => (m >> i & 1 ? 1 : -1));
+    if (signos.some((x, i) => pistas[i] && pistas[i] !== x)) continue;
+    if (Math.abs(signos.reduce((a, x, i) => a + x * costos[i], 0) - neto) <= 0.0051 * patas.length) validas.push(signos);
+  }
+  return validas.length === 1 ? { lados: validas[0].map(x => (x > 0 ? 'long' : 'short')), unidades, costos } : null;
+}
+
+// Posición → una entrada por pata. Lo que no se pueda determinar (lado o cantidad) queda con cerrable:false, nunca supuesto.
 export const normalizarPosiciones = p => {
   const total = num(p.quantity), patas = Array.isArray(p.legs) ? p.legs : [];
   const esOpcion = p.instrument_type === 'OPTION';
   const valor = (precio, cantidad, l) => (precio != null && cantidad != null ? precio * cantidad * (esOpcion ? num(l?.option_contract_multiplier) || 100 : 1) : null);
-  const idDe = (l, occ, i) => `${p.position_id}:${l.leg_id || occ || i}`;
+  const idDe = (l, occ, i) => `${p.position_id}:${occ || l.leg_id || i}`; // leg_id se repite en todas las patas: manda el contrato
 
   if (esOpcion && patas.length > 1) {
     const hayNegativas = patas.some(l => num(l.quantity) < 0);
     const unidades = Math.abs(total ?? 0);
     // Si una pata no es múltiplo del total, su "quantity" parece una proporción y no contratos.
     const cantidadesFiables = patas.every(l => num(l.quantity) && (!unidades || Math.abs(num(l.quantity)) % unidades === 0));
+    const mudas = patas.every(l => ladoExplicito(l) == null && num(l.quantity) == null);
+    const deducido = mudas ? deducirLados(p, patas) : null;
     // Precio, costo y resultado del padre son del conjunto: cada pata solo lleva los suyos (o null).
     return patas.map((l, i) => {
-      const occ = pataWebullAOcc(p.symbol, l), q = num(l.quantity), cantidad = q ? Math.abs(q) : null, precioActual = num(l.last_price);
-      const lado = ladoDe([ladoExplicito(l), negativo(q)], hayNegativas ? 'long' : null);
+      const occ = pataWebullAOcc(p.symbol, l), q = num(l.quantity), cantidad = deducido ? deducido.unidades : q ? Math.abs(q) : null, precioActual = num(l.last_price);
+      const lado = deducido ? deducido.lados[i] : ladoDe([ladoExplicito(l), negativo(q)], hayNegativas ? 'long' : null);
       return { posicionExternaId: idDe(l, occ, i), grupoId: p.position_id ?? null, simbolo: occ || String(p.symbol || ''), lado, cantidad,
-        precioPromedio: num(l.cost_price), precioActual, valorMercado: valor(precioActual, cantidad, l), claseActivo: 'us_option',
-        plNoRealizado: num(l.unrealized_profit_loss), plPctNoRealizado: null, cerrable: Boolean(occ && lado && cantidadesFiables) };
+        precioPromedio: num(l.cost ?? l.cost_price), precioActual, valorMercado: valor(precioActual, cantidad, l), claseActivo: 'us_option',
+        plNoRealizado: num(l.unrealized_profit_loss), plPctNoRealizado: null, cerrable: Boolean(occ && lado && (deducido || cantidadesFiables)) };
     });
   }
   const [l] = patas, occ = esOpcion && l ? pataWebullAOcc(p.symbol, l) : null;
@@ -229,6 +261,7 @@ export const createWebullClient = ({
   const host = new URL(url).host;
 
   // Sin reintentos en la capa HTTP: cada intento necesita su propia firma (nonce y hora), ver `trading`.
+  const dormir = esperar || (ms => new Promise(r => { setTimeout(r, ms); }));
   const http = createHttp({ proveedor: PROVEEDOR, fetch: fetchFn, timeoutMs, reintentos: 0, secretos: [key, secreto, token] });
   const pausar = esperar || (ms => new Promise(resolve => { setTimeout(resolve, ms); }));
 
@@ -328,7 +361,10 @@ export const createWebullClient = ({
     exigir();
     const cid = exigirId(id);
     await trading('/trading/orders/cancel', { method: 'POST', body: { account_id: await idCuenta(), client_order_id: cid } });
-    return consultarOrden(cid);
+    // Webull confirma la cancelación uno o dos segundos después: se espera un poco para no mostrarla aún viva.
+    let o = await consultarOrden(cid);
+    for (let i = 0; i < 4 && !['cancelada', 'ejecutada', 'rechazada', 'expirada'].includes(o.estado); i += 1) { await dormir(700); o = await consultarOrden(cid); }
+    return o;
   };
   const posiciones = async () => {
     exigir();

@@ -132,6 +132,8 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
   if (legs.length && signo == null) problemas.push('Sin cotización en todas las patas no se puede saber si la orden es de crédito o de débito.');
   if (!cantOk) problemas.push('La cantidad debe ser un entero entre 1 y 100.');
   if (tipo === 'limit' && !(isNum(limiteNum) && limiteNum > 0)) problemas.push('Indica un precio límite mayor que cero.');
+  const sinMercado = broker === 'webull' && legs.length > 1; // Webull solo admite estructuras a limite
+  if (tipo === 'market' && sinMercado) problemas.push('Webull no admite estructuras de varias patas a mercado: usa una orden límite.');
   if (tipo === 'market' && liq.sinCotizacion > 0) problemas.push('Sin cotización bid/ask válida: usa una orden límite.');
   const advertencias = [];
   if (liq.sinCotizacion > 0) advertencias.push(`${liq.sinCotizacion} de ${patas.length} patas sin cotización bid/ask válida: el precio estimado usa el último operado y puede no ser real.`);
@@ -337,7 +339,7 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
                 <input type="number" min="1" max="100" step="1" value={cantidad} onChange={e => setCantidad(e.target.value)} inputMode="numeric" />
               </Field>
               <Field label="Tipo de orden">
-                <select value={tipo} onChange={e => setTipo(e.target.value)}><option value="limit">Límite</option><option value="market">Mercado</option></select>
+                <select value={tipo} onChange={e => setTipo(e.target.value)}><option value="limit">Límite</option><option value="market" disabled={sinMercado}>Mercado{sinMercado ? ' (no disponible en Webull)' : ''}</option></select>
               </Field>
               {tipo === 'limit' && (
                 <Field label={credito ? 'Precio por acción (×100 = lo que cobras por contrato)' : 'Precio por acción (×100 = costo por contrato)'} help={credito ? 'Lo mínimo que aceptas cobrar. Por defecto, el punto medio.' : 'Lo máximo que aceptas pagar. Por defecto, el punto medio.'}>
