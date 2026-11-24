@@ -1,5 +1,5 @@
-// Botón «Operar»: arma las patas de la estrategia con la cadena actual y abre el ticket de orden paper.
-import { useState } from 'react';
+// Botón «Operar»: arma las patas de la estrategia con la cadena actual y abre el ticket de orden simulada.
+import { useRef, useState } from 'react';
 import TicketOrden from './TicketOrden';
 import { ErrorMessage } from './States';
 import { confluencias, estrategias, evaluaciones, mercado, selecciones } from '../api/resources';
@@ -42,6 +42,7 @@ export async function cargarCadena(simbolo, { diasMin = 7, diasMax = null, codig
  */
 export default function BotonOperar({ empresa, estrategiaCodigo, datos, label, className = 'btn btn--primary', disabled, diasMin, diasMax, legs: legsElegidas, chain: chainElegida }) {
   const [estado, setEstado] = useState({ busy: false, error: null, ticket: null });
+  const boton = useRef(null);
 
   const abrir = async () => {
     setEstado({ busy: true, error: null, ticket: null });
@@ -66,13 +67,13 @@ export default function BotonOperar({ empresa, estrategiaCodigo, datos, label, c
   const t = estado.ticket;
   return (
     <>
-      <button type="button" className={className} onClick={abrir} disabled={disabled || estado.busy} aria-busy={estado.busy}>
+      <button ref={boton} type="button" className={className} onClick={abrir} disabled={disabled || estado.busy} aria-busy={estado.busy}>
         {estado.busy ? 'Preparando…' : label || (estrategiaCodigo ? 'Operar ' + (ESTRATEGIA_LABELS[estrategiaCodigo] || estrategiaCodigo) : 'Operar')}
       </button>
       {estado.error && <ErrorMessage error={estado.error} title="No se pudo preparar la orden" />}
       {t && (
         <TicketOrden
-          open empresa={empresa} chain={t.chain} legs={t.legs} estrategiaCodigo={t.codigo} analisis={t.analisis}
+          open empresa={empresa} chain={t.chain} legs={t.legs} estrategiaCodigo={t.codigo} analisis={t.analisis} abridor={boton.current}
           onClose={() => setEstado({ busy: false, error: null, ticket: null })}
         />
       )}
