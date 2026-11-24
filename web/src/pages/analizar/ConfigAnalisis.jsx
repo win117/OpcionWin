@@ -29,11 +29,11 @@ export default function ConfigAnalisis({ config, onChange, catalogo, corriendo, 
   const setDias = (k, v) => onChange({ ...config, [k]: v === '' ? NaN : Number(v) });
   const valDias = v => (Number.isFinite(v) ? v : '');
   const { recursos } = resolverConfig(config, catalogo);
-  const resumen = `${seleccionados.length} ${seleccionados.length === 1 ? 'core' : 'cores'}` + (totalM ? `, ${marcadasM} de ${totalM} métricas` : '');
+  const resumen = `${seleccionados.length} ${seleccionados.length === 1 ? 'factor' : 'factores'}` + (totalM ? `, ${marcadasM} de ${totalM} métricas` : '');
 
   return (
     <section className={(embebido ? '' : 'card ') + 'cfg-card'} aria-label="Configurar análisis">
-      <p className="muted small">Elige los <Termino id="core">cores</Termino>, su peso (0–5) y las métricas. Al analizar solo se sincronizan los datos que piden los cores activos y solo ellos se evalúan.</p>
+      <p className="muted small">Elige los <Termino id="core">factores</Termino>, su peso (0–5) y las métricas. Al analizar solo se traen los datos que piden los factores activos, y no se repite lo traído en los últimos 10 minutos.</p>
       <ul className="cfg-cores">
         {CORES.map(core => {
           const c = config.cores[core];
@@ -52,7 +52,7 @@ export default function ConfigAnalisis({ config, onChange, catalogo, corriendo, 
                 <label className="cfg-peso">
                   <span className="muted small">Peso</span>
                   <input type="number" min="0" max="5" step="0.5" inputMode="decimal" value={c.peso} disabled={!c.on || corriendo}
-                    aria-label={'Peso del core ' + CORE_LABELS[core]}
+                    aria-label={'Peso del factor ' + CORE_LABELS[core]}
                     onChange={e => setCore(core, { peso: Math.min(5, Math.max(0, Number(e.target.value) || 0)) })} />
                 </label>
                 {c.on && senales.length > 0 && (
@@ -87,7 +87,7 @@ export default function ConfigAnalisis({ config, onChange, catalogo, corriendo, 
       </ul>
       <div className="cfg-opciones">
         <label className="check"><input type="checkbox" checked={config.sincronizar} onChange={e => onChange({ ...config, sincronizar: e.target.checked })} disabled={corriendo} /><span>Sincronizar datos antes de analizar</span></label>
-        <label className="check"><input type="checkbox" checked={config.institucional} onChange={e => onChange({ ...config, institucional: e.target.checked })} disabled={corriendo || !config.sincronizar || !config.cores.institucional.on} /><span>Descargar 13F institucional <small className="muted">(lento: 1–3 min; requiere el core Institucional)</small></span></label>
+        <label className="check"><input type="checkbox" checked={config.institucional} onChange={e => onChange({ ...config, institucional: e.target.checked })} disabled={corriendo || !config.sincronizar || !config.cores.institucional.on} /><span>Descargar 13F institucional <small className="muted">(lento: 1–3 min; requiere el factor Institucional)</small></span></label>
         <label className="check"><input type="checkbox" checked={config.contratos} onChange={e => onChange({ ...config, contratos: e.target.checked })} disabled={corriendo || !config.sincronizar} /><span>Traer contratos de opciones <small className="muted">(strikes, vencimientos y griegas de las estrategias sugeridas)</small></span></label>
         {config.sincronizar && <p className="muted small" aria-live="polite">Se sincronizará: empresa{recursos.length ? ', ' + recursos.map(r => RECURSO_LABELS[r].toLowerCase()).join(', ') : ''}.</p>}
       </div>
@@ -107,7 +107,7 @@ export default function ConfigAnalisis({ config, onChange, catalogo, corriendo, 
         {!embebido && <button type="button" className="btn btn--primary btn--lg" onClick={onAnalizar} disabled={corriendo || !seleccionados.length || Boolean(errDias)}>
           {corriendo ? 'Analizando…' : 'Analizar'}
         </button>}
-        {!embebido && !seleccionados.length && <span className="muted small">Selecciona al menos un core con peso mayor que 0.</span>}
+        {!embebido && !seleccionados.length && <span className="muted small">Elige al menos un factor con peso mayor que 0.</span>}
       </div>
     </section>
   );

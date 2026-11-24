@@ -1,7 +1,8 @@
-// Lectura direccional de cada core activo: Alcista / En rango / Bajista, con puntaje, confianza y motivos principales.
-// El core Fundamental va primero y destacado: es la tesis de fondo sobre la que se elige la estrategia.
+// Lectura direccional de cada factor activo: Alcista / En rango / Bajista, con puntaje, confianza y motivos principales.
+// El factor Fundamental va primero y destacado: es la tesis de fondo sobre la que se elige la estrategia.
 import { direccion, ScoreBar } from '../../components/Gauge';
 import { Empty } from '../../components/States';
+import { Termino } from '../../components/Termino';
 import { CORE_LABELS } from '../../utils/constants';
 import { fmtDateTime, fmtPct, isNum } from '../../utils/format';
 import { textoPuntaje } from '../../utils/estrategiasOrden';
@@ -15,7 +16,14 @@ const QUE_SIGNIFICA = {
   neutral: 'Sin datos suficientes para una lectura.',
 };
 
-function TarjetaCore({ core, ev, destacado }) {
+/** Por qué un factor activo no tiene lectura. */
+function sinLectura(core, analizados) {
+  if (!analizados) return 'Pulsa «Analizar» para evaluar este factor.';
+  if (core === 'institucional') return 'Sin datos 13F de esta empresa: no cuenta en el puntaje. Puedes descargarlos con «Configurar», opción «Descargar 13F institucional».';
+  return 'No entró en el último análisis. Vuelve a analizar para incluirlo.';
+}
+
+function TarjetaCore({ core, ev, destacado, analizados }) {
   const dir = direccion(ev?.puntaje);
   const confianza = metrica(ev?.metricas, 'confianza');
   const motivos = (ev?.motivos || []).slice(0, destacado ? 3 : 2);
@@ -23,27 +31,27 @@ function TarjetaCore({ core, ev, destacado }) {
     <li className={'lectura lectura--' + dir.tono + (destacado ? ' lectura--destacado' : '')}>
       <div className="lectura__head">
         <span className="lectura__core">{CORE_LABELS[core] || core}</span>
-        <span className={'lectura__dir dir dir--' + dir.tono}><span aria-hidden="true">{ICONO[dir.tono]}</span> {ev ? dir.texto : 'Sin evaluar'}</span>
+        <span className={'lectura__dir dir dir--' + dir.tono}><span aria-hidden="true">{ICONO[dir.tono]}</span> {ev ? dir.texto : core === 'institucional' && analizados ? 'Sin datos 13F' : 'Sin evaluar'}</span>
       </div>
       {ev ? (
         <>
           <ScoreBar value={ev.puntaje} label={`Puntaje direccional de ${CORE_LABELS[core]} (0 bajista, 50 en rango, 100 alcista)`} />
           <p className="muted small lectura__meta">
-            {isNum(confianza) ? `Confianza ${fmtPct(confianza, 0)} · ` : ''}Cobertura {fmtPct(ev.cobertura, 0)} · {fmtDateTime(ev.finalizadaEn || ev.createdAt)}
+            {isNum(confianza) && <><Termino id="confianza">Confianza</Termino> {fmtPct(confianza, 0)}, </>}<Termino id="cobertura">cobertura</Termino> {fmtPct(ev.cobertura, 0)}, {fmtDateTime(ev.finalizadaEn || ev.createdAt)}
           </p>
           <p className="small lectura__sig">{QUE_SIGNIFICA[dir.tono]}</p>
           {motivos.length > 0 && <ul className="list list--compact small">{motivos.map((m, i) => <li key={i}>{m}</li>)}</ul>}
-          {ev.datosFaltantes?.length > 0 && <p className="small down">Faltan datos: {ev.datosFaltantes.join(', ')}</p>}
+          {ev.datosFaltantes?.length > 0 && <p className="small aviso-texto">Faltan datos: {ev.datosFaltantes.join(', ')}</p>}
         </>
       ) : (
-        <p className="muted small">Pulsa «Analizar» para evaluar este core.</p>
+        <p className="muted small">{sinLectura(core, analizados)}</p>
       )}
     </li>
   );
 }
 
-/** `evaluaciones` = { core → última evaluación completada }; `coresActivos` = cores con peso > 0 en la configuración. */
-export default function LecturaCores({ evaluaciones, coresActivos }) {
+/** `evaluaciones` = { core → última evaluación completada }; `coresActivos` = con peso > 0; `analizados` = los del último análisis (undefined si no hay). */
+export default function LecturaCores({ evaluaciones, coresActivos, analizados }) {
   const orden = [...coresActivos].sort((a, b) => (a === 'fundamental' ? -1 : b === 'fundamental' ? 1 : 0));
   const conPuntaje = orden.map(c => evaluaciones?.[c]?.puntaje).filter(isNum);
   const media = conPuntaje.length ? conPuntaje.reduce((s, v) => s + v, 0) / conPuntaje.length : null;
@@ -52,19 +60,19 @@ export default function LecturaCores({ evaluaciones, coresActivos }) {
     <section className="card" aria-labelledby="lectura-titulo">
       <div className="card__header">
         <div>
-          <h2 id="lectura-titulo">Lectura por core</h2>
-          <p className="muted small">¿Va alcista, en rango o bajista? 0–40 bajista · 40–60 en rango · 60–100 alcista.</p>
+          <h2 id="lectura-titulo">Lectura por <Termino id="core">factor</Termino></h2>
+          <p className="muted small">De 0 a 40 bajista, de 40 a 60 en rango y de 60 a 100 alcista.</p>
         </div>
         {isNum(media) && (
           <p className="lectura__global">
             <span className="muted small">Promedio simple</span>
-            <span className={'dir dir--' + global.tono}>{ICONO[global.tono]} {global.texto} · {textoPuntaje(media)}</span>
+            <span className={'dir dir--' + global.tono}>{ICONO[global.tono]} {global.texto}, {textoPuntaje(media)}</span>
           </p>
         )}
       </div>
       {!orden.length
-        ? <Empty title="Sin cores activos">Activa al menos un core en «Configurar cores».</Empty>
-        : <ul className="lectura-grid">{orden.map(c => <TarjetaCore key={c} core={c} ev={evaluaciones?.[c]} destacado={c === 'fundamental'} />)}</ul>}
+        ? <Empty title="Sin factores activos">Activa al menos uno en «Configurar».</Empty>
+        : <ul className="lectura-grid">{orden.map(c => <TarjetaCore key={c} core={c} ev={evaluaciones?.[c]} destacado={c === 'fundamental'} analizados={analizados} />)}</ul>}
     </section>
   );
 }

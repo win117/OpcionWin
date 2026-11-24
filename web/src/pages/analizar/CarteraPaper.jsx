@@ -1,4 +1,4 @@
-// Cartera paper: cuenta, posiciones abiertas (cierre por pata o por estructura) y órdenes recientes (con cancelación).
+// Cartera de la cuenta simulada: cuenta, posiciones abiertas (cierre por pata o por estructura) y órdenes recientes (con cancelación).
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { Badge } from '../../components/Badge';
 import { Field } from '../../components/Field';
@@ -85,11 +85,11 @@ function CerrarModal({ cierre, onClose, onDone }) {
       footer={ok ? <button type="button" className="btn btn--primary" onClick={onClose}>Cerrar ventana</button> : (
         <>
           <button type="button" className="btn" onClick={onClose} disabled={busy}>Cancelar</button>
-          <button type="button" className="btn btn--danger" onClick={confirmar} disabled={busy || !listo}>{busy ? 'Enviando…' : 'Confirmar cierre (paper)'}</button>
+          <button type="button" className="btn btn--danger" onClick={confirmar} disabled={busy || !listo}>{busy ? 'Enviando…' : 'Confirmar cierre simulado'}</button>
         </>
       )}>
       <div className="stack">
-        <div className="banner-paper" role="note"><strong>PAPER · dinero simulado.</strong></div>
+        <div className="banner-paper" role="note"><strong>Orden simulada.</strong> No se usa dinero real.</div>
         {ok ? (
           <div className={'alert ' + (ok.estado === 'rechazada' ? 'alert--danger' : 'alert--success')} role="status">
             {ok.estado === 'rechazada' ? 'El broker rechazó la orden de cierre.' : 'Orden de cierre enviada.'} Estado: <Badge value={ok.estado || 'enviada'} />.
@@ -126,8 +126,8 @@ function CerrarModal({ cierre, onClose, onDone }) {
   );
 }
 
-/** vista: 'todo' | 'posiciones' | 'ordenes'. `broker`: código del broker elegido (alpaca|webull). */
-export default function CarteraPaper({ titulo = 'Cartera paper', broker, vista = 'todo' }) {
+/** vista: 'todo' | 'posiciones' | 'ordenes'. `broker`: código del broker elegido (alpaca|webull). `noOperativo`: por qué no se puede operar con él. */
+export default function CarteraPaper({ nombre = 'el broker', broker, vista = 'todo', noOperativo = null }) {
   const st = useAsync(() => operacion.resumen(broker), [broker]);
   const [cerrar, setCerrar] = useState(null);
   const [cancelando, setCancelando] = useState(null);
@@ -151,13 +151,13 @@ export default function CarteraPaper({ titulo = 'Cartera paper', broker, vista =
   };
 
   return (
-    <section className="inicio-sec cartera" aria-label={titulo}>
-      <div className="inicio-sec__head">
-        <h2>{titulo}</h2>
+    <section className="card cartera" aria-labelledby="cartera-titulo">
+      <div className="section-head">
+        <h2 id="cartera-titulo">Cuenta simulada</h2>
         <button type="button" className="btn btn--sm" onClick={st.reload} disabled={st.loading}>{st.loading ? 'Actualizando…' : 'Actualizar'}</button>
       </div>
-      <div className="inicio-card cartera__body">
-        <div className="banner-paper" role="note"><strong>PAPER · dinero simulado.</strong> Se actualiza cada 30 s.</div>
+      <div className="cartera__body">
+        {noOperativo && <div className="alert alert--warning" role="alert"><div><strong>{nombre} no está operativo.</strong> {noOperativo}</div></div>}
         {st.error && !d && <ErrorMessage error={st.error} onRetry={st.reload} title="No se pudo cargar la cartera" />}
         {st.loading && !d && <p className="muted" role="status"><Spinner small /> Cargando cartera…</p>}
         {st.error && d && <p className="small down" role="alert">No se pudo actualizar: {st.error.message}</p>}
@@ -171,8 +171,8 @@ export default function CarteraPaper({ titulo = 'Cartera paper', broker, vista =
                 <div><dt>Efectivo</dt><dd>{fmtMoney(cuenta.efectivo)}</dd></div>
                 <div><dt>Poder de compra</dt><dd>{fmtMoney(cuenta.poderCompra)}</dd></div>
               </dl>
-            ) : (
-              <div className="alert alert--warning" role="note">No hay datos de la cuenta paper{broker ? ' de ' + broker : ''}{d.error ? ': ' + d.error : '.'} Revisa las credenciales del broker en el servidor.</div>
+            ) : !noOperativo && (
+              <div className="alert alert--warning" role="note">No hay datos de la cuenta simulada de {nombre}{d.error ? ': ' + d.error : '.'} Revisa las credenciales del broker en el servidor.</div>
             )}
 
             {vista !== 'ordenes' && <h3>Posiciones abiertas</h3>}

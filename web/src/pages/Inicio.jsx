@@ -1,8 +1,9 @@
-// Inicio: franja de índices, mapa del mercado en vivo y las 5 mejores por estrategia (automático).
+// Inicio: franja de índices, mapa del mercado en vivo, movimientos del día y las 5 mejores por estrategia (automático).
 import { Link, useOutletContext } from 'react-router-dom';
 import { ScoreBar } from '../components/Gauge';
 import { Empty, ErrorMessage, Notice } from '../components/States';
 import { Termino } from '../components/Termino';
+import Movimientos from '../components/Movimientos';
 import MapaMercado from './mercado/MapaMercado';
 import { useSondeo } from '../hooks/useSondeo';
 import { screener } from '../api/resources';
@@ -120,6 +121,7 @@ export default function Inicio() {
       <h1 className="sr-only">Inicio</h1>
       <Indices mercado={mercado} />
       <MapaMercado />
+      <Movimientos />
       <Screener />
       <p className="disclaimer">{DISCLAIMER}</p>
     </div>

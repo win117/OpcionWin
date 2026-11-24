@@ -10,13 +10,14 @@ import { etiquetaEvento } from '../../utils/senales';
 import { esperar } from './flujo';
 import { fmtDate, fmtMoney } from '../../utils/format';
 
+const ALTO = 420;
 const SMAS = [
   { n: 20, color: '--accent' },
   { n: 50, color: '--info-fg' },
   { n: 200, color: '--warning-fg' },
 ];
 
-export default function GraficoPanel({ simbolo, diarias, loading, error, onReload, onCambio, niveles = [], eventos = [] }) {
+export default function GraficoPanel({ simbolo, registrada = true, diarias, loading, error, onReload, onCambio, niveles = [], eventos = [] }) {
   const [opts, setOpts] = useState({ rango: '6M', intervalo: 'D', tipo: 'velas', sma: { 20: true, 50: true, 200: false }, volumen: false });
   const [verNiveles, setVerNiveles] = useState(true);
   const [verSenales, setVerSenales] = useState(true);
@@ -62,7 +63,7 @@ export default function GraficoPanel({ simbolo, diarias, loading, error, onReloa
     finally { if (vivo.current) setCargando(false); }
   };
 
-  if (loading && !diarias.length) return <Loading text="Cargando velas…" />;
+  if (loading && !diarias.length) return <div className="grafico-hueco"><Loading text="Cargando precios…" /></div>;
   if (error && !diarias.length) return <ErrorMessage error={error} onRetry={onReload} />;
 
   return (
@@ -74,7 +75,7 @@ export default function GraficoPanel({ simbolo, diarias, loading, error, onReloa
             <button type="button" className={'seg__btn seg__btn--solo' + (verNiveles ? ' is-active' : '')} aria-pressed={verNiveles} onClick={() => setVerNiveles(v => !v)}>Soportes y resistencias</button>
             <button type="button" className={'seg__btn seg__btn--solo' + (verSenales ? ' is-active' : '')} aria-pressed={verSenales} onClick={() => setVerSenales(v => !v)} disabled={opts.intervalo !== 'D'} title={opts.intervalo !== 'D' ? 'Las señales se muestran en vista diaria' : undefined}>Señales compra/venta</button>
           </div>
-          <CandleChart velas={velas} height={460} overlays={overlays} tipo={opts.tipo} volumen={opts.volumen} rango={opts.rango} lineasPrecio={lineas} marcadores={marcadores} />
+          <CandleChart velas={velas} height={ALTO} overlays={overlays} tipo={opts.tipo} volumen={opts.volumen} rango={opts.rango} lineasPrecio={lineas} marcadores={marcadores} />
           <ul className="chips chips--legend" aria-label="Leyenda">
             {overlays.map(o => <li key={o.id}><i className="swatch" style={{ background: `var(${o.color})` }} /> {o.label}</li>)}
             {verNiveles && <li><i className="swatch" style={{ background: 'var(--down)' }} /> Resistencia</li>}
@@ -85,7 +86,7 @@ export default function GraficoPanel({ simbolo, diarias, loading, error, onReloa
             <ul className="niveles" aria-label="Niveles de soporte y resistencia">
               {niveles.map(n => (
                 <li key={n.tipo + n.precio} className={n.tipo === 'resistencia' ? 'down' : 'up'}>
-                  <strong>{n.tipo === 'resistencia' ? 'Resistencia' : 'Soporte'}</strong> {fmtMoney(n.precio)} <span className="muted">· {n.toques} toques · último {fmtDate(n.ultimoToque * 1000)}</span>
+                  <strong>{n.tipo === 'resistencia' ? 'Resistencia' : 'Soporte'}</strong> {fmtMoney(n.precio)} <span className="muted">{n.toques} toques, último {fmtDate(n.ultimoToque * 1000)}</span>
                 </li>
               ))}
             </ul>
@@ -93,8 +94,8 @@ export default function GraficoPanel({ simbolo, diarias, loading, error, onReloa
         </>
       ) : <Empty title="Sin velas almacenadas">Pulsa «Actualizar datos» o carga el histórico para ver el gráfico.</Empty>}
       <div className="chart-hist">
-        {diarias.length > 0 && <span className="muted small">Histórico disponible: {fmtDate(diarias[0].time * 1000)} → {fmtDate(diarias.at(-1).time * 1000)} ({diarias.length} sesiones)</span>}
-        <button type="button" className="btn btn--sm" onClick={cargarLargo} disabled={cargando}>{cargando ? 'Cargando histórico…' : 'Cargar histórico largo (10 años)'}</button>
+        {diarias.length > 0 && <span className="muted small">Histórico disponible: {fmtDate(diarias[0].time * 1000)} → {fmtDate(diarias.at(-1).time * 1000)} ({diarias.length} sesiones){registrada ? '' : '. Precios en vivo mientras se guardan los datos'}</span>}
+        {registrada && <button type="button" className="btn btn--sm" onClick={cargarLargo} disabled={cargando}>{cargando ? 'Cargando histórico…' : 'Cargar histórico largo (10 años)'}</button>}
       </div>
       {cargando && <Loading text="Descargando histórico del proveedor…" />}
       <ErrorMessage error={errorCarga} title="No se pudo cargar el histórico" />

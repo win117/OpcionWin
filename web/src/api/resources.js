@@ -87,7 +87,6 @@ export async function listLatest(source, params = {}, { dateOf = r => r.createdA
 const sym = simbolo => enc(String(simbolo).toUpperCase());
 
 export const mercado = {
-  panorama: params => api.get('/mercado/panorama' + qs(params)),
   historicos: (simbolo, params) => api.get(`/mercado/historicos/${sym(simbolo)}` + qs(params)),
   cotizaciones: (simbolo, params) => api.get(`/mercado/cotizaciones/${sym(simbolo)}` + qs(params)),
   fundamentales: (simbolo, params) => api.get(`/mercado/fundamentales/${sym(simbolo)}` + qs(params)),
@@ -98,26 +97,12 @@ export const mercado = {
   opcionesResumen: (simbolo, params) => api.get(`/mercado/opciones/resumen/${sym(simbolo)}` + qs(params)),
   estado: () => api.get('/mercado/estado'),
   mapa: () => api.get('/mercado/mapa'),
+  movimientos: () => api.get('/mercado/movimientos'),
   ficha: simbolo => api.get(`/mercado/mapa/${sym(simbolo)}`),
 };
 
-/**
- * Estado del mercado para la barra superior y el inicio. Usa GET /mercado/estado y, si aún no existe en el servidor,
- * cae al panorama de índices (sin abierto/cerrado). Devuelve { abierto, proximaApertura, proximoCierre, indices, fuente }.
- */
-export const INDICES_MERCADO = ['SPY', 'QQQ', 'IWM', 'DIA'];
-export async function cargarEstadoMercado() {
-  try {
-    return await mercado.estado();
-  } catch (error) {
-    if (error?.name === 'AbortError') throw error;
-    const p = await mercado.panorama({ simbolos: INDICES_MERCADO.join(',') });
-    return {
-      abierto: null, proximaApertura: null, proximoCierre: null, fuente: 'panorama',
-      indices: (p?.items || []).filter(i => !i.error).map(i => ({ simbolo: i.simbolo, nombre: i.nombre, precio: i.ultimo, cambioPct: i.cambioPct })),
-    };
-  }
-}
+/** Estado del mercado para la cabecera y el inicio: { abierto, proximaApertura, proximoCierre, indices, fuente }. */
+export const cargarEstadoMercado = () => mercado.estado();
 
 // Ranking por estrategia del universo; el servidor lo calcula y actualiza solo.
 export const screener = {

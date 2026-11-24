@@ -5,17 +5,15 @@ import { useBroker } from '../context/BrokerContext';
 import { useConexionBroker } from '../hooks/useConexionBroker';
 import { useLookup } from '../hooks/useLookup';
 import { configuraciones } from '../api/resources';
-import { Notice } from '../components/States';
 
 export default function Ordenes() {
-  const { broker, nombre, entorno, bloqueado, info } = useBroker();
+  const { broker, nombre, bloqueado, info } = useBroker();
   const { conexion, conexionesL } = useConexionBroker();
   const configsL = useLookup(configuraciones);
   return (
     <>
-      <PageHeader title="Órdenes" subtitle={`Órdenes de ${nombre} · ${entorno}. Cambia de broker en la barra superior.`} />
-      {bloqueado && <Notice tone="warning" title={nombre + ' no está operativo.'}>{info?.mensaje || 'El servidor indica que aún no se puede operar con este broker.'}</Notice>}
-      <CarteraPaper key={broker} broker={broker} vista="ordenes" titulo={`Órdenes recientes en ${nombre}`} />
+      <PageHeader title="Órdenes" subtitle={`Cuenta simulada de ${nombre}, sin dinero real. Para cambiar de broker usa el selector de la cabecera o, en pantallas chicas, el menú de tu cuenta.`} />
+      <CarteraPaper key={broker} broker={broker} nombre={nombre} vista="ordenes" noOperativo={bloqueado ? info?.mensaje || 'Todavía no se puede operar con este broker.' : null} />
       <details className="card details">
         <summary>Historial y órdenes desde configuración</summary>
         {conexion
