@@ -192,6 +192,17 @@ test('Alpaca: mapeo de estados, consulta, cancelación y posiciones', async () =
   assert.deepEqual(p, { posicionExternaId: 'a1', simbolo: 'AAPL260116C00200000', lado: 'short', cantidad: 2, precioPromedio: 1.5, precioActual: 1.2, valorMercado: -240, claseActivo: 'us_option', plNoRealizado: null, plPctNoRealizado: null });
 });
 
+test('Alpaca: búsqueda por client_order_id y posiciones en formato no reconocido', async () => {
+  let posiciones = {};
+  const fetch = fakeFetch(url => (url.pathname === '/v2/positions' ? { json: posiciones } : { json: { id: 'ord-1', client_order_id: 'key 1', status: 'new', qty: '1', filled_qty: '0' } }));
+  const cliente = alpaca(fetch);
+  assert.equal((await cliente.consultarPorClientOrderId('key 1')).ordenExternaId, 'ord-1');
+  assert.equal(fetch.llamadas[0].url.pathname, '/v2/orders:by_client_order_id'); assert.equal(fetch.llamadas[0].url.searchParams.get('client_order_id'), 'key 1');
+  await assert.rejects(cliente.consultarPorClientOrderId(''), e => e.codigo === 'VALIDACION');
+  await assert.rejects(cliente.posiciones(), e => e.codigo === 'PROVEEDOR');
+  posiciones = []; assert.deepEqual(await cliente.posiciones(), []);
+});
+
 test('HTTP: 429 se reintenta con espera y luego tiene éxito', async () => {
   const esperas = [];
   const fetch = fakeFetch([

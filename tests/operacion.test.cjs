@@ -14,14 +14,18 @@ const DIA=86400000;
 const venc=new Date(Date.now()+30*DIA).toISOString().slice(0,10);
 const occ=(t,k)=>'TEST'+venc.slice(2).replace(/-/g,'')+t+String(k*1000).padStart(8,'0');
 
+const err=(codigo,status,mensaje)=>Object.assign(new Error(mensaje),{name:'IntegrationError',proveedor:'alpaca',codigo,status,mensaje});
+const viva=(c,lado,cantidad,extra={})=>({posicionExternaId:'ext-'+c.simbolo,simbolo:c.simbolo,lado,cantidad,precioPromedio:2,precioActual:2.5,valorMercado:null,...extra});
+
 function fake(){
   const enviadas=[];
-  const f={enviadas,vivas:[],sinCredenciales:false,
+  const f={enviadas,vivas:[],sinCredenciales:false,remota:{estado:'cancelada'},enBroker:new Map(),busquedas:[],canceladas:[],
     estado:()=>({alpaca:{configurado:true}}),
     alpaca:{
       cuenta:async()=>{if(f.sinCredenciales){const e=new Error('x');e.name='IntegrationError';e.proveedor='alpaca';e.codigo='SIN_CREDENCIALES';e.mensaje='Faltan credenciales.';throw e;}return{cuentaExternaId:'PA1',estado:'ACTIVE',efectivo:1000,poderCompra:2000,patrimonio:1500,nivelOpciones:3};},
       enviarOrden:async o=>{enviadas.push(o);return{ordenExternaId:'ext-'+enviadas.length,estado:'aceptada',estadoProveedor:'accepted'};},
-      consultarOrden:async()=>({estado:'cancelada'}),cancelarOrden:async()=>undefined,
+      consultarOrden:async()=>f.remota,cancelarOrden:async id=>{f.canceladas.push(id);},
+      consultarPorClientOrderId:async clave=>{f.busquedas.push(clave);if(!f.enBroker.has(clave))throw err('NO_ENCONTRADO',404,'order not found');return f.enBroker.get(clave);},
       posiciones:async()=>f.vivas,
     },
   };
@@ -31,6 +35,7 @@ function fake(){
     cuenta:async()=>({cuentaExternaId:'WB1',estado:'ACTIVE',efectivo:500,poderCompra:900,patrimonio:700,nivelOpciones:null}),
     enviarOrden:async o=>{f.enviadasWebull.push(o);return{ordenExternaId:'wb-'+f.enviadasWebull.length,estado:'enviada',estadoProveedor:'SUBMITTED_REQUEST'};},
     consultarOrden:async()=>({estado:'cancelada',estadoProveedor:'CANCELLED'}),cancelarOrden:async()=>undefined,
+    consultarPorClientOrderId:async()=>{throw err('NO_ENCONTRADO',404,'x');},
     posiciones:async()=>f.vivasWebull,
   };
   return f;
@@ -46,7 +51,7 @@ async function entorno(){
   let token;
   const call=async(method,path,body,status=200,headers={})=>{
     const r=await fetch(base+path,{method,headers:{...(token?{Authorization:'Bearer '+token}:{}),...(body!==undefined?{'Content-Type':'application/json'}:{}),...headers},body:body===undefined?undefined:JSON.stringify(body)});
-    const j=await r.json(); assert.equal(r.status,status,method+' '+path+' → '+JSON.stringify(j)); return j.data;
+    const j=await r.json(); assert.ok([].concat(status).includes(r.status),r.status+' '+method+' '+path+' → '+JSON.stringify(j)); return j.data;
   };
   token=(await call('POST','/sesiones',{email:user.email,password,baseDatos:'mongodb'})).token;
   const emp=await call('POST','/empresas',{simbolo:'TEST',nombre:'Test Corp',mercado:'NASDAQ'},201);
@@ -58,7 +63,7 @@ async function entorno(){
   };
   await mk('c100','call',100); await mk('p90','put',90); await mk('p85','put',85); await mk('c110','call',110); await mk('c115','call',115); await mk('ajeno','call',100,otra);
   const k=()=>'key-'+randomUUID();
-  return {call,integraciones,contratos,emp,k,cerrar:()=>server.close()};
+  return {call,integraciones,contratos,emp,k,factory,ctx:{userId,database:'mongodb'},cerrar:()=>server.close()};
 }
 const pata=(c,accion,extra={})=>({contratoId:c._id,accion,...extra});
 
@@ -105,12 +110,15 @@ test('ticket: validaciones',async()=>{
     await post({...ok,componentes:['c100','p90','p85','c110','c115'].map(c=>pata(e.contratos[c],'buy'))});
     await post({...ok,precioLimite:undefined});
     await post({...ok,tipo:'market'});
+    await post({...ok,componentes:[pata(e.contratos.c100,'buy',{proporcion:11})]});
     await post({...ok,cantidad:101});
-    await post({...ok,credito:true}); // crédito en una pata
+    await post({...ok,credito:'si'});
     await post({...ok,componentes:[pata(e.contratos.c100,'buy'),pata(e.contratos.c110,'sell')]}); // 2 patas sin estrategiaCodigo
     await post({...ok,componentes:[pata(e.contratos.c100,'buy',{intencion:'sell_to_open'})]});
     await e.call('POST','/ordenes/ticket',ok,400,{'Idempotency-Key':'corta'});
     assert.equal(e.integraciones.enviadas.length,0); assert.equal((await e.call('GET','/ordenes')).total,0);
+    assert.equal((await post({...ok,credito:true},201)).orden.credito,false); // crédito en una pata: se ignora
+    assert.equal(e.integraciones.enviadas[0].credito,undefined);
   } finally{e.cerrar();}
 });
 
@@ -137,31 +145,37 @@ test('construirCuerpoOrden: convención crédito/débito',()=>{
   const una={...base,componentes:[legs[0]],precioLimite:2};
   assert.equal(construirCuerpoOrden(una).limit_price,'2'); assert.equal(construirCuerpoOrden(una).order_class,undefined);
   assert.throws(()=>construirCuerpoOrden({...una,credito:true}),x=>x.codigo==='VALIDACION');
-  assert.throws(()=>construirCuerpoOrden({clientOrderId:'k',tipo:'market',cantidad:1,credito:true,componentes:legs}),x=>x.codigo==='VALIDACION');
+  assert.equal(construirCuerpoOrden({clientOrderId:'k',tipo:'market',cantidad:1,credito:true,componentes:legs}).limit_price,undefined); // market de crédito: sin precio
   assert.throws(()=>construirCuerpoOrden({...base,precioLimite:-1,credito:true}),x=>x.codigo==='VALIDACION');
   assert.throws(()=>construirCuerpoOrden({...base,precioLimite:0}),x=>x.codigo==='VALIDACION');
 });
 
-test('cierre: long → sell_to_close, short → buy_to_close; idempotente; solo abiertas',async()=>{
+test('cierre: long → sell_to_close, short → buy_to_close con cantidad en vivo; idempotente; solo abiertas',async()=>{
   const e=await entorno();
   try{
-    const conexion=(await e.call('POST','/broker/paper/conexion')).conexion;
-    const datosPos=(c,lado,cantidad,estado='abierta')=>({conexionId:conexion._id,posicionExternaId:'ext-'+c.simbolo,contratoId:c._id,lado,cantidad,precioPromedio:2,actualizadaEn:new Date().toISOString(),estado});
-    const larga=await e.call('POST','/posiciones',datosPos(e.contratos.c100,'long',3),201), corta=await e.call('POST','/posiciones',datosPos(e.contratos.p90,'short',2),201);
+    const {c100,p90}=e.contratos;
+    e.integraciones.vivas=[viva(c100,'long',2),viva(p90,'short',2)];
+    const [larga,corta]=(await e.call('GET','/broker/paper/resumen')).posiciones.map(p=>p.posicionId);
+    e.integraciones.vivas[0].cantidad=3; // cambió en el broker después de sincronizar
     const key=e.k();
-    const r=await e.call('POST','/posiciones/'+larga._id+'/cierre',{tipo:'limit',precioLimite:1.5},201,{'Idempotency-Key':key});
+    const r=await e.call('POST','/posiciones/'+larga+'/cierre',{tipo:'limit',precioLimite:1.5},201,{'Idempotency-Key':key});
     assert.equal(r.orden.estado,'aceptada'); assert.equal(r.orden.cantidad,3);
     let env=e.integraciones.enviadas.at(-1);
     assert.equal(env.componentes[0].accion,'sell'); assert.equal(env.componentes[0].intencion,'sell_to_close'); assert.equal(env.clientOrderId,key);
-    const rep=await e.call('POST','/posiciones/'+larga._id+'/cierre',{tipo:'limit',precioLimite:1.5},200,{'Idempotency-Key':key});
+    const rep=await e.call('POST','/posiciones/'+larga+'/cierre',{tipo:'limit',precioLimite:1.5},200,{'Idempotency-Key':key});
     assert.equal(rep.orden._id,r.orden._id); assert.equal(e.integraciones.enviadas.length,1);
-    await e.call('POST','/posiciones/'+corta._id+'/cierre',{tipo:'limit',precioLimite:1.5},201,{'Idempotency-Key':e.k()});
+    await e.call('POST','/posiciones/'+larga+'/cierre',{tipo:'limit',precioLimite:1.6},409,{'Idempotency-Key':key}); // misma clave, otro precio
+    await e.call('POST','/posiciones/'+corta+'/cierre',{tipo:'limit',precioLimite:1.5},201,{'Idempotency-Key':e.k()});
     env=e.integraciones.enviadas.at(-1);
     assert.equal(env.componentes[0].intencion,'buy_to_close'); assert.equal(env.cantidad,2);
     assert.ok((await e.call('GET','/configuraciones')).items.some(c=>c.nombre.startsWith('Cierre TEST')));
-    await e.call('POST','/posiciones/'+larga._id+'/cierre',{tipo:'limit'},400,{'Idempotency-Key':e.k()}); // limit sin precio
-    await e.call('PUT','/posiciones/'+corta._id,datosPos(e.contratos.p90,'short',2,'cerrada'),200);
-    await e.call('POST','/posiciones/'+corta._id+'/cierre',{tipo:'limit',precioLimite:1},409,{'Idempotency-Key':e.k()});
+    await e.call('POST','/posiciones/'+larga+'/cierre',{tipo:'limit'},400,{'Idempotency-Key':e.k()}); // limit sin precio
+    e.integraciones.vivas=[]; // ya no está en el broker
+    await e.call('POST','/posiciones/'+corta+'/cierre',{tipo:'limit',precioLimite:1},409,{'Idempotency-Key':e.k()});
+    assert.equal((await e.call('GET','/posiciones/'+corta)).estado,'cerrada');
+    e.integraciones.alpaca.posiciones=async()=>{throw err('PROVEEDOR',null,'formato');};
+    await e.call('POST','/posiciones/'+larga+'/cierre',{tipo:'market'},502,{'Idempotency-Key':e.k()}); // sin datos vivos no se cierra
+    assert.equal(e.integraciones.enviadas.length,2);
   } finally{e.cerrar();}
 });
 
@@ -206,7 +220,7 @@ test('broker webull: disponibles, conexión, ticket, resumen, cancelación y cie
     const body={broker:'webull',empresaId:e.emp._id,tipo:'limit',precioLimite:2.5,cantidad:1,componentes:[pata(e.contratos.c100,'buy')]};
     const r=await e.call('POST','/ordenes/ticket',body,201,{'Idempotency-Key':key});
     assert.equal(r.orden.conexionId,w.conexion._id); assert.equal(r.orden.ordenExternaId,'wb-1'); assert.equal(r.orden.estado,'enviada');
-    assert.match(r.orden.eventos[0].mensaje,/^Webull paper/);
+    assert.match(r.orden.eventos.at(-1).mensaje,/^Webull paper/);
     assert.equal(e.integraciones.enviadasWebull.length,1); assert.equal(e.integraciones.enviadas.length,0);
     assert.equal(e.integraciones.enviadasWebull[0].componentes[0].simbolo,e.contratos.c100.contratoExternoId);
     const rep=await e.call('POST','/ordenes/ticket',body,200,{'Idempotency-Key':key});
@@ -217,12 +231,14 @@ test('broker webull: disponibles, conexión, ticket, resumen, cancelación y cie
     assert.equal((await e.call('GET','/ordenes?conexionId='+a.conexion._id)).total,0);
     // resumen por broker
     e.integraciones.vivasWebull=[{posicionExternaId:'w1',simbolo:e.contratos.c100.simbolo,lado:'long',cantidad:1,precioPromedio:2,precioActual:3,valorMercado:300}];
+    assert.equal((await e.call('POST','/ordenes/'+r.orden._id+'/actualizacion')).estado,'cancelada');
     const rs=await e.call('GET','/broker/paper/resumen?broker=webull');
     assert.equal(rs.conexionId,w.conexion._id); assert.equal(rs.cuenta.poderCompra,900); assert.equal(rs.posiciones.length,1); assert.equal(rs.ordenes.length,1);
     assert.ok(rs.posiciones[0].posicionId); assert.equal((await e.call('GET','/posiciones?conexionId='+w.conexion._id)).total,1);
     assert.equal((await e.call('GET','/broker/paper/resumen')).posiciones.length,0); // alpaca sigue vacío
     // cancelación y cierre
-    const c=await e.call('POST','/ordenes/'+r.orden._id+'/cancelacion'); assert.equal(c.estado,'cancelada');
+    const r4=await e.call('POST','/ordenes/ticket',body,201,{'Idempotency-Key':e.k()});
+    const c=await e.call('POST','/ordenes/'+r4.orden._id+'/cancelacion'); assert.equal(c.estado,'cancelada');
     const pos=(await e.call('GET','/posiciones?conexionId='+w.conexion._id)).items[0];
     const cr=await e.call('POST','/posiciones/'+pos._id+'/cierre',{tipo:'market'},201,{'Idempotency-Key':e.k()});
     assert.equal(cr.orden.conexionId,w.conexion._id); assert.equal(e.integraciones.enviadasWebull.at(-1).componentes[0].intencion,'sell_to_close');
@@ -230,5 +246,253 @@ test('broker webull: disponibles, conexión, ticket, resumen, cancelación y cie
     e.integraciones.webull.configurado=false;
     const d2=await e.call('GET','/brokers/disponibles'); const wb=d2.items.find(i=>i.codigo==='webull');
     assert.equal(wb.configurado,false); assert.equal(wb.operativo,false); assert.ok(wb.mensaje);
+  } finally{e.cerrar();}
+});
+
+// --- Envío incierto, rechazos y claves reutilizadas
+const ticketDe=e=>({empresaId:e.emp._id,tipo:'limit',precioLimite:2.5,cantidad:2,componentes:[pata(e.contratos.c100,'buy')]});
+const ordenDe=async(e,key)=>(await e.call('GET','/ordenes')).items.find(o=>o.idempotencyKey===key);
+
+test('reintento tras un envío incierto: adopta la orden del broker o la reenvía si no existe',async()=>{
+  const e=await entorno();
+  try{
+    const {integraciones:f}=e, body=ticketDe(e), enviar=f.alpaca.enviarOrden;
+    const post=(key,status,b=body)=>e.call('POST','/ordenes/ticket',b,status,{'Idempotency-Key':key});
+    // 1) llegó, pero se perdió la respuesta
+    const k1=e.k();
+    f.alpaca.enviarOrden=async()=>{throw err('RED',null,'Tiempo de espera agotado');};
+    await post(k1,502);
+    assert.equal((await ordenDe(e,k1)).estado,'pendiente'); assert.equal((await ordenDe(e,k1)).eventos.at(-1).tipo,'error_envio');
+    f.enBroker.set(k1,{ordenExternaId:'viva-1',estado:'aceptada',estadoProveedor:'new',cantidadEjecutada:0});
+    f.alpaca.enviarOrden=enviar;
+    const r1=await post(k1,200);
+    assert.equal(r1.orden.ordenExternaId,'viva-1'); assert.equal(r1.orden.estado,'aceptada'); assert.equal(f.enviadas.length,0);
+    // 2) no llegó: se reenvía con la misma clave
+    const k2=e.k();
+    f.alpaca.enviarOrden=async()=>{throw err('PROVEEDOR',503,'no disponible');};
+    await post(k2,502);
+    f.alpaca.enviarOrden=enviar;
+    const r2=await post(k2,200);
+    assert.equal(r2.orden.estado,'aceptada'); assert.equal(f.enviadas.length,1); assert.equal(f.enviadas[0].clientOrderId,k2);
+    await post(k2,200); assert.equal(f.enviadas.length,1);
+    // 3) si no se puede consultar al broker, no se reenvía
+    const k3=e.k();
+    f.alpaca.enviarOrden=async()=>{throw err('RED',null,'x');};
+    await post(k3,502);
+    f.alpaca.enviarOrden=enviar;
+    const buscar=f.alpaca.consultarPorClientOrderId;
+    f.alpaca.consultarPorClientOrderId=async()=>{throw err('RED',null,'x');};
+    await post(k3,502); assert.equal(f.enviadas.length,1); assert.equal((await ordenDe(e,k3)).estado,'pendiente');
+    f.alpaca.consultarPorClientOrderId=buscar;
+    // 4) clave duplicada según el broker → la orden sí existía
+    const k4=e.k();
+    f.enBroker.set(k4,{ordenExternaId:'viva-4',estado:'aceptada'});
+    f.alpaca.enviarOrden=async()=>{throw err('PROVEEDOR',422,'client_order_id must be unique');};
+    assert.equal((await post(k4,201)).orden.ordenExternaId,'viva-4');
+    // 5) otra solicitud con la misma clave
+    await post(k4,409,{...body,cantidad:3});
+    await post(k4,409,{...body,broker:'webull'});
+  } finally{e.cerrar();}
+});
+
+test('dos tickets simultáneos con la misma clave crean una sola orden',async()=>{
+  const e=await entorno();
+  try{
+    const key=e.k(), f=e.integraciones;
+    f.alpaca.enviarOrden=async o=>{
+      if(f.enBroker.has(o.clientOrderId)) throw err('PROVEEDOR',422,'client_order_id must be unique');
+      const r={ordenExternaId:'unica',estado:'aceptada'}; f.enBroker.set(o.clientOrderId,r); await new Promise(x=>setTimeout(x,20)); return r;
+    };
+    const rs=await Promise.all([1,2].map(()=>e.call('POST','/ordenes/ticket',ticketDe(e),[200,201],{'Idempotency-Key':key})));
+    assert.ok(rs.every(r=>r.orden.ordenExternaId==='unica'));
+    assert.equal((await e.call('GET','/ordenes')).total,1);
+  } finally{e.cerrar();}
+});
+
+test('rechazo definitivo (4xx) → rechazada; credenciales o límite → sigue pendiente y se puede reintentar',async()=>{
+  const e=await entorno();
+  try{
+    const f=e.integraciones, enviar=f.alpaca.enviarOrden;
+    const post=(key,status)=>e.call('POST','/ordenes/ticket',ticketDe(e),status,{'Idempotency-Key':key});
+    for(const error of [err('PROVEEDOR',403,'insufficient buying power'),err('PROVEEDOR',422,'x'),err('VALIDACION',null,'estrategia')]){
+      const key=e.k(); f.alpaca.enviarOrden=async()=>{throw error;};
+      await post(key,error.codigo==='VALIDACION'?400:502);
+      const o=await ordenDe(e,key); assert.equal(o.estado,'rechazada'); assert.equal(o.eventos.at(-1).mensaje,error.mensaje);
+      f.alpaca.enviarOrden=enviar;
+      assert.equal((await post(key,200)).orden.estado,'rechazada'); // no se reenvía
+    }
+    assert.equal(f.enviadas.length,0);
+    const key=e.k(); f.alpaca.enviarOrden=async()=>{throw err('LIMITE',429,'x');};
+    await post(key,429); assert.equal((await ordenDe(e,key)).estado,'pendiente');
+    f.alpaca.enviarOrden=enviar;
+    assert.equal((await post(key,200)).orden.estado,'aceptada');
+  } finally{e.cerrar();}
+});
+
+test('cancelar una orden sin id externo consulta antes al broker',async()=>{
+  const e=await entorno();
+  try{
+    const f=e.integraciones, buscar=f.alpaca.consultarPorClientOrderId;
+    const incierta=async()=>{const key=e.k(); f.alpaca.enviarOrden=async()=>{throw err('RED',null,'x');}; await e.call('POST','/ordenes/ticket',ticketDe(e),502,{'Idempotency-Key':key}); return ordenDe(e,key);};
+    const cancelar=(o,status=200)=>e.call('POST','/ordenes/'+o._id+'/cancelacion',undefined,status);
+    const viva=await incierta();
+    f.enBroker.set(viva.idempotencyKey,{ordenExternaId:'x-1',estado:'aceptada'});
+    assert.equal((await cancelar(viva)).estado,'cancelada'); assert.deepEqual(f.canceladas,['x-1']); // se canceló en el broker
+    const llena=await incierta();
+    f.enBroker.set(llena.idempotencyKey,{ordenExternaId:'x-2',estado:'ejecutada',cantidadEjecutada:2,precioPromedioEjecucion:2.4});
+    const l=await cancelar(llena); assert.equal(l.estado,'ejecutada'); assert.equal(l.precioPromedioEjecucion,2.4); assert.equal(f.canceladas.length,1);
+    const dudosa=await incierta();
+    f.alpaca.consultarPorClientOrderId=async()=>{throw err('RED',null,'x');};
+    await cancelar(dudosa,502); assert.equal((await ordenDe(e,dudosa.idempotencyKey)).estado,'pendiente');
+    f.alpaca.consultarPorClientOrderId=buscar;
+    assert.equal((await cancelar(dudosa)).estado,'cancelada'); assert.equal(f.canceladas.length,1);
+  } finally{e.cerrar();}
+});
+
+// --- Actualización y sincronización de órdenes
+test('actualización y sincronización: solo órdenes vivas, ejecución parcial y fallos por orden',async()=>{
+  const e=await entorno();
+  try{
+    const f=e.integraciones, consultas=[];
+    const crear=()=>e.call('POST','/ordenes/ticket',ticketDe(e),201,{'Idempotency-Key':e.k()}).then(r=>r.orden);
+    const [a,b]=[await crear(),await crear()];
+    f.alpaca.consultarOrden=async id=>{consultas.push(id);return{estado:'parcial',cantidadEjecutada:1,precioPromedioEjecucion:2.4};};
+    const u=await e.call('POST','/ordenes/'+a._id+'/actualizacion');
+    assert.equal(u._id,a._id); assert.equal(u.estado,'parcial'); assert.equal(u.cantidadEjecutada,1); assert.equal(u.precioPromedioEjecucion,2.4); assert.deepEqual(consultas,[a.ordenExternaId]);
+    const eventos=u.eventos.length;
+    assert.equal((await e.call('POST','/ordenes/'+a._id+'/actualizacion')).eventos.length,eventos); // sin cambios no agrega eventos
+    f.alpaca.consultarOrden=async()=>({estado:'parcial',cantidadEjecutada:2,precioPromedioEjecucion:2.45});
+    assert.equal((await e.call('POST','/ordenes/'+a._id+'/actualizacion')).cantidadEjecutada,2); // mismo estado, otra ejecución
+    const resumen=(await e.call('GET','/broker/paper/resumen')).ordenes.find(o=>o._id===a._id);
+    assert.equal(resumen.cantidadEjecutada,2); assert.equal(resumen.precioPromedioEjecucion,2.45);
+    f.alpaca.consultarOrden=async id=>{consultas.push(id);if(id===a.ordenExternaId)throw err('PROVEEDOR',500,'x');return{estado:'ejecutada',cantidadEjecutada:2,precioPromedioEjecucion:2.5};};
+    const {createSincronizador}=require('../dist/api/v1/services/sincronizacion.service');
+    const sync=()=>createSincronizador({integraciones:f,factory:e.factory}).ejecutar(e.ctx,{recurso:'ordenes',conexionId:a.conexionId});
+    assert.deepEqual(await sync(),{procesados:1,fallidos:1});
+    assert.equal((await e.call('GET','/ordenes/'+b._id)).estado,'ejecutada');
+    consultas.length=0; await sync(); assert.deepEqual(consultas,[a.ordenExternaId]); // b ya es terminal
+    await e.call('POST','/ordenes/'+b._id+'/actualizacion'); assert.deepEqual(consultas,[a.ordenExternaId]);
+    await e.call('POST','/ordenes/nada/actualizacion',undefined,400);
+  } finally{e.cerrar();}
+});
+
+test('actualización de una orden pendiente de envío incierto la recupera del broker',async()=>{
+  const e=await entorno();
+  try{
+    const f=e.integraciones, key=e.k();
+    f.alpaca.enviarOrden=async()=>{throw err('RED',null,'x');};
+    await e.call('POST','/ordenes/ticket',ticketDe(e),502,{'Idempotency-Key':key});
+    const o=await ordenDe(e,key);
+    assert.equal((await e.call('POST','/ordenes/'+o._id+'/actualizacion')).estado,'pendiente');
+    f.enBroker.set(key,{ordenExternaId:'x-9',estado:'aceptada'});
+    assert.equal((await e.call('POST','/ordenes/'+o._id+'/actualizacion')).ordenExternaId,'x-9');
+  } finally{e.cerrar();}
+});
+
+// --- Cierre de estructuras
+test('cierre-grupo: una orden multi-pata con intenciones de cierre, cantidades vivas y bloqueo de cierres duplicados',async()=>{
+  const e=await entorno();
+  try{
+    const f=e.integraciones, c=e.contratos;
+    f.vivas=[viva(c.p85,'long',2,{grupoId:'G'}),viva(c.p90,'short',2,{grupoId:'G'}),viva(c.c110,'short',2),viva(c.c115,'long',2)];
+    const ps=(await e.call('GET','/broker/paper/resumen')).posiciones;
+    assert.equal(ps[0].grupoId,'G'); assert.ok(ps.every(p=>p.cerrable));
+    const ids=ps.map(p=>p.posicionId);
+    const post=(body,status,key=e.k())=>e.call('POST','/posiciones/cierre-grupo',body,status,{'Idempotency-Key':key});
+    const base={posicionIds:ids,tipo:'limit',precioLimite:0.6,credito:false};
+    await e.call('POST','/posiciones/cierre-grupo',base,400);
+    for(const posicionIds of [undefined,[ids[0]],[ids[0],ids[0]],[...ids,'otra'],[1,2]]) await post({...base,posicionIds},400);
+    await post({...base,precioLimite:undefined},400); await post({...base,posicionIds:[ids[0],'nada']},400);
+    f.vivas.forEach(v=>{v.cantidad=3;});
+    const key=e.k(), r=await post(base,201,key);
+    const env=f.enviadas.at(-1);
+    assert.equal(env.cantidad,3); assert.ok(env.componentes.every(x=>x.proporcion===1));
+    assert.deepEqual(env.componentes.map(x=>x.intencion),['sell_to_close','buy_to_close','buy_to_close','sell_to_close']);
+    assert.equal(construirCuerpoOrden(env).limit_price,'0.6');
+    assert.equal((await post(base,200,key)).orden._id,r.orden._id); await post({...base,credito:true},409,key);
+    // cierre en curso: ni el grupo ni una pata suelta
+    f.remota={estado:'aceptada'};
+    await post(base,409);
+    await e.call('POST','/posiciones/'+ids[0]+'/cierre',{tipo:'market'},409,{'Idempotency-Key':e.k()});
+    f.remota={estado:'cancelada'}; // en el broker ya terminó aunque la copia local diga aceptada
+    f.vivas[0].cantidad=4; f.vivas[1].cantidad=2;
+    await post({posicionIds:ids.slice(0,2),tipo:'market',credito:true},201);
+    const dos=f.enviadas.at(-1); assert.equal(dos.cantidad,2); assert.deepEqual(dos.componentes.map(x=>x.proporcion),[2,1]); assert.equal(dos.credito,true);
+    assert.equal(construirCuerpoOrden(dos).limit_price,undefined);
+    const n=f.enviadas.length;
+    f.vivas[2].cantidad=23; f.vivas[3].cantidad=1; await post({...base,posicionIds:ids.slice(2)},400); // proporción > 10
+    f.vivas.pop(); await post({...base,posicionIds:ids.slice(2)},409); // una pata ya no está
+    assert.equal(f.enviadas.length,n);
+  } finally{e.cerrar();}
+});
+
+test('posición sin lado determinable: se muestra y se guarda como no cerrable',async()=>{
+  const e=await entorno();
+  try{
+    const f=e.integraciones, c=e.contratos;
+    f.vivas=[viva(c.c100,null,1,{precioPromedio:null,precioActual:null,grupoId:'G',cerrable:false}),viva(c.c110,'short',1,{grupoId:'G'})];
+    const r=await e.call('GET','/broker/paper/resumen'), [p,q]=r.posiciones;
+    assert.equal(r.avisoSincronizacion,undefined);
+    assert.equal(p.cerrable,false); assert.equal(p.lado,null); assert.equal(p.pl,null); assert.ok(p.posicionId); assert.equal(q.cerrable,true);
+    await e.call('POST','/posiciones/'+p.posicionId+'/cierre',{tipo:'market'},409,{'Idempotency-Key':e.k()});
+    await e.call('POST','/posiciones/cierre-grupo',{posicionIds:[p.posicionId,q.posicionId],tipo:'market'},409,{'Idempotency-Key':e.k()});
+    assert.equal(f.enviadas.length,0);
+  } finally{e.cerrar();}
+});
+
+test('resumen: avisa si falla la sincronización y solo consulta los contratos de las posiciones vivas',async()=>{
+  const e=await entorno();
+  try{
+    const f=e.integraciones; f.vivas=[viva(e.contratos.c100,'long',1)];
+    const filtros=[];
+    const factory=(name,ctx)=>{const r=e.factory(name,ctx);return name==='contratos'?{...r,list:o=>{filtros.push(o.filtro);return r.list(o);}}:name==='posiciones'?{...r,create:async()=>{throw new Error('base caída');}}:r;};
+    const {createOperacion}=require('../dist/api/v1/services/operacion.service');
+    const r=await createOperacion({integraciones:f,factory,cola:createCola()}).resumen(e.ctx);
+    assert.match(r.avisoSincronizacion,/No se pudieron guardar/); assert.equal(r.posiciones.length,1); assert.equal(r.posiciones[0].contratoId,e.contratos.c100._id);
+    assert.ok(filtros.length&&filtros.every(x=>x.contratoExternoId===e.contratos.c100.simbolo));
+  } finally{e.cerrar();}
+});
+
+// --- CRUD protegido y conexión única
+test('CRUD: auditoría y posiciones de solo lectura; órdenes sin campos del servidor ni borrado en vivo',async()=>{
+  const e=await entorno();
+  try{
+    for(const r of ['auditoria','posiciones']){
+      await e.call('POST','/'+r,{},405); await e.call('POST','/'+r+'/lote',{items:[{}]},405); await e.call('PUT','/'+r+'/x',{},405);
+      await e.call('DELETE','/'+r+'/x',undefined,405); await e.call('POST','/'+r+'/eliminacion-lote',{ids:['x']},405); await e.call('GET','/'+r);
+    }
+    const t=(await e.call('POST','/ordenes/ticket',ticketDe(e),201,{'Idempotency-Key':e.k()})).orden;
+    const datos={conexionId:t.conexionId,configuracionId:t.configuracionId,tipo:'limit',vigencia:'day',cantidad:1,precioLimite:1,
+      componentes:[{contratoId:e.contratos.c100._id,simbolo:e.contratos.c100.simbolo,accion:'buy',intencion:'buy_to_open',proporcion:1}]};
+    for(const extra of [{estado:'ejecutada'},{ordenExternaId:'x'},{eventos:[]},{cantidadEjecutada:1},{huella:'x'},{idempotencyKey:'corta'}]) await e.call('POST','/ordenes',{...datos,...extra},400);
+    await e.call('POST','/ordenes',{...datos,idempotencyKey:t.idempotencyKey},409);
+    const lote=await e.call('POST','/ordenes/lote',{items:[{...datos,estado:'ejecutada'}]}); assert.equal(lote.fallidos,1);
+    const o=await e.call('POST','/ordenes',datos,201);
+    assert.equal(o.estado,'pendiente'); assert.ok(o.idempotencyKey);
+    const {_id,_revision,usuarioId,createdAt,updatedAt,...editable}=o;
+    const ed=await e.call('PUT','/ordenes/'+_id,{...editable,cantidad:2}); assert.equal(ed.cantidad,2); assert.equal(ed.idempotencyKey,o.idempotencyKey);
+    for(const extra of [{estado:'ejecutada'},{ordenExternaId:'x'},{idempotencyKey:'otra-clave-1'},{eventos:[{tipo:'x'}]}]) await e.call('PUT','/ordenes/'+_id,{...editable,...extra},400);
+    await e.call('PUT','/ordenes/'+t._id,datos,409); // ya enviada
+    await e.call('POST','/ordenes/'+_id+'/eventos',{tipo:'x'},405); await e.call('POST','/ordenes/'+_id+'/componentes',datos.componentes[0],405); await e.call('GET','/ordenes/'+_id+'/eventos');
+    await e.call('DELETE','/ordenes/'+_id,undefined,409); await e.call('DELETE','/ordenes/'+t._id,undefined,409);
+    assert.equal((await e.call('POST','/ordenes/eliminacion-lote',{ids:[t._id]})).fallidos,1);
+    await e.call('POST','/ordenes/'+_id+'/cancelacion'); await e.call('DELETE','/ordenes/'+_id);
+  } finally{e.cerrar();}
+});
+
+test('conexión: peticiones simultáneas no duplican; respeta la existente y reemplaza la revocada',async()=>{
+  const e=await entorno();
+  try{
+    const rs=await Promise.all([1,2,3].map(()=>e.call('POST','/broker/paper/conexion')));
+    assert.equal(new Set(rs.map(r=>r.conexion._id)).size,1);
+    assert.equal((await e.call('GET','/conexiones-broker')).total,1); assert.equal((await e.call('GET','/brokers')).total,1);
+    const c=(await e.call('GET','/conexiones-broker')).items[0];
+    await e.call('PUT','/conexiones-broker/'+c._id,{brokerId:c.brokerId,alias:c.alias,entorno:'paper',estado:'revocada'});
+    const nueva=await e.call('POST','/broker/paper/conexion'); assert.notEqual(nueva.conexion._id,c._id);
+    assert.equal((await e.call('POST','/broker/paper/conexion')).conexion._id,nueva.conexion._id);
+    // una conexión previa con id aleatorio se reutiliza
+    const b=await e.call('POST','/brokers',{codigo:'webull',nombre:'Webull',activo:true,entornos:['paper']},201);
+    const previa=await e.call('POST','/conexiones-broker',{brokerId:b._id,alias:'Antigua',entorno:'paper',credencialRef:'env:WEBULL'},201);
+    assert.equal((await e.call('POST','/broker/paper/conexion',{broker:'webull'})).conexion._id,previa._id);
   } finally{e.cerrar();}
 });

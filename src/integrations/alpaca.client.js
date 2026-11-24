@@ -150,7 +150,6 @@ export const construirCuerpoOrden = orden => {
   if (!['day', 'gtc'].includes(vigencia)) throw validacion('vigencia debe ser day o gtc.');
   if (!Number.isSafeInteger(cantidad) || cantidad < 1) throw validacion('cantidad debe ser un entero positivo.');
   if (tipo === 'limit' && !Number.isFinite(precioLimite)) throw validacion('precioLimite requerido para orden limit.');
-  if (credito && tipo !== 'limit') throw validacion('credito requiere una orden limit.');
   if (tipo === 'market' && precioLimite != null) throw validacion('Una orden market no lleva precioLimite.');
   if (!Array.isArray(componentes) || componentes.length < 1 || componentes.length > 4) throw validacion('Se requieren de 1 a 4 componentes.');
   for (const c of componentes) {
@@ -430,6 +429,12 @@ export const createAlpacaClient = ({
 
   const consultarOrden = async idOrden => normalizarOrden(await trading(`/v2/orders/${exigirId(idOrden)}`, { query: { nested: true } }));
 
+  // Recupera una orden cuyo envío quedó sin respuesta (NO_ENCONTRADO si nunca llegó).
+  const consultarPorClientOrderId = async clave => {
+    if (typeof clave !== 'string' || !clave.trim() || clave.length > 128) throw validacion('clientOrderId requerido (máximo 128 caracteres).');
+    return normalizarOrden(await trading('/v2/orders:by_client_order_id', { query: { client_order_id: clave } }));
+  };
+
   // DELETE responde 204 sin cuerpo; luego se consulta el estado vigente.
   const cancelarOrden = async idOrden => {
     await trading(`/v2/orders/${exigirId(idOrden)}`, { method: 'DELETE' });
@@ -437,8 +442,11 @@ export const createAlpacaClient = ({
   };
 
   const posiciones = async () => {
-    const lista = await trading('/v2/positions');
-    return (Array.isArray(lista) ? lista : []).map(normalizarPosicion);
+    const r = await trading('/v2/positions');
+    const lista = Array.isArray(r) ? r : r?.positions;
+    // Nunca tratar una respuesta irreconocible como "sin posiciones": cerraría las guardadas.
+    if (!Array.isArray(lista)) throw new IntegrationError({ proveedor: PROVEEDOR, codigo: 'PROVEEDOR', mensaje: 'Alpaca devolvió posiciones en un formato no reconocido.' });
+    return lista.map(normalizarPosicion);
   };
 
   return {
@@ -447,6 +455,6 @@ export const createAlpacaClient = ({
     opcionesFeed,
     configurado,
     buscarActivo, listarActivos, velas, velasLote, cotizacionesLote, reloj, cotizacion, contratos, snapshotsOpciones, noticias,
-    cuenta, enviarOrden, consultarOrden, cancelarOrden, posiciones,
+    cuenta, enviarOrden, consultarOrden, consultarPorClientOrderId, cancelarOrden, posiciones,
   };
 };

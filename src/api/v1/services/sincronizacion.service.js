@@ -2,7 +2,7 @@
 // Cada recurso hace "upsert" con _id determinista: repetir una sincronización no duplica datos.
 import boom from '@hapi/boom';
 import { repository } from '../../../repositories';
-import { adaptadorDe } from './broker.service';
+import { adaptadorDe, createBroker, ESTADOS_TERMINALES } from './broker.service';
 import { idDeterminista, todos, guardar, guardarLote, obtener, parchar } from './registros';
 
 const DIA = 86400000;
@@ -123,19 +123,23 @@ export function createSincronizador({ integraciones, factory = repository }) {
   // Adaptador de trading según el broker de la conexión (alpaca | webull).
   const adaptadorConexion = async (ctx, conexion) => adaptadorDe(integraciones, (await obtener('brokers', ctx, conexion.brokerId, factory)).codigo);
 
+  const broker = createBroker({ integraciones, factory });
   const porConexion = {
     async posiciones(ctx, conexion, conteo) {
       const lista = await (await adaptadorConexion(ctx, conexion)).posiciones();
       let n = 0;
       const vigentes = new Set();
       for (const p of lista) {
+        if (p.cantidad === 0) continue; // ya sin contratos: se cierra abajo
         const [contrato] = await todos('contratos', ctx, { contratoExternoId: p.simbolo }, factory);
         if (!contrato) { conteo.fallidos++; continue; } // posición sin contrato sincronizado (p. ej. acciones)
         const id = idDeterminista(conexion._id, 'pos', p.posicionExternaId || p.simbolo);
         vigentes.add(id);
         await guardar('posiciones', ctx, id, {
           conexionId: conexion._id, posicionExternaId: p.posicionExternaId || p.simbolo, contratoId: contrato._id,
-          lado: p.lado, cantidad: Math.abs(p.cantidad), precioPromedio: Math.abs(p.precioPromedio), actualizadaEn: new Date(), estado: 'abierta',
+          ...(p.lado ? { lado: p.lado } : {}), ...(p.cantidad != null ? { cantidad: Math.abs(p.cantidad) } : {}),
+          ...(p.precioPromedio != null ? { precioPromedio: Math.abs(p.precioPromedio) } : {}), ...(p.grupoId ? { grupoId: p.grupoId } : {}),
+          cerrable: p.cerrable !== false && Boolean(p.lado) && p.cantidad != null, actualizadaEn: new Date(), estado: 'abierta',
         }, factory);
         n++;
       }
@@ -147,16 +151,15 @@ export function createSincronizador({ integraciones, factory = repository }) {
       }
       return n;
     },
-    async ordenes(ctx, conexion) {
-      const ordenes = (await todos('ordenes', ctx, { conexionId: conexion._id }, factory)).filter(o => o.ordenExternaId);
-      const adaptador = ordenes.length ? await adaptadorConexion(ctx, conexion) : null;
-      for (const o of ordenes) {
-        const remoto = await adaptador.consultarOrden(o.ordenExternaId);
-        const ejecucion = remoto.precioPromedioEjecucion != null ? '; ejecutada a ' + remoto.precioPromedioEjecucion : '';
-        if (remoto.estado !== o.estado) await parchar('ordenes', ctx, o._id, d => ({ ...d, estado: remoto.estado,
-          eventos: [...(d.eventos || []), { tipo: 'sincronizacion', mensaje: 'Estado del broker: ' + remoto.estado + ejecucion }] }), factory);
+    async ordenes(ctx, conexion, conteo) {
+      const vigentes = (await todos('ordenes', ctx, { conexionId: conexion._id }, factory))
+        .filter(o => !ESTADOS_TERMINALES.includes(o.estado) && (o.ordenExternaId || o.eventos?.length));
+      let n = 0;
+      for (const o of vigentes) {
+        try { await broker.actualizar(ctx, o._id); n++; }
+        catch { conteo.fallidos++; } // una orden con error no detiene a las demás
       }
-      return ordenes.length;
+      return n;
     },
   };
 

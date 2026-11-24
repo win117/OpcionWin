@@ -1,7 +1,7 @@
 // Adaptador Webull: firma, símbolos OCC, estados, cuerpos de orden y flujo con fetch simulado (sin red).
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { firmar, occAPataWebull, pataWebullAOcc, idClienteWebull, detectarEstrategia, construirCuerpoOrden, mapearEstadoOrden, createWebullClient } = require('../dist/integrations/webull.client');
+const { firmar, occAPataWebull, pataWebullAOcc, idClienteWebull, detectarEstrategia, construirCuerpoOrden, mapearEstadoOrden, normalizarOrden, normalizarPosiciones, createWebullClient } = require('../dist/integrations/webull.client');
 const { createIntegrations } = require('../dist/integrations');
 
 test('firma: vector oficial de la documentación', () => {
@@ -18,11 +18,13 @@ test('OCC ↔ pata de Webull', () => {
   assert.deepEqual(p, { symbol: 'AAPL', option_expire_date: '2026-11-20', option_type: 'CALL', strike_price: '220.50' });
   assert.equal(pataWebullAOcc('AAPL', { option_expire_date: '2026-11-20', option_type: 'CALL', option_exercise_price: '220.5' }), 'AAPL261120C00220500');
   assert.equal(pataWebullAOcc('AAPL', {}), null);
+  assert.equal(pataWebullAOcc('BRK.B', { option_expire_date: '2026-11-20', option_type: 'PUT', option_exercise_price: '400' }), 'BRKB261120P00400000'); // la raíz OCC no lleva punto
+  assert.equal(occAPataWebull('BRKB261120P00400000').symbol, 'BRKB');
   assert.throws(() => occAPataWebull('AAPL'), e => e.codigo === 'VALIDACION');
 });
 
 test('estados de orden y client_order_id', () => {
-  const m = { PENDING: 'enviada', SUBMITTED: 'aceptada', PARTIAL_FILLED: 'parcial', FILLED: 'ejecutada', CANCELLED: 'cancelada', FAILED: 'rechazada' };
+  const m = { PENDING: 'enviada', SUBMITTED: 'aceptada', PARTIAL_FILLED: 'parcial', FILLED: 'ejecutada', CANCELLED: 'cancelada', FAILED: 'rechazada', REJECTED: 'rechazada', EXPIRED: 'expirada' };
   for (const [k, v] of Object.entries(m)) assert.equal(mapearEstadoOrden(k), v);
   assert.equal(idClienteWebull('abc1234567'), 'abc1234567'); assert.equal(idClienteWebull('abc123').length, 32); // Webull exige al menos 10 caracteres
   const h = idClienteWebull('key-' + 'x'.repeat(40));
@@ -44,6 +46,9 @@ test('cuerpo de orden: una pata y estrategias multi-pata', () => {
   assert.equal(detectarEstrategia([L('C', 100), L('C', 100, '261127')].map(occAPataWebull)), 'CALENDAR');
   assert.throws(() => detectarEstrategia([L('C', 100), L('C', 105), L('P', 90)].map(occAPataWebull)), e => e.codigo === 'VALIDACION');
   const bad = x => assert.throws(() => construirCuerpoOrden({ clientOrderId: 'k', tipo: 'limit', precioLimite: 1, cantidad: 1, componentes: [{ simbolo: L('C', 1), accion: 'buy' }], ...x }), e => e.codigo === 'VALIDACION');
+  // market de crédito neto: sin precio y side SELL
+  const m = construirCuerpoOrden({ clientOrderId: 'k3', tipo: 'market', cantidad: 1, credito: true, componentes: ic }).new_orders[0];
+  assert.equal(m.side, 'SELL'); assert.equal(m.order_type, 'MARKET'); assert.equal(m.limit_price, undefined);
   bad({ precioLimite: -1 }); bad({ credito: true }); bad({ cantidad: 0 }); bad({ tipo: 'market' });
 });
 
@@ -123,4 +128,68 @@ test('errores del proveedor se normalizan sin filtrar secretos', async () => {
   const fetch = async () => ({ ok: false, status: 417, headers: { get: () => null }, text: async () => JSON.stringify({ error_code: 'X', message: 'bad SECRET456' }) });
   const w = createWebullClient({ appKey: 'APPKEY123', appSecret: 'SECRET456', accountId: 'A', fetch });
   await assert.rejects(w.posiciones(), e => e.proveedor === 'webull' && e.codigo === 'PROVEEDOR' && !e.mensaje.includes('SECRET456'));
+});
+
+test('normalizarOrden no devuelve otra orden de la lista', () => {
+  const cuerpo = { orders: [{ client_order_id: 'otra', status: 'FILLED' }, { client_order_id: 'mia', status: 'EXPIRED' }] };
+  assert.equal(normalizarOrden(cuerpo, 'mia').estado, 'expirada');
+  assert.throws(() => normalizarOrden(cuerpo, 'nada'), e => e.codigo === 'NO_ENCONTRADO');
+});
+
+const pataPos = (id, t, k, quantity, extra = {}) => ({ leg_id: id, symbol: 'AAPL', quantity, option_type: t, option_expire_date: '2026-11-20', option_exercise_price: String(k), ...extra });
+test('posiciones multi-pata: lado por pata, id único, sin repartir costo ni resultado del conjunto', () => {
+  const padre = { position_id: 'P9', symbol: 'AAPL', instrument_type: 'OPTION', quantity: '1', last_price: '1.2', cost_price: '1', unrealized_profit_loss: '20' };
+  const conSide = normalizarPosiciones({ ...padre, legs: [pataPos('L1', 'PUT', 90, '1', { side: 'BUY' }), pataPos(null, 'PUT', 95, '1', { side: 'SELL' })] });
+  assert.deepEqual(conSide.map(p => [p.posicionExternaId, p.lado, p.cantidad, p.cerrable, p.grupoId]), [['P9:L1', 'long', 1, true, 'P9'], ['P9:' + L('P', 95), 'short', 1, true, 'P9']]);
+  for (const p of conSide) assert.deepEqual([p.precioPromedio, p.precioActual, p.valorMercado, p.plNoRealizado], [null, null, null, null]);
+  const conSigno = normalizarPosiciones({ ...padre, quantity: '-2', legs: [pataPos('L1', 'CALL', 100, '-2'), pataPos('L2', 'CALL', 105, '2')] });
+  assert.deepEqual(conSigno.map(p => [p.lado, p.cantidad, p.cerrable]), [['short', 2, true], ['long', 2, true]]);
+  const sinLado = normalizarPosiciones({ ...padre, legs: [pataPos('L1', 'CALL', 100, '1'), pataPos('L2', 'CALL', 105, '1', { side: 'SELL' })] });
+  assert.deepEqual(sinLado.map(p => [p.lado, p.cerrable]), [[null, false], ['short', true]]);
+  const contradice = normalizarPosiciones({ ...padre, legs: [pataPos('L1', 'CALL', 100, '-1', { side: 'BUY' }), pataPos('L2', 'CALL', 105, '1', { side: 'BUY' })] });
+  assert.deepEqual(contradice.map(p => p.cerrable), [false, true]);
+  const proporcion = normalizarPosiciones({ ...padre, quantity: '5', legs: [pataPos('L1', 'CALL', 100, '1', { side: 'BUY' }), pataPos('L2', 'CALL', 105, '1', { side: 'SELL' })] });
+  assert.ok(proporcion.every(p => !p.cerrable)); // ¿1 contrato o proporción 1 de 5 estructuras?
+  const [una] = normalizarPosiciones({ ...padre, quantity: '3', legs: [pataPos('L1', 'CALL', 100, '3', { side: 'SELL' })] });
+  assert.deepEqual([una.posicionExternaId, una.lado, una.cantidad, una.plNoRealizado, una.grupoId, una.cerrable], ['P9:L1', 'short', 3, 20, null, true]);
+});
+
+test('reintentos: firma y nonce nuevos en cada intento; un POST con 5xx no se repite', async () => {
+  const vistos = []; let n = 0;
+  const fetch = async (url, init) => { vistos.push([init.method, init.headers['x-signature-nonce'], init.headers['x-signature']]);
+    return vistos.length <= 2 ? new Response('{}', { status: vistos.length === 1 ? 429 : 503 }) : new Response('[]', { status: 200 }); };
+  const esperas = [];
+  const w = createWebullClient({ appKey: 'APPKEY123', appSecret: 'SECRET456', fetch, nonce: () => 'n' + (++n), esperar: async ms => { esperas.push(ms); } });
+  await assert.rejects(w.posiciones(), e => e.codigo === 'VALIDACION'); // sin cuentas: ya pasó los reintentos
+  assert.deepEqual(vistos.map(v => v[1]), ['n1', 'n2', 'n3']); assert.equal(new Set(vistos.map(v => v[2])).size, 3); assert.deepEqual(esperas, [500, 1000]);
+  let posts = 0;
+  const f2 = async (url, init) => { if (init.method === 'POST') { posts++; return new Response('{}', { status: 503 }); } return new Response(JSON.stringify([{ account_id: 'A' }]), { status: 200 }); };
+  const w2 = createWebullClient({ appKey: 'APPKEY123', appSecret: 'SECRET456', fetch: f2, esperar: async () => {} });
+  await assert.rejects(w2.enviarOrden({ clientOrderId: 'clave-1234567', tipo: 'market', cantidad: 1, componentes: [{ simbolo: L('C', 200), accion: 'buy' }] }), e => e.status === 503);
+  assert.equal(posts, 1);
+});
+
+test('hosts: solo los de pruebas exactos', async () => {
+  for (const baseUrl of ['https://sandbox.evil.com', 'https://api.webull.com/?x=sandbox', 'https://test-api.webull.com', 'https://api.sandbox.webull.com.evil.com', 'https://api.sandbox.webull.com:8443', 'https://u:p@api.sandbox.webull.com', 'http://api.sandbox.webull.com'])
+    await assert.rejects(createWebullClient({ appKey: 'kkkkkkkk', appSecret: 'ssssssss', baseUrl, fetch: async () => { throw new Error('red'); } }).cuenta(), e => e.codigo === 'NO_PERMITIDO', baseUrl);
+  assert.equal(createWebullClient({ appKey: 'kkkkkkkk', appSecret: 'ssssssss', baseUrl: 'https://api.sandbox.webull.com/' }).configurado, true);
+});
+
+test('búsqueda por Idempotency-Key y formato de posiciones no reconocido', async () => {
+  const consultas = []; let ordenes = { orders: [] }, status = 200, posiciones = [];
+  const fetch = async u => { const url = new URL(u);
+    if (url.pathname === '/trading/accounts/list') return new Response(JSON.stringify([{ account_id: 'A' }]));
+    if (url.pathname === '/trading/orders/get') { consultas.push(url.searchParams.get('client_order_id')); return new Response(JSON.stringify(ordenes), { status }); }
+    return new Response(JSON.stringify(posiciones)); };
+  const w = createWebullClient({ appKey: 'APPKEY123', appSecret: 'SECRET456', fetch, esperar: async () => {} });
+  await assert.rejects(w.consultarPorClientOrderId('key-123456789'), e => e.codigo === 'NO_ENCONTRADO');
+  const id = idClienteWebull('key-123456789'); assert.equal(consultas[0], id);
+  ordenes = { orders: [{ client_order_id: id, status: 'SUBMITTED' }] };
+  assert.equal((await w.consultarPorClientOrderId('key-123456789')).estado, 'aceptada');
+  status = 417; ordenes = { message: 'Order does not exist' };
+  await assert.rejects(w.consultarPorClientOrderId('key-123456789'), e => e.codigo === 'NO_ENCONTRADO');
+  ordenes = { message: 'internal' };
+  await assert.rejects(w.consultarPorClientOrderId('key-123456789'), e => e.codigo === 'PROVEEDOR');
+  for (const raro of [{}, { data: [] }, null]) { posiciones = raro; await assert.rejects(w.posiciones(), e => e.codigo === 'PROVEEDOR'); }
+  posiciones = { positions: [] }; assert.deepEqual(await w.posiciones(), []);
 });

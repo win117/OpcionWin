@@ -11,6 +11,8 @@ import { IntegrationError } from './errors';
 import { createHttp } from './http';
 
 export const WEBULL_SANDBOX_URL = 'https://api.sandbox.webull.com';
+// Únicos hosts de pruebas admitidos (ADR-005): lista exacta, sin coincidencias parciales.
+const HOSTS_PRUEBAS = ['api.sandbox.webull.com', 'us-openapi-alb.uat.webullbroker.com'];
 const PROVEEDOR = 'webull';
 
 const ESTADOS_ORDEN = {
@@ -21,6 +23,8 @@ const ESTADOS_ORDEN = {
   CANCELLED: 'cancelada',
   CANCELED: 'cancelada',
   FAILED: 'rechazada',
+  REJECTED: 'rechazada',
+  EXPIRED: 'expirada',
 };
 export const mapearEstadoOrden = status => ESTADOS_ORDEN[String(status || '').toUpperCase()] || 'enviada';
 
@@ -46,8 +50,8 @@ export const firmar = ({ ruta, query = {}, encabezados = {}, cuerpo, appSecret }
   return createHmac('sha1', `${appSecret}&`).update(encodeURIComponent(str3), 'utf8').digest('base64');
 };
 
-// --- Símbolos OCC (Alpaca: AAPL261125C00200000) → pata de Webull ---
-const OCC = /^([A-Z.]{1,6})(\d{2})(\d{2})(\d{2})([CP])(\d{8})$/;
+// --- Símbolos OCC (Alpaca: AAPL261125C00200000) → pata de Webull. La raíz OCC no lleva punto (BRK.B → BRKB). ---
+const OCC = /^([A-Z]{1,6}\d?)(\d{2})(\d{2})(\d{2})([CP])(\d{8})$/;
 export const occAPataWebull = simbolo => {
   const m = OCC.exec(String(simbolo || '').trim().toUpperCase());
   if (!m) throw validacion('Símbolo OCC inválido: ' + String(simbolo).slice(0, 40));
@@ -58,7 +62,7 @@ export const pataWebullAOcc = (simbolo, pata) => {
   const strike = num(pata?.option_exercise_price ?? pata?.strike_price);
   const f = /^(\d{4})-(\d{2})-(\d{2})/.exec(pata?.option_expire_date || '');
   if (!f || strike == null || !['CALL', 'PUT'].includes(pata?.option_type)) return null;
-  return `${String(simbolo).toUpperCase()}${f[1].slice(2)}${f[2]}${f[3]}${pata.option_type === 'CALL' ? 'C' : 'P'}${String(Math.round(strike * 1000)).padStart(8, '0')}`;
+  return `${String(simbolo).toUpperCase().replace(/[^A-Z0-9]/g, '')}${f[1].slice(2)}${f[2]}${f[3]}${pata.option_type === 'CALL' ? 'C' : 'P'}${String(Math.round(strike * 1000)).padStart(8, '0')}`;
 };
 
 // client_order_id de Webull: el servidor exige de 10 a 40 y la documentación, máx. 32. Se conserva si es alfanumérico de 10 a 32; si no, hash determinista (idempotencia).
@@ -92,7 +96,7 @@ export const detectarEstrategia = patas => {
 };
 
 // Cuerpo de POST /trading/orders/place a partir de una orden neutral (misma forma que Alpaca).
-// Convención: precioLimite positivo; `credito:true` en multi-pata → side SELL (crédito neto), si no BUY (débito).
+// Convención: precioLimite positivo; `credito:true` en multi-pata (limit o market) → side SELL (crédito neto), si no BUY (débito).
 // (La documentación de Webull no define precio negativo; se asume side del combo = SELL para crédito.)
 export const construirCuerpoOrden = (orden, accountId) => {
   if (!orden || typeof orden !== 'object') throw validacion('Orden requerida.');
@@ -103,7 +107,6 @@ export const construirCuerpoOrden = (orden, accountId) => {
   if (!Number.isSafeInteger(cantidad) || cantidad < 1) throw validacion('cantidad debe ser un entero positivo.');
   if (tipo === 'limit' && !(Number.isFinite(precioLimite) && precioLimite > 0)) throw validacion('precioLimite (positivo) requerido para orden limit.');
   if (tipo === 'market' && precioLimite != null) throw validacion('Una orden market no lleva precioLimite.');
-  if (credito && tipo !== 'limit') throw validacion('credito requiere una orden limit.');
   if (!Array.isArray(componentes) || componentes.length < 1 || componentes.length > 4) throw validacion('Se requieren de 1 a 4 componentes.');
   for (const c of componentes) {
     if (!['buy', 'sell'].includes(c?.accion)) throw validacion('accion debe ser buy o sell.');
@@ -142,7 +145,7 @@ export const construirCuerpoOrden = (orden, accountId) => {
 // --- Normalizadores ---
 export const normalizarOrden = (cuerpo, clientOrderId) => {
   const lista = Array.isArray(cuerpo?.orders) ? cuerpo.orders : [];
-  const o = lista.find(x => x.client_order_id === clientOrderId) || lista[0];
+  const o = lista.find(x => x.client_order_id === clientOrderId); // nunca otra orden de la lista
   if (!o) throw new IntegrationError({ proveedor: PROVEEDOR, status: 404, codigo: 'NO_ENCONTRADO', mensaje: 'Orden no encontrada en Webull.' });
   return {
     ordenExternaId: o.client_order_id,
@@ -160,18 +163,46 @@ export const normalizarOrden = (cuerpo, clientOrderId) => {
   };
 };
 
-const normalizarPosiciones = p => {
-  const cantidad = num(p.quantity) ?? 0, precioActual = num(p.last_price), costo = num(p.cost_price), lado = cantidad < 0 ? 'short' : 'long';
-  const comunes = { lado, precioPromedio: costo, precioActual, plNoRealizado: num(p.unrealized_profit_loss) };
-  if (p.instrument_type === 'OPTION' && Array.isArray(p.legs) && p.legs.length) {
-    return p.legs.map(l => ({ ...comunes, posicionExternaId: l.leg_id || p.position_id, simbolo: pataWebullAOcc(p.symbol, l) || p.symbol,
-      cantidad: Math.abs(num(l.quantity) ?? cantidad), valorMercado: precioActual != null ? precioActual * Math.abs(num(l.quantity) ?? cantidad) * (num(l.option_contract_multiplier) || 100) : null,
-      claseActivo: 'us_option', plPctNoRealizado: null }));
-  }
+// Lado de una posición: solo con evidencia explícita (side) o cantidad negativa; dos evidencias opuestas → null.
+const ladoExplicito = x => {
+  const v = String(x?.side ?? x?.position_side ?? x?.direction ?? '').trim().toUpperCase();
+  return ['BUY', 'LONG'].includes(v) ? 'long' : ['SELL', 'SHORT', 'SELL_SHORT'].includes(v) ? 'short' : null;
+};
+const negativo = n => (n < 0 ? 'short' : null);
+const ladoDe = (evidencias, porDefecto) => {
+  const vistas = new Set(evidencias.filter(Boolean));
+  if (vistas.size > 1) return null;
+  return vistas.size ? [...vistas][0] : porDefecto;
+};
+
+// Posición → una entrada por pata. La forma real de la respuesta multi-pata no está documentada: lo que no se pueda
+// determinar (lado o cantidad) queda con cerrable:false, nunca supuesto.
+export const normalizarPosiciones = p => {
+  const total = num(p.quantity), patas = Array.isArray(p.legs) ? p.legs : [];
   const esOpcion = p.instrument_type === 'OPTION';
-  return [{ ...comunes, posicionExternaId: p.position_id, simbolo: p.symbol, cantidad: Math.abs(cantidad),
-    valorMercado: precioActual != null ? precioActual * Math.abs(cantidad) * (esOpcion ? 100 : 1) : null,
-    claseActivo: esOpcion ? 'us_option' : 'us_equity', plPctNoRealizado: null }];
+  const valor = (precio, cantidad, l) => (precio != null && cantidad != null ? precio * cantidad * (esOpcion ? num(l?.option_contract_multiplier) || 100 : 1) : null);
+  const idDe = (l, occ, i) => `${p.position_id}:${l.leg_id || occ || i}`;
+
+  if (esOpcion && patas.length > 1) {
+    const hayNegativas = patas.some(l => num(l.quantity) < 0);
+    const unidades = Math.abs(total ?? 0);
+    // Si una pata no es múltiplo del total, su "quantity" parece una proporción y no contratos.
+    const cantidadesFiables = patas.every(l => num(l.quantity) && (!unidades || Math.abs(num(l.quantity)) % unidades === 0));
+    // Precio, costo y resultado del padre son del conjunto: cada pata solo lleva los suyos (o null).
+    return patas.map((l, i) => {
+      const occ = pataWebullAOcc(p.symbol, l), q = num(l.quantity), cantidad = q ? Math.abs(q) : null, precioActual = num(l.last_price);
+      const lado = ladoDe([ladoExplicito(l), negativo(q)], hayNegativas ? 'long' : null);
+      return { posicionExternaId: idDe(l, occ, i), grupoId: p.position_id ?? null, simbolo: occ || String(p.symbol || ''), lado, cantidad,
+        precioPromedio: num(l.cost_price), precioActual, valorMercado: valor(precioActual, cantidad, l), claseActivo: 'us_option',
+        plNoRealizado: num(l.unrealized_profit_loss), plPctNoRealizado: null, cerrable: Boolean(occ && lado && cantidadesFiables) };
+    });
+  }
+  const [l] = patas, occ = esOpcion && l ? pataWebullAOcc(p.symbol, l) : null;
+  const q = total ?? num(l?.quantity), cantidad = q == null ? null : Math.abs(q), precioActual = num(p.last_price);
+  const lado = ladoDe([ladoExplicito(l), ladoExplicito(p), negativo(q)], 'long');
+  return [{ posicionExternaId: esOpcion && l ? idDe(l, occ, 0) : p.position_id, grupoId: null, simbolo: occ || String(p.symbol || ''), lado, cantidad,
+    precioPromedio: num(p.cost_price), precioActual, valorMercado: valor(precioActual, cantidad, l), claseActivo: esOpcion ? 'us_option' : 'us_equity',
+    plNoRealizado: num(p.unrealized_profit_loss), plPctNoRealizado: null, cerrable: Boolean(lado && cantidad) }];
 };
 
 const normalizarUrl = u => String(u).trim().replace(/\/+$/, '');
@@ -190,22 +221,23 @@ export const createWebullClient = ({
   else if (limpio(baseUrl)) {
     try {
       const u = new URL(normalizarUrl(baseUrl));
-      if (u.protocol !== 'https:' || !/sandbox|uat|test/i.test(u.hostname)) bloqueo = 'WEBULL_BASE_URL debe ser https y de un entorno de pruebas (sandbox); producción está bloqueada (ADR-005).';
+      if (u.protocol !== 'https:' || u.username || !HOSTS_PRUEBAS.includes(u.host)) bloqueo = 'WEBULL_BASE_URL debe ser https y de un entorno de pruebas (sandbox); producción está bloqueada (ADR-005).';
       else url = normalizarUrl(baseUrl);
     } catch { bloqueo = 'WEBULL_BASE_URL inválida.'; }
   }
   const configurado = Boolean(key && secreto) && !bloqueo;
   const host = new URL(url).host;
 
-  const http = createHttp({ proveedor: PROVEEDOR, fetch: fetchFn, timeoutMs, esperar, secretos: [key, secreto, token] });
+  // Sin reintentos en la capa HTTP: cada intento necesita su propia firma (nonce y hora), ver `trading`.
+  const http = createHttp({ proveedor: PROVEEDOR, fetch: fetchFn, timeoutMs, reintentos: 0, secretos: [key, secreto, token] });
+  const pausar = esperar || (ms => new Promise(resolve => { setTimeout(resolve, ms); }));
 
   const exigir = () => {
     if (bloqueo) throw new IntegrationError({ proveedor: PROVEEDOR, codigo: 'NO_PERMITIDO', mensaje: bloqueo });
     if (!configurado) throw new IntegrationError({ proveedor: PROVEEDOR, codigo: 'SIN_CREDENCIALES', mensaje: 'Faltan WEBULL_APP_KEY / WEBULL_APP_SECRET en el servidor.' });
   };
 
-  const trading = (ruta, { method = 'GET', query, body } = {}) => {
-    exigir();
+  const intento = (ruta, { method, query, body }) => {
     const marca = ahora().toISOString().replace(/\.\d{3}Z$/, 'Z');
     const firmados = { 'x-app-key': key, 'x-signature-algorithm': 'HMAC-SHA1', 'x-signature-version': '1.0', 'x-signature-nonce': nonce(), 'x-timestamp': marca, host };
     const cuerpo = body !== undefined ? JSON.stringify(body) : undefined;
@@ -214,6 +246,18 @@ export const createWebullClient = ({
     const { host: _h, ...enviar } = firmados; void _h;
     return http.request({ url: `${url}${ruta}`, method, query: limpioQ, body,
       headers: { ...enviar, 'x-signature': firma, 'x-version': 'v3', ...(token ? { 'x-access-token': token } : {}) } });
+  };
+  // 429 (no procesada) se reintenta siempre; 5xx solo en lecturas, para no duplicar órdenes.
+  const trading = async (ruta, { method = 'GET', query, body } = {}) => {
+    exigir();
+    for (let n = 0; ; n += 1) {
+      try { return await intento(ruta, { method, query, body }); }
+      catch (e) {
+        const reintentable = e?.status === 429 || (e?.status >= 500 && method === 'GET');
+        if (!reintentable || n >= 2) throw e;
+        await pausar(500 * 2 ** n);
+      }
+    }
   };
 
   const listaCuentas = async () => { const l = await trading('/trading/accounts/list'); return Array.isArray(l) ? l : (Array.isArray(l?.accounts) ? l.accounts : []); };
@@ -271,6 +315,15 @@ export const createWebullClient = ({
     const cid = exigirId(id);
     return normalizarOrden(await trading('/trading/orders/get', { query: { account_id: await idCuenta(), client_order_id: cid } }), cid);
   };
+  // Recupera una orden por la Idempotency-Key con la que se envió (NO_ENCONTRADO si nunca llegó).
+  const consultarPorClientOrderId = async clave => {
+    try { return await consultarOrden(idClienteWebull(clave)); }
+    catch (e) {
+      // El código HTTP de "no existe" no está documentado: se reconoce también por el mensaje.
+      if (e?.status >= 400 && e.status < 500 && /not.?(found|exist)|no existe/i.test(e.mensaje || '')) throw new IntegrationError({ proveedor: PROVEEDOR, status: 404, codigo: 'NO_ENCONTRADO', mensaje: 'Orden no encontrada en Webull.' });
+      throw e;
+    }
+  };
   const cancelarOrden = async id => {
     exigir();
     const cid = exigirId(id);
@@ -279,11 +332,14 @@ export const createWebullClient = ({
   };
   const posiciones = async () => {
     exigir();
-    const l = await trading('/trading/assets/positions/list', { query: { account_id: await idCuenta() } });
-    return (Array.isArray(l) ? l : (Array.isArray(l?.positions) ? l.positions : [])).flatMap(normalizarPosiciones);
+    const r = await trading('/trading/assets/positions/list', { query: { account_id: await idCuenta() } });
+    const lista = Array.isArray(r) ? r : r?.positions;
+    // Nunca tratar una respuesta irreconocible como "sin posiciones": cerraría las guardadas.
+    if (!Array.isArray(lista)) throw new IntegrationError({ proveedor: PROVEEDOR, codigo: 'PROVEEDOR', mensaje: 'Webull devolvió posiciones en un formato no reconocido.' });
+    return lista.flatMap(normalizarPosiciones);
   };
 
-  const cliente = { proveedor: PROVEEDOR, configurado, entorno: 'paper', cuenta, enviarOrden, consultarOrden, cancelarOrden, posiciones };
+  const cliente = { proveedor: PROVEEDOR, configurado, entorno: 'paper', cuenta, enviarOrden, consultarOrden, consultarPorClientOrderId, cancelarOrden, posiciones };
   for (const m of ['buscarActivo', 'listarActivos', 'velas', 'cotizacion', 'contratos', 'snapshotsOpciones', 'noticias']) cliente[m] = async () => { throw noImplementado(m); };
   return cliente;
 };

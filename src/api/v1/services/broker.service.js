@@ -16,6 +16,22 @@ export function adaptadorDe(integraciones, codigo) {
   return a;
 }
 
+export const ESTADOS_TERMINALES = ['ejecutada', 'cancelada', 'rechazada', 'expirada'];
+// Último evento que deja en duda si la orden llegó al broker: envío sin respuesta, 5xx o proceso interrumpido.
+const envioAmbiguo = orden => ['envio', 'error_envio'].includes(orden.eventos?.at(-1)?.tipo);
+// Error al enviar → 'error_previo' (no llegó; se puede reintentar), 'rechazada' (definitivo) o 'error_envio' (ambiguo).
+function clasificarErrorEnvio({ codigo, status } = {}) {
+  if (['SIN_CREDENCIALES', 'LIMITE'].includes(codigo)) return 'error_previo';
+  if (['VALIDACION', 'NO_PERMITIDO', 'NO_IMPLEMENTADO'].includes(codigo)) return 'rechazada';
+  if (status >= 400 && status < 500 && ![408, 409, 425].includes(status)) return 'rechazada';
+  return 'error_envio';
+}
+const ejecucionDe = remoto => ({
+  ...(remoto.cantidadEjecutada != null ? { cantidadEjecutada: remoto.cantidadEjecutada } : {}),
+  ...(remoto.precioPromedioEjecucion != null ? { precioPromedioEjecucion: remoto.precioPromedioEjecucion } : {}),
+});
+const estadoDe = remoto => remoto.estadoProveedor || remoto.estado;
+
 export function createBroker({ integraciones, factory = repository }) {
   // Devuelve la conexión y el adaptador del broker al que pertenece.
   async function conexionOperable(ctx, conexionId) {
@@ -29,6 +45,19 @@ export function createBroker({ integraciones, factory = repository }) {
     if (ref && ref !== meta.ref) throw boom.badRequest('credencialRef no soportada. Usa ' + meta.ref + '.');
     if (conexion.estado === 'revocada') throw boom.conflict('La conexión está revocada.');
     return { conexion, meta, adaptador: adaptadorDe(integraciones, meta.codigo) };
+  }
+
+  // Guarda lo que informa el broker (id externo, estado y ejecución) junto con un evento.
+  const registrar = (ctx, ordenId, remoto, tipo, mensaje) => parchar('ordenes', ctx, ordenId, d => ({ ...d,
+    ...(remoto.ordenExternaId ? { ordenExternaId: remoto.ordenExternaId } : {}), estado: remoto.estado, ...ejecucionDe(remoto),
+    eventos: [...(d.eventos || []), { tipo, mensaje }] }), factory);
+
+  // Busca en el broker la orden por su client_order_id; si existe, la adopta. null = el broker no la tiene.
+  async function adoptar(ctx, orden, { meta, adaptador }) {
+    let remoto;
+    try { remoto = await adaptador.consultarPorClientOrderId(orden.idempotencyKey); }
+    catch (error) { if (error?.codigo === 'NO_ENCONTRADO') return null; throw error; }
+    return registrar(ctx, orden._id, remoto, 'recuperada', meta.nombre + ' paper ya tenía la orden: ' + estadoDe(remoto));
   }
 
   return {
@@ -45,13 +74,19 @@ export function createBroker({ integraciones, factory = repository }) {
       }
     },
 
-    async enviar(ctx, ordenId, idempotencyKey) {
+    // Un reintento (la orden ya tiene eventos) consulta primero al broker; solo reenvía si allí no existe.
+    async enviar(ctx, ordenId, idempotencyKey, { primerEnvio = false } = {}) {
       if (typeof idempotencyKey !== 'string' || !/^[\w-]{8,128}$/.test(idempotencyKey)) throw boom.badRequest('Envía el header Idempotency-Key (8-128 caracteres).');
       const orden = await obtener('ordenes', ctx, ordenId, factory);
       if (orden.idempotencyKey !== idempotencyKey) throw boom.conflict('Idempotency-Key no corresponde a la orden.');
       if (orden.ordenExternaId) return orden; // reintento: ya enviada
       if (orden.estado !== 'pendiente') throw boom.conflict('Solo se envían órdenes pendientes.');
-      const { meta, adaptador } = await conexionOperable(ctx, orden.conexionId);
+      const operable = await conexionOperable(ctx, orden.conexionId), { meta, adaptador } = operable;
+      const reintento = !primerEnvio && orden.eventos?.length > 0;
+      if (reintento) {
+        const adoptada = await adoptar(ctx, orden, operable);
+        if (adoptada) return adoptada;
+      }
       const componentes = [];
       for (const c of orden.componentes) {
         const contrato = await obtener('contratos', ctx, c.contratoId, factory);
@@ -62,26 +97,62 @@ export function createBroker({ integraciones, factory = repository }) {
       let remoto;
       try {
         remoto = await adaptador.enviarOrden({ clientOrderId: idempotencyKey, tipo: orden.tipo, vigencia: orden.vigencia, cantidad: orden.cantidad,
-          ...(orden.precioLimite != null ? { precioLimite: orden.precioLimite } : {}), ...(orden.credito ? { credito: true } : {}), componentes });
+          ...(orden.precioLimite != null ? { precioLimite: orden.precioLimite } : {}), ...(orden.credito && componentes.length > 1 ? { credito: true } : {}), componentes });
       } catch (error) {
-        await parchar('ordenes', ctx, orden._id, d => ({ ...d, eventos: [...(d.eventos || []), { tipo: 'error_envio', mensaje: String(error?.mensaje || 'Error al enviar').slice(0, 1900) }] }), factory).catch(() => {});
+        let tipo = clasificarErrorEnvio(error);
+        const mensaje = String(error?.mensaje || 'Error al enviar').slice(0, 1900);
+        // Un rechazo por clave duplicada (o en un reintento) puede significar que el primer envío sí entró.
+        if (tipo === 'rechazada' && (reintento || /client.?order.?id|duplic/i.test(mensaje))) {
+          let adoptada = null;
+          try { adoptada = await adoptar(ctx, orden, operable); } catch { tipo = 'error_envio'; }
+          if (adoptada) return adoptada;
+        }
+        await parchar('ordenes', ctx, orden._id, d => (d.ordenExternaId ? d : { ...d, ...(tipo === 'rechazada' ? { estado: 'rechazada' } : {}),
+          eventos: [...(d.eventos || []), { tipo, mensaje }] }), factory).catch(() => {});
         throw error;
       }
-      return parchar('ordenes', ctx, orden._id, d => ({ ...d, ordenExternaId: remoto.ordenExternaId, estado: remoto.estado,
-        eventos: [...(d.eventos || []), { tipo: 'enviada', mensaje: meta.nombre + ' paper: ' + (remoto.estadoProveedor || remoto.estado) }] }), factory);
+      return registrar(ctx, orden._id, remoto, 'enviada', meta.nombre + ' paper: ' + estadoDe(remoto));
+    },
+
+    // Refresca una sola orden. Una terminal no se consulta (salvo ejecutada sin precio); una pendiente ya intentada se busca por su clave.
+    async actualizar(ctx, ordenId) {
+      const orden = await obtener('ordenes', ctx, ordenId, factory);
+      const faltaPrecio = orden.estado === 'ejecutada' && orden.precioPromedioEjecucion == null && orden.ordenExternaId;
+      if (ESTADOS_TERMINALES.includes(orden.estado) && !faltaPrecio) return orden;
+      if (!orden.ordenExternaId) {
+        if (!orden.eventos?.length) return orden; // nunca se intentó enviar
+        return await adoptar(ctx, orden, await conexionOperable(ctx, orden.conexionId)) || orden;
+      }
+      const { adaptador } = await conexionOperable(ctx, orden.conexionId);
+      const remoto = await adaptador.consultarOrden(orden.ordenExternaId), ejecucion = ejecucionDe(remoto);
+      const mismoEstado = remoto.estado === orden.estado;
+      if (mismoEstado && Object.entries(ejecucion).every(([k, v]) => orden[k] === v)) return orden;
+      // Primera lectura sin nada ejecutado: se guarda el 0 sin agregar un evento.
+      if (mismoEstado && !ejecucion.cantidadEjecutada && ejecucion.precioPromedioEjecucion == null) return parchar('ordenes', ctx, orden._id, ejecucion, factory);
+      const detalle = (remoto.cantidadEjecutada ? '; ejecutadas ' + remoto.cantidadEjecutada : '') + (remoto.precioPromedioEjecucion != null ? ' a ' + remoto.precioPromedioEjecucion : '');
+      return registrar(ctx, orden._id, { ...remoto, ordenExternaId: orden.ordenExternaId }, 'sincronizacion', 'Estado del broker: ' + remoto.estado + detalle);
     },
 
     async cancelar(ctx, ordenId) {
-      const orden = await obtener('ordenes', ctx, ordenId, factory);
+      let orden = await obtener('ordenes', ctx, ordenId, factory);
       if (!orden.ordenExternaId) {
         if (orden.estado !== 'pendiente') throw boom.conflict('La orden no puede cancelarse.');
-        return parchar('ordenes', ctx, orden._id, d => ({ ...d, estado: 'cancelada', eventos: [...(d.eventos || []), { tipo: 'cancelada', mensaje: 'Cancelada antes de enviarse.' }] }), factory);
+        let adoptada = null;
+        try { adoptada = await adoptar(ctx, orden, await conexionOperable(ctx, orden.conexionId)); }
+        catch (error) { if (envioAmbiguo(orden)) throw error; } // en duda y sin poder comprobar: no se marca cancelada
+        if (!adoptada) {
+          const local = await parchar('ordenes', ctx, orden._id, d => (d.ordenExternaId ? d
+            : { ...d, estado: 'cancelada', eventos: [...(d.eventos || []), { tipo: 'cancelada', mensaje: 'Cancelada: el broker no tiene esta orden.' }] }), factory);
+          if (local.ordenExternaId) throw boom.conflict('La orden acaba de enviarse al broker. Vuelve a cancelarla.');
+          return local;
+        }
+        if (ESTADOS_TERMINALES.includes(adoptada.estado)) return adoptada;
+        orden = adoptada;
       }
       const { adaptador } = await conexionOperable(ctx, orden.conexionId);
       await adaptador.cancelarOrden(orden.ordenExternaId);
       const remoto = await adaptador.consultarOrden(orden.ordenExternaId);
-      return parchar('ordenes', ctx, orden._id, d => ({ ...d, estado: remoto.estado,
-        eventos: [...(d.eventos || []), { tipo: 'cancelacion_solicitada', mensaje: 'Estado del broker: ' + (remoto.estadoProveedor || remoto.estado) }] }), factory);
+      return registrar(ctx, orden._id, { ...remoto, ordenExternaId: orden.ordenExternaId }, 'cancelacion_solicitada', 'Estado del broker: ' + estadoDe(remoto));
     },
   };
 }

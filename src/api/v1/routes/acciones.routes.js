@@ -55,19 +55,24 @@ export default ({ factory, integraciones, cola, ahora, cacheActivos }) => {
 
   router.post('/ordenes/:id/envio', handle(async (req, res) => respond(res, await auditar(req, 'orden.enviar', 'ordenes', req.params.id, () => broker.enviar(req.context, req.params.id, req.get('Idempotency-Key'))), 200, 'Orden enviada al broker (paper).')));
   router.post('/ordenes/:id/cancelacion', handle(async (req, res) => respond(res, await auditar(req, 'orden.cancelar', 'ordenes', req.params.id, () => broker.cancelar(req.context, req.params.id)))));
+  // Refresca solo esa orden contra el broker y devuelve la orden actualizada.
+  router.post('/ordenes/:id/actualizacion', handle(async (req, res) => respond(res, await broker.actualizar(req.context, req.params.id), 200, 'Orden actualizada.')));
   router.post('/conexiones-broker/:id/verificacion', handle(async (req, res) => respond(res, await auditar(req, 'conexion.verificar', 'conexiones-broker', req.params.id, () => broker.verificar(req.context, req.params.id)))));
 
   // Operación paper en un paso (ADR-011).
+  const yaExistente = orden => 'Orden ya existente para esa Idempotency-Key (estado: ' + orden.estado + ').';
   router.get('/brokers/disponibles', handle(async (_req, res) => respond(res, await operacion.disponibles())));
   router.post('/broker/paper/conexion', handle(async (req, res) => respond(res, await operacion.ensureConexion(req.context, req.body))));
   router.get('/broker/paper/resumen', handle(async (req, res) => respond(res, await operacion.resumen(req.context, req.query.broker))));
   router.post('/ordenes/ticket', handle(async (req, res) => {
     const { repetida, brokerNombre, ...data } = await auditar(req, 'orden.ticket', 'ordenes', r => r?.orden?._id || r?._id, () => operacion.ticket(req.context, req.body, req.get('Idempotency-Key')));
-    respond(res, data, repetida ? 200 : 201, repetida ? 'Orden ya existente para esa Idempotency-Key.' : 'Orden creada y enviada a ' + brokerNombre + ' paper.');
+    respond(res, data, repetida ? 200 : 201, repetida ? yaExistente(data.orden) : 'Orden creada y enviada a ' + brokerNombre + ' paper.');
   }));
-  router.post('/posiciones/:id/cierre', handle(async (req, res) => {
-    const { repetida, brokerNombre, ...data } = await auditar(req, 'posicion.cerrar', 'posiciones', req.params.id, () => operacion.cierre(req.context, req.params.id, req.body, req.get('Idempotency-Key')));
-    respond(res, data, repetida ? 200 : 201, repetida ? 'Orden ya existente para esa Idempotency-Key.' : 'Orden de cierre enviada a ' + brokerNombre + ' paper.');
-  }));
+  const responderCierre = (res, { repetida, brokerNombre, orden }) =>
+    respond(res, { orden }, repetida ? 200 : 201, repetida ? yaExistente(orden) : 'Orden de cierre enviada a ' + brokerNombre + ' paper.');
+  router.post('/posiciones/cierre-grupo', handle(async (req, res) => responderCierre(res, await auditar(req, 'posicion.cerrarGrupo', 'ordenes', r => r?.orden?._id,
+    () => operacion.cierreGrupo(req.context, req.body, req.get('Idempotency-Key'))))));
+  router.post('/posiciones/:id/cierre', handle(async (req, res) => responderCierre(res, await auditar(req, 'posicion.cerrar', 'posiciones', req.params.id,
+    () => operacion.cierre(req.context, req.params.id, req.body, req.get('Idempotency-Key'))))));
   return router;
 };
