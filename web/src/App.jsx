@@ -1,4 +1,5 @@
 import { Navigate, Route, Routes, generatePath, useLocation, useParams } from 'react-router-dom';
+import './utils/tema';
 import { useAuth } from './context/AuthContext';
 import { BrokerProvider } from './context/BrokerContext';
 import { Layout } from './components/Layout';

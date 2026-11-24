@@ -47,6 +47,14 @@ export function fmtDateTime(value) {
   return d ? d.toLocaleString(LOCALE, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : EMPTY;
 }
 
+/** Hora local corta, con el día si no es hoy: «07:30» o «mar 07:30». */
+export function fmtHoraCorta(value, ahora = new Date()) {
+  const d = toDate(value);
+  if (!d) return EMPTY;
+  const hora = d.toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+  return d.toDateString() === ahora.toDateString() ? hora : `${d.toLocaleDateString(LOCALE, { weekday: 'short' }).replace('.', '')} ${hora}`;
+}
+
 /** Valor de métrica con su unidad. */
 export function fmtMetric(valor, unidad) {
   if (!isNum(valor)) return EMPTY;

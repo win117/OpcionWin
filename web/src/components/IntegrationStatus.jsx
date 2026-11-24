@@ -17,7 +17,7 @@ export function IntegrationStatus({ state, compact = false }) {
   if (loading && !data) return <span className="integrations muted">Integraciones…</span>;
   if (error) {
     const text = error.status === 404 ? 'Integraciones: no disponible aún' : 'Integraciones: sin respuesta';
-    return <span className="integrations" title={error.message}><span className="dot dot--neutral" aria-hidden="true" />{text}</span>;
+    return <span className="integrations" title={error.message}><span className="dot dot--error" aria-hidden="true" />{text}</span>;
   }
   return (
     <span className="integrations" aria-label="Estado de integraciones">

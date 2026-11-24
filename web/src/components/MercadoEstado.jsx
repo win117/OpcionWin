@@ -1,19 +1,24 @@
-import { fmtDateTime } from '../utils/format';
+import { fmtDateTime, fmtHoraCorta } from '../utils/format';
 
-/** Indicador «● ABIERTO / CERRADO · fecha». `estado` = resultado de useAsync(cargarEstadoMercado). */
+/** «Cerrado, abre mar 07:30» (hora local). `estado` = resultado de useAsync(cargarEstadoMercado). Rojo solo si hay un error. */
 export function MercadoEstado({ estado }) {
-  const { data, loading, error } = estado;
-  if (loading && !data) return <span className="mkt-state muted"><span className="dot dot--neutral" aria-hidden="true" /> Mercado…</span>;
-  if (error && !data) return <span className="mkt-state muted" title={error.message}><span className="dot dot--neutral" aria-hidden="true" /> Mercado sin datos</span>;
+  const { data, error } = estado;
   const abierto = data?.abierto;
-  const texto = abierto === true ? 'ABIERTO' : abierto === false ? 'CERRADO' : 'MERCADO';
   const fecha = abierto === true ? data?.proximoCierre : data?.proximaApertura;
-  const titulo = abierto === true ? 'Próximo cierre' : abierto === false ? 'Próxima apertura' : 'Sin estado de sesión';
+  let tono = 'neutral', texto = 'Mercado…', detalle = '', titulo;
+  if (error && !data) { tono = 'error'; texto = 'Mercado sin datos'; titulo = error.message; }
+  else if (data) {
+    tono = error ? 'error' : abierto === true ? 'ok' : 'neutral';
+    texto = abierto === true ? 'Abierto' : abierto === false ? 'Cerrado' : 'Mercado';
+    if (fecha) {
+      detalle = `, ${abierto === true ? 'cierra' : 'abre'} ${fmtHoraCorta(fecha)}`;
+      titulo = `${error ? 'No se pudo actualizar. ' : ''}${abierto === true ? 'Próximo cierre' : 'Próxima apertura'}: ${fmtDateTime(fecha)}, tu hora local`;
+    }
+  }
   return (
-    <span className="mkt-state" title={fecha ? `${titulo}: ${fmtDateTime(fecha)}` : undefined}>
-      <span className={'dot ' + (abierto === true ? 'dot--ok' : abierto === false ? 'dot--off' : 'dot--neutral')} aria-hidden="true" />
-      <strong>{texto}</strong>
-      {fecha && <span className="muted"> · {fmtDateTime(fecha)}</span>}
+    <span className="mkt-state" title={titulo}>
+      <span className={'dot dot--' + tono} aria-hidden="true" />
+      <span><span className="mkt-state__txt">{texto}</span><span className="mkt-state__det">{detalle}</span></span>
     </span>
   );
 }

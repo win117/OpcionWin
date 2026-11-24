@@ -31,4 +31,38 @@ export const OPERADORES = [
   { value: 'between', label: 'entre (rango)' },
 ];
 export const ESTADOS_ORDEN = ['pendiente', 'enviada', 'aceptada', 'parcial', 'ejecutada', 'cancelada', 'rechazada', 'expirada'];
+// Secciones de Configuración, agrupadas. Las usan la navegación y los títulos de página.
+export const CONFIG_GRUPOS = [
+  {
+    nombre: 'Mi análisis', descripcion: 'Qué se analiza y con qué criterios.', secciones: [
+      { to: 'perfiles', label: 'Perfiles de análisis', descripcion: 'Conjuntos de reglas para puntuar una empresa.' },
+      { to: 'estrategias', label: 'Estrategias', descripcion: 'Las estrategias que se comparan y cuánto pesa cada core.' },
+      { to: 'configuraciones', label: 'Configuraciones', descripcion: 'Operaciones preparadas: empresa, estrategia y contratos.' },
+      { to: 'empresas', label: 'Empresas', descripcion: 'Las empresas que has analizado.' },
+    ],
+  },
+  {
+    nombre: 'Brokers', descripcion: 'Dónde se envían tus órdenes de práctica.', secciones: [
+      { to: 'conexiones', label: 'Conexiones de broker', descripcion: 'Cuentas de práctica (paper) vinculadas.' },
+    ],
+  },
+  {
+    nombre: 'Avanzado', descripcion: 'Herramientas para revisar el detalle.', secciones: [
+      { to: 'cores', label: 'Evaluar cores', descripcion: 'Ejecuta un solo core y mira sus métricas.' },
+      { to: 'seleccion', label: 'Selección', descripcion: 'Compara las estrategias para una o varias empresas.' },
+      { to: 'mercado', label: 'Mercado', descripcion: 'Los datos guardados de cada empresa.' },
+      { to: 'sincronizaciones', label: 'Sincronizaciones', descripcion: 'Descargas de datos y su resultado.' },
+      { to: 'auditoria', label: 'Auditoría', descripcion: 'Registro de lo que ha ocurrido en tu cuenta.' },
+    ],
+  },
+];
+
+const TITULOS = { '': 'Inicio', analisis: 'Análisis', posiciones: 'Posiciones', ordenes: 'Órdenes', configuracion: 'Configuración', glosario: 'Glosario' };
+/** Título de la pestaña del navegador según la ruta. */
+export function tituloDeRuta(pathname) {
+  const [a = '', b] = pathname.split('/').filter(Boolean);
+  if (a === 'analisis' && b) return 'Análisis de ' + b.toUpperCase();
+  if (a === 'configuracion' && b) return CONFIG_GRUPOS.flatMap(g => g.secciones).find(s => s.to === b)?.label || TITULOS.configuracion;
+  return TITULOS[a] || 'Página no encontrada';
+}
 export const DISCLAIMER = 'Este análisis es informativo y educativo: no es garantía de rentabilidad ni una recomendación de inversión.';
