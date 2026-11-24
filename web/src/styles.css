@@ -802,6 +802,31 @@ a.indice:hover { background: var(--surface-2); }
 .progreso[open] summary::after { content: "Ocultar pasos"; }
 .progreso__titulo { font-weight: 600; }
 
+/* ===== Configuración ===== */
+.cfg { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 32px; align-items: start; }
+.cfg__nav { position: sticky; top: calc(var(--h-header) + 24px); display: grid; gap: 20px; }
+.cfg__nav ul { list-style: none; margin: 6px 0 0; padding: 0; display: grid; }
+.cfg__nombre { margin: 0; font-weight: 700; font-size: var(--t-14); }
+.cfg__desc { margin: 0; font-size: var(--t-12); color: var(--text-muted); }
+.cfg__nav .subnav__link { display: flex; align-items: center; min-height: 34px; margin-left: -12px; padding: 4px 12px; font-size: var(--t-14); }
+.cfg__nav .subnav__link.is-active { font-weight: 600; }
+.cfg__grupos, .cfg__ayuda { display: none; }
+.cfg__glosario { font-size: var(--t-14); }
+.cfg__cuerpo { min-width: 0; }
+@media (max-width: 960px) {
+  .cfg { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .cfg__nav { position: static; gap: 8px; min-width: 0; }
+  .cfg__grupos { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--control-border); border-radius: var(--radius-sm); overflow: hidden; background: var(--surface); }
+  .cfg__grupo-op { display: grid; place-items: center; min-height: var(--touch); font-size: var(--t-14); font-weight: 500; color: var(--text-muted); text-decoration: none; }
+  .cfg__grupo-op + .cfg__grupo-op { border-left: 1px solid var(--border-subtle); }
+  .cfg__grupo-op.is-active { background: var(--accent-soft); color: var(--accent-strong); font-weight: 600; }
+  .cfg__grupo { display: none; min-width: 0; } .cfg__grupo.is-active { display: block; }
+  .cfg__nombre, .cfg__desc, .cfg__glosario { display: none; }
+  .cfg__nav ul { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--border); padding-bottom: 6px; margin: 0; }
+  .cfg__nav .subnav__link { min-height: var(--touch); margin: 0; }
+  .cfg__ayuda { display: block; margin: 0; }
+}
+
 /* ===== Glosario ===== */
 .termino__caja { display: inline; }
 .termino { display: inline; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: inherit; text-decoration: underline dotted; text-decoration-color: var(--control-border); text-underline-offset: 3px; cursor: help; }
