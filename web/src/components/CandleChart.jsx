@@ -55,9 +55,11 @@ export function CandleChart({ velas, height = 380, intradia = false, overlays, t
     const media = window.matchMedia('(prefers-color-scheme: dark)');
     const onTheme = () => chart.applyOptions(themeOptions());
     media.addEventListener?.('change', onTheme);
+    window.addEventListener('opciones:tema', onTheme);
     const lineas = lineasRef.current;
     return () => {
       media.removeEventListener?.('change', onTheme);
+      window.removeEventListener('opciones:tema', onTheme);
       chart.remove();
       chartRef.current = null;
       seriesRef.current = {};

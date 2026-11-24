@@ -299,6 +299,7 @@ export function createUniversoVivo({ integraciones, factory, catalogo, tamano = 
     return { id: idDeterminista(PROPIETARIO_SISTEMA, p.simbolo), datos: { ...p, ...Object.fromEntries(CAMPOS_EMPRESA.filter(c => e[c] != null).map(c => [c, e[c]])) } };
   });
   async function guardar() {
+    if (!activo) return; // al apagarse no se reabre la conexión a la base
     const items = [];
     let descartadas = 0, motivo;
     // Cada fila se valida por separado: una defectuosa no impide guardar las demás.
