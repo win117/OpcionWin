@@ -13,5 +13,7 @@ export default {
   // En la nube (Render) no existe private/users.json: los usuarios pueden venir como JSON en una variable de entorno.
   AUTH_USERS_JSON: process.env.AUTH_USERS_JSON || '',
   SESSION_TTL_SECONDS: Number(process.env.SESSION_TTL_SECONDS || 3600),
+  // Proxies de confianza delante del servidor (número de saltos, nunca true). 0: conexión directa; Render: 1.
+  TRUST_PROXY: Number(process.env.TRUST_PROXY || 0),
   CORS_ORIGINS: (process.env.CORS_ORIGINS || '').split(',').filter(Boolean),
 };

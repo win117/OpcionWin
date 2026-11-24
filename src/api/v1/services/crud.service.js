@@ -1,6 +1,7 @@
 import boom from '@hapi/boom';
 import { repository } from '../../../repositories';
-import { resources, resource } from '../../../repositories/resources';
+import { resources, resource, idSeguro, patronBusqueda, rutasReferencia, REFERENCIAS_ARREGLO } from '../../../repositories/resources';
+import { registrarError } from '../../../middlewares/errores.handler';
 import { reconciliarTrabajo, reconciliarTrabajos } from './trabajos-huerfanos.service';
 const protectedFields = ['_id', 'id', 'usuarioId', 'createdAt', 'updatedAt', '_revision', 'owner_id'];
 export function object(value) {
@@ -43,27 +44,9 @@ async function references(name, document, context, factory) {
     }
   };
   await visit(resource(name).Model.schema, document);
-  const arrays = name === 'confluencias' ? { evaluacionesIds: 'evaluaciones' } : name === 'selecciones' ? { empresasCandidatas: 'empresas' } : {};
-  for (const [field, target] of Object.entries(arrays)) {
+  for (const [field, target] of Object.entries(REFERENCIAS_ARREGLO[name] || {})) {
     for (const id of document[field] || []) if (!await factory(target, context).get(id)) throw boom.badRequest('Referencia inexistente o ajena: ' + field);
   }
-}
-export async function allRows(repo) {
-  const rows = [];
-  for (let offset = 0; offset < 10000; offset += 500) {
-    const page = await repo.list({ offset, limit: 500 });
-    rows.push(...page);
-    if (page.length < 500) return rows;
-  }
-  throw boom.badRequest('Demasiados registros para esta consulta. Reduce el conjunto de datos.');
-}
-function hasReference(schema, value, targetModel, id) {
-  return Object.entries(schema.paths).some(([key, type]) => {
-    const item = value?.[key];
-    if (item == null) return false;
-    if (type.options.ref === targetModel && String(item) === id) return true;
-    return type.schema && (Array.isArray(item) ? item : [item]).some(v => hasReference(type.schema, v, targetModel, id));
-  });
 }
 export function createCrudService(name, factory = repository, { cola, ahora } = {}) {
   resource(name);
@@ -76,20 +59,16 @@ export function createCrudService(name, factory = repository, { cola, ahora } = 
       }
       const page = Number(query.page || 1), limit = Number(query.limit || 50);
       if (!Number.isSafeInteger(page) || page < 1 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw boom.badRequest('Paginación inválida.');
-      let rows = await allRows(factory(name, context));
-      for (const [key, value] of Object.entries(query)) {
-        if (['page','limit'].includes(key)) continue;
-        if (key === 'search') rows = rows.filter(r => ['nombre','simbolo','titulo','descripcion'].some(k => String(r.document[k] || '').toLowerCase().includes(value.toLowerCase())));
-        else rows = rows.filter(r => String(r.document[key]) === value);
-      }
+      const { page: _page, limit: _limit, search: busqueda, ...filtro } = query;
+      if (busqueda) patronBusqueda(busqueda); // valida antes de consultar
+      const repo = factory(name, context), offset = (page - 1) * limit;
+      const total = await repo.count({ filtro, busqueda });
       // Más recientes primero (los _id son UUID aleatorios y no sirven como orden).
-      const t = r => new Date(r.document.createdAt || 0).getTime() || 0;
-      rows.sort((a, b) => t(b) - t(a) || String(a._id).localeCompare(String(b._id)));
-      return { items: await reconciliarTrabajos(name, context, rows.slice((page-1)*limit, page*limit).map(safeDocument), huerfanos), page, limit, total: rows.length };
+      const rows = offset < total ? await repo.list({ offset, limit, filtro, busqueda, orden: 'recientes' }) : [];
+      return { items: await reconciliarTrabajos(name, context, rows.map(safeDocument), huerfanos), page, limit, total };
     },
     async get(context, id) {
-      if (typeof id !== 'string' || !id) throw boom.badRequest('Identificador inválido.');
-      const row = await factory(name, context).get(id);
+      const row = await factory(name, context).get(idSeguro(id));
       if (!row) throw boom.notFound('Registro no encontrado.');
       return reconciliarTrabajo(name, context, safeDocument(row), huerfanos);
     },
@@ -103,7 +82,7 @@ export function createCrudService(name, factory = repository, { cola, ahora } = 
     },
     async update(context, id, body, expectedRevision) {
       input(body);
-      const repo = factory(name, context), row = await repo.get(id);
+      const repo = factory(name, context), row = await repo.get(idSeguro(id));
       if (!row) throw boom.notFound('Registro no encontrado.');
       if (expectedRevision !== undefined && expectedRevision !== row.revision) throw boom.conflict('Versión desactualizada.');
       const owner = resource(name).Model.schema.path('usuarioId') ? { usuarioId: context.userId } : {};
@@ -114,16 +93,13 @@ export function createCrudService(name, factory = repository, { cola, ahora } = 
       return safeDocument(await repo.replace(id, document, row.revision));
     },
     async remove(context, id) {
-      const repo = factory(name, context), row = await repo.get(id);
+      const repo = factory(name, context), row = await repo.get(idSeguro(id));
       if (!row) throw boom.notFound('Registro no encontrado.');
-      for (const [other, { Model }] of Object.entries(resources)) {
-        if (other === 'sesiones') continue;
-        const rows = await allRows(factory(other, context));
-        if (rows.some(r => !(other === name && r._id === id) && (
-          hasReference(Model.schema, r.document, resource(name).Model.modelName, id) ||
-          (name === 'evaluaciones' && other === 'confluencias' && r.document.evaluacionesIds?.includes(id)) ||
-          (name === 'empresas' && other === 'selecciones' && r.document.empresasCandidatas?.includes(id))
-        ))) throw boom.conflict('El registro está referenciado. Elimina o actualiza sus dependencias primero.');
+      for (const other of Object.keys(resources)) {
+        const rutas = rutasReferencia(other, name);
+        if (rutas.length && await factory(other, context).referenciado(rutas, id, other === name ? id : undefined)) {
+          throw boom.conflict('El registro está referenciado. Elimina o actualiza sus dependencias primero.');
+        }
       }
       await repo.remove(id, row.revision);
       return { _id: id, eliminado: true };
@@ -136,6 +112,7 @@ export async function batch(items, action) {
   for (let index = 0; index < items.length; index++) {
     try { results.push({ index, success: true, data: await action(items[index]), status: 200 }); }
     catch (error) {
+      if (!boom.isBoom(error)) registrarError(error, { ruta: 'lote' });
       const known = boom.isBoom(error) ? error : boom.internal();
       results.push({ index, success: false, status: known.output.statusCode, message: known.output.payload.message });
     }
@@ -148,7 +125,7 @@ export function createChildService(name, field, factory = repository) {
   if (!schema) throw new Error('Subdocumento desconocido: ' + field);
   const parentCrud = createCrudService(name, factory);
   async function mutate(context, parentId, action) {
-    const repo = factory(name, context), row = await repo.get(parentId);
+    const repo = factory(name, context), row = await repo.get(idSeguro(parentId));
     if (!row) throw boom.notFound('Registro padre no encontrado.');
     if (name === 'configuraciones' && row.document.estado !== 'borrador') throw boom.conflict('Solo se editan componentes de un borrador.');
     const next = structuredClone(row.document);
@@ -173,6 +150,7 @@ export function createChildService(name, field, factory = repository) {
     },
     update(context, id, childId, body) {
       input(body);
+      idSeguro(childId);
       return mutate(context, id, items => {
         const at = items.findIndex(v => v._id === childId);
         if (at < 0) throw boom.notFound('Subdocumento no encontrado.');
@@ -181,6 +159,7 @@ export function createChildService(name, field, factory = repository) {
       });
     },
     remove(context, id, childId) {
+      idSeguro(childId);
       return mutate(context, id, items => {
         const at = items.findIndex(v => v._id === childId);
         if (at < 0) throw boom.notFound('Subdocumento no encontrado.');

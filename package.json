@@ -10,7 +10,7 @@
     "start": "node dist/index.js",
     "check:structure": "npm run build && node scripts/check-structure.cjs",
     "check:models": "npm run build && node --test scripts/check-models.cjs",
-    "test": "npm run build && node --test scripts/check-models.cjs tests/services.test.cjs tests/http.test.cjs tests/start.test.cjs tests/cores.test.cjs tests/integrations.test.cjs tests/webull.test.cjs tests/acciones.test.cjs tests/senales-activos.test.cjs tests/operacion.test.cjs tests/trabajos-auditoria.test.cjs tests/screener.test.cjs tests/universo-vivo.test.cjs",
+    "test": "npm run build && node --test scripts/check-models.cjs tests/services.test.cjs tests/http.test.cjs tests/start.test.cjs tests/cores.test.cjs tests/integrations.test.cjs tests/webull.test.cjs tests/acciones.test.cjs tests/senales-activos.test.cjs tests/operacion.test.cjs tests/trabajos-auditoria.test.cjs tests/screener.test.cjs tests/universo-vivo.test.cjs tests/repositorios.test.cjs tests/plataforma.test.cjs",
     "test:databases": "npm run build && node scripts/check-databases.cjs",
     "setup:mongodb": "npm run build && node scripts/setup-mongodb.cjs",
     "dev:web": "npm --prefix web run dev",

@@ -24,6 +24,10 @@ services:
         value: iex
       - key: DATABASE
         value: db_opciones
+      - key: TRUST_PROXY
+        value: "1"              # proxies de Render delante del servicio: IP real del cliente (límite de accesos) y HSTS
+      - key: WEBULL_ENTORNO
+        value: paper            # único valor permitido (ADR-005)
       # ---- Secretos: se capturan en el panel de Render, nunca en Git ----
       - key: CONNECTION_STRING   # MongoDB Atlas (mongodb+srv://...)
         sync: false
@@ -34,6 +38,12 @@ services:
       - key: ALPACA_KEY_ID       # claves Trading API PAPER (empiezan con PK)
         sync: false
       - key: ALPACA_SECRET_KEY
+        sync: false
+      - key: WEBULL_APP_KEY      # opcional: entorno de pruebas (sandbox) de Webull
+        sync: false
+      - key: WEBULL_APP_SECRET
+        sync: false
+      - key: WEBULL_ACCOUNT_ID
         sync: false
       - key: SEC_USER_AGENT      # "AppRESTOpciones tu-correo"
         sync: false
