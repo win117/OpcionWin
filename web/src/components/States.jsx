@@ -10,11 +10,13 @@ export function Loading({ text = 'Cargando…' }) {
   );
 }
 
-export function Empty({ title = 'Sin datos', children }) {
+/** `accion`: botón o enlace con el siguiente paso. */
+export function Empty({ title = 'Sin datos', children, accion }) {
   return (
     <div className="state state--empty">
       <strong>{title}</strong>
       {children && <div className="muted">{children}</div>}
+      {accion && <div className="state__accion">{accion}</div>}
     </div>
   );
 }

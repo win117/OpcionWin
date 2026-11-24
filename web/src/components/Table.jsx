@@ -1,11 +1,12 @@
 import { Loading, Empty, ErrorMessage } from './States';
 
 /*
+ * emptyAction: botón o enlace que se ofrece cuando no hay filas.
  * columns: [{ key, label, render?(row), align?: 'right', className? }]
  * selectable + selected (Set) + onSelectionChange(Set) habilitan casillas por fila.
  */
 export function Table({
-  columns, rows = [], loading, error, onRetry, emptyTitle = 'Sin registros', emptyText,
+  columns, rows = [], loading, error, onRetry, emptyTitle = 'Sin registros', emptyText, emptyAction,
   selectable, selected = new Set(), onSelectionChange, caption, rowKey = r => r._id, dense,
 }) {
   const allSelected = rows.length > 0 && rows.every(r => selected.has(rowKey(r)));
@@ -50,7 +51,7 @@ export function Table({
                   </td>
                 )}
                 {columns.map(col => (
-                  <td key={col.key} className={(col.align === 'right' ? 'num ' : '') + (col.className || '')} data-label={col.label}>
+                  <td key={col.key} className={(col.align === 'right' ? 'num ' : '') + (col.className || '')} data-label={typeof col.label === 'string' ? col.label : undefined}>
                     {col.render ? col.render(row) : (row[col.key] ?? '—')}
                   </td>
                 ))}
@@ -60,7 +61,7 @@ export function Table({
         </tbody>
       </table>
       {loading && !rows.length && <Loading />}
-      {!loading && !error && !rows.length && <Empty title={emptyTitle}>{emptyText}</Empty>}
+      {!loading && !error && !rows.length && <Empty title={emptyTitle} accion={emptyAction}>{emptyText}</Empty>}
     </div>
   );
 }
