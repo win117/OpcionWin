@@ -352,6 +352,26 @@ test('estrategias: IRON_CONDOR errores de validación', () => {
     assert.ok(r.errores.some(e => patron.test(e)), `${patron} en ${r.errores}`);
   }
 });
+test('estrategias 1.2.0: riesgo genérico con alas desiguales, débito y multiplicador', () => {
+  // Alas 1 (put) y 5 (call), crédito 1.80: por abajo nunca se pierde, así que no hay breakeven inferior.
+  const r = estrategias.evaluarConfiguracion({ estrategia: 'IRON_CONDOR', componentes: [pata('put', 'buy', 94, 1), pata('put', 'sell', 95, 1.8), pata('call', 'sell', 105, 1.8), pata('call', 'buy', 110, 0.8)] });
+  assert.equal(met(r, 'ganancia_maxima'), 180);
+  assert.equal(met(r, 'perdida_maxima'), 320);
+  assert.equal(met(r, 'breakeven_inferior'), undefined);
+  assert.equal(met(r, 'breakeven_superior'), 106.8);
+  assert.ok(r.motivos.some(m => m.includes('sin límite inferior')));
+  const debito = estrategias.evaluarConfiguracion({ estrategia: 'IRON_CONDOR', componentes: condor().map(c => ({ ...c, precio: c.accion === 'buy' ? 2 : 1.75 })) });
+  assert.equal(met(debito, 'ganancia_maxima'), -50);
+  assert.equal(met(debito, 'perdida_maxima'), 550);
+  assert.equal(met(debito, 'breakeven_inferior'), undefined);
+  const lp = estrategias.evaluarConfiguracion({ estrategia: 'LONG_PUT', componentes: [pata('put', 'buy', 100, 5)] });
+  assert.equal(met(lp, 'ganancia_maxima'), 9500);
+  assert.equal(met(estrategias.evaluarConfiguracion({ estrategia: 'LONG_CALL', componentes: [pata('call', 'buy', 100, 16.2)] }), 'breakeven'), 116.2);
+  const mini = estrategias.evaluarConfiguracion({ estrategia: 'LONG_CALL', componentes: [pata('call', 'buy', 100, 2, { multiplicador: 10 })], multiplicador: 100 });
+  assert.equal(met(mini, 'perdida_maxima'), 20);
+  const mezcla = estrategias.evaluarConfiguracion({ estrategia: 'IRON_CONDOR', componentes: condor().map((c, i) => ({ ...c, multiplicador: i ? 100 : 10 })) });
+  assert.match(mezcla.errores.join(), /mismo multiplicador/);
+});
 test('estrategias: sin precios no calcula montos; delta neta si hay griegas', () => {
   const r = estrategias.evaluarConfiguracion({ estrategia: 'LONG_CALL', componentes: [{ ...pata('call', 'buy', 100), precio: undefined, griegas: { delta: 0.55 } }] });
   assert.equal(r.valida, true);

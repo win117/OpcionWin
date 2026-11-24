@@ -1,49 +1,8 @@
 import { useMemo, useState } from 'react';
 import { fmtMoney, fmtNum } from '../utils/format';
 
-/*
- * Pago al vencimiento calculado en el cliente a partir de las patas:
- * legs: [{ tipo: 'call'|'put', strike, accion: 'buy'|'sell', cantidad, multiplicador, prima }]
- * P/L(S) = Σ signo · cantidad · multiplicador · (intrínseco(S) − prima), signo +1 compra, −1 venta.
- */
-export function payoffAt(legs, S) {
-  return legs.reduce((sum, leg) => {
-    const intrinsic = leg.tipo === 'call' ? Math.max(S - leg.strike, 0) : Math.max(leg.strike - S, 0);
-    const sign = leg.accion === 'sell' ? -1 : 1;
-    return sum + sign * leg.cantidad * leg.multiplicador * (intrinsic - (leg.prima || 0));
-  }, 0);
-}
-
-export function analyzePayoff(legs, samples = 240) {
-  if (!legs.length) return null;
-  const strikes = legs.map(l => l.strike);
-  const lo = Math.min(...strikes), hi = Math.max(...strikes);
-  const pad = Math.max((hi - lo) * 0.6, hi * 0.15, 1);
-  const min = Math.max(0, lo - pad), max = hi + pad;
-  const points = [];
-  for (let i = 0; i <= samples; i++) {
-    const S = min + ((max - min) * i) / samples;
-    points.push([S, payoffAt(legs, S)]);
-  }
-  // Incluir los strikes exactos para no perder vértices.
-  for (const k of strikes) points.push([k, payoffAt(legs, k)]);
-  points.sort((a, b) => a[0] - b[0]);
-  const breakevens = [];
-  for (let i = 1; i < points.length; i++) {
-    const [s0, p0] = points[i - 1], [s1, p1] = points[i];
-    if (p0 === 0 && i >= 2 && points[i - 2][1] !== 0 && p1 !== 0) breakevens.push(s0);
-    else if ((p0 < 0 && p1 > 0) || (p0 > 0 && p1 < 0)) breakevens.push(s0 + ((s1 - s0) * -p0) / (p1 - p0));
-  }
-  const values = points.map(p => p[1]);
-  // Pendiente en los extremos: indica pérdida/ganancia ilimitada.
-  const slopeRight = payoffAt(legs, max * 2) - payoffAt(legs, max);
-  return {
-    points, min, max, strikes,
-    breakevens: [...new Set(breakevens.map(b => Math.round(b * 100) / 100))],
-    maxGain: Math.max(...values), maxLoss: Math.min(...values),
-    gainUnbounded: slopeRight > 1e-9, lossUnbounded: slopeRight < -1e-9,
-  };
-}
+// El cálculo (puro y probado) vive en utils/estrategiasOrden.
+export { analyzePayoff, payoffAt } from '../utils/estrategiasOrden';
 
 const W = 640, H = 300, M = { top: 16, right: 16, bottom: 34, left: 64 };
 

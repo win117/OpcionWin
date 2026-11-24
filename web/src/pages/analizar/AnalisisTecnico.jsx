@@ -8,7 +8,8 @@ import { confluencia, estadoSenales, eventosSenales, soportesResistencias, etiqu
 import { fmtDate, fmtFixed, fmtNum, fmtPct, isNum } from '../../utils/format';
 import { metrica } from '../../utils/objects';
 
-const DIR = { alcista: { texto: 'Alcista', clase: 'up', icono: '▲' }, bajista: { texto: 'Bajista', clase: 'down', icono: '▼' }, neutral: { texto: 'Neutral', clase: 'flat', icono: '■' } };
+const DIR = { alcista: { texto: 'Alcista', clase: 'up', icono: '▲' }, bajista: { texto: 'Bajista', clase: 'down', icono: '▼' }, neutral: { texto: 'Neutral', clase: 'flat', icono: '■' }, informativo: { texto: 'Informativo', clase: 'flat', icono: 'ⓘ' } };
+const LADO = { compra: { texto: '▲ COMPRA', clase: 'up' }, venta: { texto: '▼ VENTA', clase: 'down' }, info: { texto: 'ⓘ Informativo', clase: 'muted' } };
 
 function Chip({ dir }) {
   const d = DIR[dir] || DIR.neutral;
@@ -23,7 +24,7 @@ function Confluencia({ conf, eventos, coresActivos }) {
   const recientes = eventos.slice(-6).reverse();
   return (
     <section className="card" aria-labelledby="conf-titulo">
-      <div className="card__header"><div><h3 id="conf-titulo">Confluencia de señales</h3><p className="muted small">Cuántas señales técnicas apuntan en la misma dirección (solo cores activos: {coresActivos.map(c => CORE_LABELS[c]).join(', ') || 'ninguno'}).</p></div></div>
+      <div className="card__header"><div><h3 id="conf-titulo">Confluencia de señales</h3><p className="muted small">Cuántas señales de tendencia (medias y MACD) apuntan en la misma dirección. RSI, estocástico y Bollinger son informativos y no se cuentan (solo cores activos: {coresActivos.map(c => CORE_LABELS[c]).join(', ') || 'ninguno'}).</p></div></div>
       {sinCores ? <Empty title="Sin señales que contar">Activa el core Técnico o Indicadores en la configuración y asegúrate de tener al menos 20 velas.</Empty> : (
         <>
           <div className="conf-resumen" role="group" aria-label="Recuento de señales">
@@ -48,7 +49,7 @@ function Confluencia({ conf, eventos, coresActivos }) {
           <h4>Señales recientes</h4>
           <ul className="list list--compact senales-rec">
             {recientes.map((e, i) => (
-              <li key={i}><span className={e.lado === 'compra' ? 'up' : 'down'}>{e.lado === 'compra' ? '▲ COMPRA' : '▼ VENTA'}</span> · {etiquetaEvento(e)} <span className="muted">· {e.texto} · {fmtDate(e.time * 1000)}</span></li>
+              <li key={i}><span className={LADO[e.lado].clase}>{LADO[e.lado].texto}</span> · {etiquetaEvento(e)} <span className="muted">· {e.texto} · {fmtDate(e.time * 1000)}</span></li>
             ))}
           </ul>
         </>
@@ -72,7 +73,7 @@ function Indicadores({ estado, resumen, evalIndicadores }) {
   const f = (v, d = 2) => (isNum(v) ? fmtFixed(v, d) : '—');
   return (
     <section className="card" aria-labelledby="ind-titulo">
-      <div className="card__header"><h3 id="ind-titulo">Indicadores</h3><span className="muted small">Calculados con las velas diarias almacenadas</span></div>
+      <div className="card__header"><h3 id="ind-titulo">Indicadores</h3><span className="muted small">Velas diarias almacenadas. «Informativo»: describe sobrecompra/sobreventa; el core Indicadores lee esos osciladores como momentum.</span></div>
       <ul className="ind-grid">
         {fila('RSI (14)', f(resumen.rsi, 1), por('rsi'))}
         {fila('MACD (12/26/9)', `${f(resumen.macd, 3)} · señal ${f(resumen.macdSenal, 3)} · hist ${f(resumen.macdHist, 3)}`, por('macd'))}
@@ -95,12 +96,13 @@ export default function AnalisisTecnico({ simbolo, velas, coresActivos, evalIndi
     resumen: resumenIndicadores(diarias),
   }), [diarias]);
   const eventosActivos = useMemo(() => calc.eventos.filter(e => coresActivos.includes(e.core)), [calc.eventos, coresActivos]);
+  const eventosGrafica = useMemo(() => eventosActivos.filter(e => e.lado !== 'info'), [eventosActivos]); // los marcadores son solo compra/venta
   const conf = useMemo(() => confluencia(calc.estado, coresActivos), [calc.estado, coresActivos]);
   return (
     <div className="stack">
       <section className="card" aria-labelledby="graf-titulo">
         <div className="card__header"><h2 id="graf-titulo">Gráfica técnica</h2></div>
-        <GraficoPanel simbolo={simbolo} diarias={diarias} loading={velas.loading} error={velas.error} onReload={velas.reload} onCambio={onCambio} niveles={calc.niveles} eventos={eventosActivos} />
+        <GraficoPanel simbolo={simbolo} diarias={diarias} loading={velas.loading} error={velas.error} onReload={velas.reload} onCambio={onCambio} niveles={calc.niveles} eventos={eventosGrafica} />
       </section>
       {diarias.length >= 20 && (
         <div className="grid grid--2">

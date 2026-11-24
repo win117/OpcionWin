@@ -3,17 +3,21 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Modal } from './Modal';
 import { Badge } from './Badge';
-import { Field } from './Field';
+import { Checkbox, Field } from './Field';
 import { Spinner } from './States';
 import { useBroker } from '../context/BrokerContext';
+import { api, esNoDisponible } from '../api/client';
 import { acciones, mercado, operacion } from '../api/resources';
 import { CORE_LABELS, ESTRATEGIA_LABELS } from '../utils/constants';
 import { fmtDateTime, fmtFixed, fmtMoney, fmtPct, isNum } from '../utils/format';
-import { diasHasta, intencionPara, mid, netoMid, nombreConContexto, nombreOrden, perfilRiesgo, reconstruirPatas, redondearPrecio, spreadPct } from '../utils/estrategiasOrden';
+import {
+  antiguedadCotizacion, camposPrecio, costoSpread, cotizacionValida, CREDITO_ANCHO_MINIMO, diasHasta, intencionPara, liquidez, metricasOrden, mid, netoMid, nombreConContexto,
+  nombreOrden, notasVencimiento, reconstruirPatas, redondearPrecio, signoNeto, SPREAD_AVISO, spreadPct, textoPuntaje, validarPatas, vencimientosVigentes,
+} from '../utils/estrategiasOrden';
 import { uuid } from '../utils/objects';
 
 export const ESTADOS_TERMINALES = ['ejecutada', 'cancelada', 'rechazada', 'expirada'];
-const POLL_MS = 2000;
+const POLL_MS = 3000;
 const POLL_MAX_MS = 60000;
 let seq = 0;
 const nuevaPata = p => ({ id: ++seq, accion: p.accion || 'buy', intencion: p.intencion || intencionPara(p.accion), contratoId: p.contratoId });
@@ -25,6 +29,8 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
   const [vencSel, setVencSel] = useState(chainInicial?.vencimiento || '');
   const [cargaV, setCargaV] = useState({ loading: false, error: null });
   const reqV = useRef(0);
+  const [avisoVenc, setAvisoVenc] = useState(null); // qué pasó con los strikes al cambiar de vencimiento
+  const [confirmado, setConfirmado] = useState(false); // confirmación explícita de spread amplio
   const items = useMemo(() => (chain?.items || []).filter(i => i.contratoId && isNum(i.strike)), [chain]);
   const precioSub = chain?.precioSubyacente;
   const [legs, setLegs] = useState(() => legsIniciales.map(nuevaPata));
@@ -54,7 +60,7 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
 
   const vencimientos = useMemo(() => {
     const l = chain?.vencimientos?.length ? chain.vencimientos : chain?.vencimiento ? [chain.vencimiento] : [];
-    return [...new Set(l)].sort();
+    return vencimientosVigentes(l);
   }, [chain]);
   const bloqueado = paso === 'enviado' || enviando;
   const cambiarVencimiento = async v => {
@@ -71,6 +77,7 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
       if (r.error) throw new Error(r.error);
       setChain({ ...d, vencimientos: d.vencimientos?.length ? d.vencimientos : vencimientos, vencimiento: d.vencimiento || v });
       setLegs(r.legs.map(nuevaPata));
+      setAvisoVenc(r.aviso);
       setLimiteTocado(false);
       setCargaV({ loading: false, error: null });
     } catch (error) {
@@ -82,14 +89,24 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
   const porId = useMemo(() => new Map(items.map(i => [i.contratoId, i])), [items]);
   const patas = legs.map(l => ({ ...l, item: porId.get(l.contratoId) }));
   const neto = useMemo(() => netoMid(patas), [legs, porId]); // eslint-disable-line react-hooks/exhaustive-deps
-  const credito = isNum(neto) ? neto > 0 : false;
+  const signo = signoNeto(patas, neto);
+  const credito = signo === 'credito'; // solo para mostrar; lo que se envía lo decide camposPrecio
   const limiteDefecto = redondearPrecio(neto);
   const limiteNum = limiteTocado ? Number(limite) : limiteDefecto;
   const precioUnit = tipo === 'limit' ? limiteNum : isNum(neto) ? Math.abs(neto) : null;
   const cant = Number(cantidad);
   const cantOk = Number.isInteger(cant) && cant >= 1 && cant <= 100;
   const total = isNum(precioUnit) ? precioUnit * 100 * (cantOk ? cant : 1) : null;
-  const perfil = useMemo(() => perfilRiesgo(patas, precioUnit, credito, cantOk ? cant : 1), [legs, porId, precioUnit, credito, cant]); // eslint-disable-line react-hooks/exhaustive-deps
+  const unidades = cantOk ? cant : 1;
+  const metricas = useMemo(() => metricasOrden({
+    patas, precioNeto: precioUnit, credito, cantidad: unidades, S: precioSub, items, vencimiento: chain?.vencimiento, patrimonio: cuenta.data?.cuenta?.patrimonio,
+  }), [legs, porId, precioUnit, credito, unidades, precioSub, chain, cuenta.data]); // eslint-disable-line react-hooks/exhaustive-deps
+  const perfil = metricas.riesgo;
+  const ilimitada = Boolean(perfil) && perfil.maxPerdida == null;
+  const liq = liquidez(patas);
+  const costo = costoSpread(patas, unidades);
+  const edad = antiguedadCotizacion(patas);
+  const dias = chain?.vencimiento ? diasHasta(chain.vencimiento) : null;
   const poder = cuenta.data?.cuenta?.poderCompra;
   const requerido = credito ? perfil?.maxPerdida : total;
 
@@ -98,20 +115,28 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
   if (cargaV.error || (vencPendiente && !cargaV.loading)) problemas.push('No se pudo cargar el vencimiento elegido.');
   if (!legs.length) problemas.push('Agrega al menos una pata.');
   if (patas.some(p => !p.item)) problemas.push('Una de las patas no existe en la cadena del vencimiento.');
+  if (new Set(legs.map(l => l.contratoId)).size < legs.length) problemas.push('Hay un contrato repetido en las patas.');
+  // Los strikes son editables: se vuelve a validar la estructura. Cuatro patas sin estrategia se registran como iron condor.
+  const codigoValidar = estrategiaCodigo || (legs.length === 4 ? 'IRON_CONDOR' : null);
+  if (codigoValidar && legs.length && patas.every(p => p.item)) problemas.push(...validarPatas(codigoValidar, patas));
+  if (isNum(dias) && dias < 0) problemas.push('El vencimiento elegido ya pasó.');
+  if (legs.length && signo == null) problemas.push('Sin cotización en todas las patas no se puede saber si la orden es de crédito o de débito.');
   if (!cantOk) problemas.push('La cantidad debe ser un entero entre 1 y 100.');
   if (tipo === 'limit' && !(isNum(limiteNum) && limiteNum > 0)) problemas.push('Indica un precio límite mayor que cero.');
-  if (tipo === 'market' && patas.some(p => p.item && !isNum(mid(p.item)))) problemas.push('Sin cotización: usa una orden límite.');
+  if (tipo === 'market' && liq.sinCotizacion > 0) problemas.push('Sin cotización bid/ask válida: usa una orden límite.');
   const advertencias = [];
-  if (tipo === 'market') {
-    const ancho = patas.filter(p => (spreadPct(p.item) ?? 0) > 0.1);
-    if (ancho.length) advertencias.push('Orden de mercado con spread amplio (más de 10 % del punto medio): puede ejecutarse a un precio mucho peor. Considera una orden límite.');
-  }
+  if (liq.sinCotizacion > 0) advertencias.push(`${liq.sinCotizacion} de ${patas.length} patas sin cotización bid/ask válida: el precio estimado usa el último operado y puede no ser real.`);
+  if (liq.avisar) advertencias.push(`Spread de hasta ${fmtPct(liq.peorSpread, 0)} del precio${liq.insuficiente ? ' (sin liquidez suficiente)' : ''}: ${tipo === 'market' ? 'una orden de mercado puede ejecutarse a un precio mucho peor; considera una límite.' : 'puede que no se ejecute en el punto medio.'}`);
+  if (edad && edad.horas > 24) advertencias.push(`La cotización es de ${edad.texto}: el precio actual puede ser distinto. Sincroniza los contratos.`);
+  if (!edad && patas.length) advertencias.push('No se conoce la fecha de las cotizaciones.');
+  if (!estrategiaCodigo && legs.length > 1 && legs.length < 4) advertencias.push('El servidor solo registra órdenes de una pata o iron condor de cuatro: puede rechazar esta combinación.');
+  if (perfil && perfil.maxGanancia != null && perfil.maxGanancia <= 0) advertencias.push('Con este precio la combinación no puede ganar dinero al vencimiento.');
   if (isNum(requerido) && isNum(poder) && requerido > poder) advertencias.push(`Poder de compra insuficiente: se requieren ${fmtMoney(requerido)} y hay ${fmtMoney(poder)}.`);
   if (analisis?.sinAnalisis) advertencias.push('Opera sin análisis: no hay una selección completada para esta empresa.');
   if (analisis && !analisis.sinAnalisis && analisis.antiguo) advertencias.push('El análisis tiene más de 24 horas; el mercado pudo cambiar. Considera volver a analizar.');
   if (analisis && !analisis.sinAnalisis && !analisis.esTop) advertencias.push(`La estrategia elegida no es la mejor clasificada (la más compatible es ${ESTRATEGIA_LABELS[analisis.topCodigo] || analisis.topCodigo}).`);
   if (analisis?.contradiccion) advertencias.push('Los cores se contradicen: la neutralidad puede ser desacuerdo, no rango lateral.');
-  if (!isNum(neto)) advertencias.push('Alguna pata no tiene cotización (bid/ask); el precio estimado puede no ser confiable.');
+  if (isNum(metricas.creditoAncho) && metricas.creditoAncho < CREDITO_ANCHO_MINIMO) advertencias.push(`El crédito es solo ${fmtPct(metricas.creditoAncho, 0)} del ancho de las alas (menos de ${fmtPct(CREDITO_ANCHO_MINIMO, 0)}): arriesgas mucho para ganar poco.`);
 
   const setPata = (id, cambios) => { setLegs(ls => ls.map(l => (l.id === id ? { ...l, ...cambios } : l))); setLimiteTocado(false); };
   const cambiarAccion = (id, accion) => setPata(id, { accion, intencion: intencionPara(accion) });
@@ -129,7 +154,7 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
   };
   const quitar = id => { setLegs(ls => ls.filter(l => l.id !== id)); setLimiteTocado(false); };
 
-  const volver = () => { clave.current = null; setError(null); setPaso('editar'); };
+  const volver = () => { clave.current = null; setConfirmado(false); setError(null); setPaso('editar'); };
 
   const enviar = async () => {
     if (!empresa?._id) return;
@@ -142,7 +167,7 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
       ...(estrategiaCodigo ? { estrategiaCodigo } : {}),
       nombre: analisis && estrategiaCodigo ? nombreConContexto(empresa.simbolo, estrategiaCodigo, analisis) : nombreOrden(empresa.simbolo, patas, estrategiaCodigo),
       tipo,
-      ...(tipo === 'limit' ? { precioLimite: Math.round(limiteNum * 100) / 100, credito } : { credito }),
+      ...camposPrecio({ tipo, limite: limiteNum, credito, nPatas: patas.length }),
       vigencia,
       cantidad: cant,
       componentes: patas.map(p => ({ contratoId: p.contratoId, accion: p.accion, intencion: p.intencion, proporcion: 1 })),
@@ -159,19 +184,29 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
     }
   };
 
-  // Seguimiento: cada 2 s sincroniza órdenes y consulta la orden, hasta estado final o 60 s.
+  // Seguimiento: cada 3 s pide al servidor actualizar la orden (espera cada respuesta), hasta estado final o 60 s.
+  // Si ese recurso no existe en el servidor (404), consulta la orden guardada.
   const ordenId = orden?._id;
   const terminal = ESTADOS_TERMINALES.includes(orden?.estado);
-  const conexionId = cuenta.data?.conexion?._id || orden?.conexionId;
   useEffect(() => {
     if (paso !== 'enviado' || !ordenId || terminal) return undefined;
-    let cancelado = false, timer;
+    let cancelado = false, timer, sinActualizacion = false;
     const t0 = Date.now();
     setSondeo('activo');
     const tick = async () => {
       try {
-        if (conexionId) await acciones.sincronizar({ recurso: 'ordenes', conexionId }).catch(() => {});
-        const o = await operacion.orden(ordenId);
+        let o = null;
+        if (!sinActualizacion) {
+          try {
+            const r = await api.post(`/ordenes/${encodeURIComponent(ordenId)}/actualizacion`);
+            o = r?.orden || r;
+          } catch (e) {
+            if (!esNoDisponible(e)) throw e;
+            sinActualizacion = true;
+          }
+        }
+        if (cancelado) return;
+        if (!o) o = await operacion.orden(ordenId);
         if (cancelado) return;
         setOrden(o);
         if (ESTADOS_TERMINALES.includes(o?.estado)) { setSondeo('idle'); return; }
@@ -182,7 +217,7 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
     };
     timer = setTimeout(tick, POLL_MS);
     return () => { cancelado = true; clearTimeout(timer); };
-  }, [paso, ordenId, terminal, conexionId]);
+  }, [paso, ordenId, terminal]);
 
   const cancelar = async () => {
     setCancelando(true);
@@ -203,7 +238,7 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
   ) : paso === 'revisar' ? (
     <>
       <button type="button" className="btn" onClick={volver} disabled={enviando}>Volver</button>
-      <button type="button" className="btn btn--primary" onClick={enviar} disabled={enviando}>{enviando ? 'Enviando…' : error ? 'Reintentar envío (paper)' : 'Confirmar envío (paper)'}</button>
+      <button type="button" className="btn btn--primary" onClick={enviar} disabled={enviando || problemas.length > 0 || (liq.confirmar && !confirmado)}>{enviando ? 'Enviando…' : error ? 'Reintentar envío (paper)' : 'Confirmar envío (paper)'}</button>
     </>
   ) : (
     <>
@@ -232,7 +267,7 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
 
         {analisis && !analisis.sinAnalisis && (
           <div className="ticket__analisis small" role="note">
-            <strong>Análisis de origen:</strong> {ESTRATEGIA_LABELS[analisis.codigo] || analisis.codigo} · compatibilidad {isNum(analisis.puntaje) ? Math.round(analisis.puntaje) : '—'}/100 · cobertura {isNum(analisis.cobertura) ? fmtPct(analisis.cobertura) : '—'} · {fmtDateTime(analisis.fecha)} · cores: {analisis.cores.map(c => CORE_LABELS[c] || c).join(', ') || '—'}
+            <strong>Análisis de origen:</strong> {ESTRATEGIA_LABELS[analisis.codigo] || analisis.codigo} · compatibilidad {textoPuntaje(analisis.puntaje)}/100 · confianza {analisis.est ? fmtPct(analisis.est.confianza) : '—'} · dispersión {analisis.est ? analisis.est.dispersion.toFixed(2) : '—'} · cobertura {isNum(analisis.cobertura) ? fmtPct(analisis.cobertura) : '—'} · {fmtDateTime(analisis.fecha)} · cores: {analisis.cores.map(c => CORE_LABELS[c] || c).join(', ') || '—'}
           </div>
         )}
 
@@ -255,10 +290,11 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
                 )}
               </div>
             )}
+            {avisoVenc && <div className="alert alert--info" role="status">{avisoVenc}</div>}
             <div className="table-wrap">
               <table className="table table--dense">
                 <caption className="sr-only">Patas de la orden</caption>
-                <thead><tr><th scope="col">Acción</th><th scope="col">Tipo</th><th scope="col">Strike</th><th scope="col" className="num">Bid</th><th scope="col" className="num">Ask</th><th scope="col" className="num">Mid</th><th scope="col" className="num">IV</th><th scope="col" className="num">Δ</th><th scope="col"><span className="sr-only">Quitar</span></th></tr></thead>
+                <thead><tr><th scope="col">Acción</th><th scope="col">Tipo</th><th scope="col">Strike</th><th scope="col" className="num">Bid</th><th scope="col" className="num">Ask</th><th scope="col" className="num">Mid</th><th scope="col" className="num">Spread</th><th scope="col" className="num">IV</th><th scope="col" className="num">Δ</th><th scope="col"><span className="sr-only">Quitar</span></th></tr></thead>
                 <tbody>
                   {patas.map((l, i) => {
                     const it = l.item;
@@ -273,7 +309,8 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
                         </select></td>
                         <td className="num">{isNum(it?.bid) ? fmtFixed(it.bid) : '—'}</td>
                         <td className="num">{isNum(it?.ask) ? fmtFixed(it.ask) : '—'}</td>
-                        <td className="num">{isNum(mid(it)) ? fmtFixed(mid(it)) : '—'}</td>
+                        <td className="num">{isNum(mid(it)) ? <>{fmtFixed(mid(it))}{!cotizacionValida(it) && <abbr title="Último precio operado: no hay cotización bid/ask válida">*</abbr>}</> : '—'}</td>
+                        <td className={'num' + ((spreadPct(it) ?? 0) > SPREAD_AVISO ? ' down' : '')}>{isNum(spreadPct(it)) ? fmtPct(spreadPct(it), 0) : '—'}</td>
                         <td className="num">{isNum(it?.volatilidadImplicita) ? fmtPct(it.volatilidadImplicita, 1) : '—'}</td>
                         <td className="num">{isNum(it?.griegas?.delta) ? fmtFixed(it.griegas.delta, 3) : '—'}</td>
                         <td>{legs.length > 1 && <button type="button" className="btn btn--ghost btn--sm" onClick={() => quitar(l.id)} aria-label={`Quitar pata ${i + 1}`}>×</button>}</td>
@@ -283,6 +320,7 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
                 </tbody>
               </table>
             </div>
+            <p className="muted small">Cotización: {edad ? `${edad.texto} (${fmtDateTime(edad.fecha)})` : 'fecha desconocida'} · Cruzar el spread cuesta {isNum(costo) ? `${fmtMoney(costo)} al entrar (y otro tanto, aproximadamente, al salir)` : '—'}.</p>
             {legs.length < 4 && <div><button type="button" className="btn btn--sm" onClick={agregar}>+ Añadir pata</button></div>}
 
             <div className="ticket__form">
@@ -302,6 +340,7 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
               </Field>
             </div>
             <Resumen credito={credito} total={total} perfil={perfil} />
+            {ilimitada && <PerdidaIlimitada />}
             {advertencias.map(a => <div key={a} className="alert alert--warning" role="note">{a}</div>)}
             {problemas.length > 0 && <ul className="list list--compact small down">{problemas.map(p => <li key={p}>{p}</li>)}</ul>}
           </>
@@ -319,7 +358,22 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
               <div><dt>Cantidad</dt><dd>{cant}</dd></div>
             </dl>
             <Resumen credito={credito} total={total} perfil={perfil} />
+            {ilimitada && <PerdidaIlimitada />}
+            <Cifras m={metricas} costo={costo} edad={edad} />
             {advertencias.map(a => <div key={a} className="alert alert--warning" role="note">{a}</div>)}
+            <div className="ticket__notas small">
+              <strong>Antes de confirmar</strong>
+              <ul className="list list--compact">
+                {notasVencimiento(patas, precioSub, dias).map(n => <li key={n}>{n}</li>)}
+                <li>Fecha de resultados: no disponible. Comprueba si la empresa publica resultados antes del {chain?.vencimiento || 'vencimiento'}: el precio puede saltar y la volatilidad implícita caer de golpe.</li>
+              </ul>
+            </div>
+            {liq.confirmar && (
+              <div className="ticket__confirmar">
+                <Checkbox checked={confirmado} onChange={setConfirmado} disabled={enviando}
+                  label={liq.sinCotizacion > 0 ? 'Entiendo que hay patas sin cotización válida y que el precio estimado puede no ser real.' : `Entiendo que el spread llega al ${fmtPct(liq.peorSpread, 0)} y que cruzarlo costaría ${fmtMoney(costo)}.`} />
+              </div>
+            )}
             {error && <div className="alert alert--danger" role="alert"><div><strong>No se pudo enviar la orden.</strong> {error.message} Puedes reintentar: se reutiliza la misma clave de idempotencia.</div></div>}
           </>
         )}
@@ -344,17 +398,43 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
 
 const diasTxt = d => (d === 1 ? '1 día' : d + ' días');
 
+const PerdidaIlimitada = () => (
+  <div className="alert alert--danger ticket__ilimitada" role="alert"><div><strong>Pérdida ilimitada.</strong> Vendes una opción sin otra que la cubra: si el precio sube mucho, la pérdida no tiene tope y puede superar el dinero de la cuenta. Añade una pata comprada que la limite.</div></div>
+);
+
+const monto = v => (v == null ? 'Ilimitada' : fmtMoney(v));
+
 function Resumen({ credito, total, perfil }) {
   return (
     <dl className="stats stats--row ticket__resumen">
       <div><dt>{credito ? 'Crédito neto estimado' : 'Costo (débito) estimado'}</dt><dd className={credito ? 'up' : ''}>{isNum(total) ? fmtMoney(total) : '—'}</dd></div>
-      {perfil && (
-        <>
-          <div><dt>Pérdida máxima</dt><dd className="down">{perfil.maxPerdida == null ? 'Ilimitada' : fmtMoney(perfil.maxPerdida)}</dd></div>
-          <div><dt>Ganancia máxima</dt><dd className="up">{perfil.maxGanancia == null ? 'Ilimitada' : fmtMoney(perfil.maxGanancia)}</dd></div>
-          <div><dt>{perfil.breakevens.length > 1 ? 'Puntos de equilibrio' : 'Punto de equilibrio'}</dt><dd>{perfil.breakevens.map(b => fmtFixed(b, 2)).join(' / ')}</dd></div>
-        </>
-      )}
+      <div><dt>Pérdida máxima</dt><dd className="down">{perfil ? monto(perfil.maxPerdida) : 'Sin datos'}</dd></div>
+      <div><dt>Ganancia máxima</dt><dd className="up">{perfil ? monto(perfil.maxGanancia) : 'Sin datos'}</dd></div>
+      <div><dt>{perfil?.breakevens.length > 1 ? 'Puntos de equilibrio' : 'Punto de equilibrio'}</dt><dd>{perfil ? perfil.breakevens.map(b => fmtFixed(b, 2)).join(' / ') || 'Ninguno' : 'Sin datos'}</dd></div>
     </dl>
+  );
+}
+
+/** Cifras de la revisión: probabilidad, griegas en dólares, retorno, movimiento esperado y peso en la cuenta. */
+function Cifras({ m, costo, edad }) {
+  const dinero = v => (isNum(v) ? <span className={v < 0 ? 'down' : v > 0 ? 'up' : ''}>{fmtMoney(v)}</span> : '—');
+  const mv = m.movimiento;
+  return (
+    <>
+      <dl className="stats stats--row ticket__cifras">
+        <div><dt>Probabilidad de ganar al vencer</dt><dd>{isNum(m.probabilidad) ? fmtPct(m.probabilidad, 0) : '—'}</dd></div>
+        <div><dt>Retorno sobre el riesgo</dt><dd>{isNum(m.retornoRiesgo) ? fmtPct(m.retornoRiesgo, 0) : m.riesgo?.maxGanancia == null && m.riesgo?.maxPerdida != null ? 'Sin tope de ganancia' : '—'}</dd></div>
+        {isNum(m.creditoAncho) && <div><dt>Crédito / ancho del ala</dt><dd className={m.creditoAncho < CREDITO_ANCHO_MINIMO ? 'down' : ''}>{fmtPct(m.creditoAncho, 0)}</dd></div>}
+        <div><dt>% de la cuenta en riesgo</dt><dd>{isNum(m.pctCuenta) ? fmtPct(m.pctCuenta, 1) : m.riesgo && m.riesgo.maxPerdida == null ? 'Ilimitado' : '—'}</dd></div>
+        <div><dt>Delta: por cada $1 que suba</dt><dd>{dinero(m.delta)}</dd></div>
+        <div><dt>Theta: por cada día</dt><dd>{dinero(m.theta)}</dd></div>
+        <div><dt>Vega: por punto de volatilidad</dt><dd>{dinero(m.vega)}</dd></div>
+        <div><dt>Costo de cruzar el spread</dt><dd>{isNum(costo) ? fmtMoney(costo) : '—'}</dd></div>
+      </dl>
+      <p className="small">{mv
+        ? <>Movimiento esperado hasta el vencimiento: ±{fmtMoney(mv.monto)}. Si baja a {fmtMoney(mv.abajo)}: {dinero(mv.plAbajo)}; si sube a {fmtMoney(mv.arriba)}: {dinero(mv.plArriba)} (al vencimiento).</>
+        : 'Movimiento esperado: no disponible (falta volatilidad implícita o precio del subyacente).'}</p>
+      <p className="muted small">Cotización {edad ? edad.texto : 'de fecha desconocida'}. Probabilidad estimada con Black-Scholes y la volatilidad implícita; no es una garantía. Griegas indicativas del proveedor.</p>
+    </>
   );
 }

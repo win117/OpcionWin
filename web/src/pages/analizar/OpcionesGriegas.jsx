@@ -1,7 +1,8 @@
 // Cadena de opciones con griegas (GET /mercado/opciones/resumen/:simbolo) y sonrisa de volatilidad.
 import { useMemo, useState } from 'react';
 import TicketOrden from '../../components/TicketOrden';
-import { intencionPara } from '../../utils/estrategiasOrden';
+import { cargarCadena } from '../../components/BotonOperar';
+import { intencionPara, vencimientosVigentes } from '../../utils/estrategiasOrden';
 import { SyncButton } from '../../components/SyncButton';
 import { Empty, ErrorMessage, Loading, Notice } from '../../components/States';
 import { Select } from '../../components/Field';
@@ -79,7 +80,7 @@ function Lado({ o, lado, onOperar }) {
 export default function OpcionesGriegas({ simbolo, empresa }) {
   const [ticket, setTicket] = useState(null);
   const [venc, setVenc] = useState('');
-  const state = useAsync(() => mercado.opcionesResumen(simbolo, { vencimiento: venc }), [simbolo, venc]);
+  const state = useAsync(() => (venc ? mercado.opcionesResumen(simbolo, { vencimiento: venc }) : cargarCadena(simbolo)), [simbolo, venc]);
   const d = state.data;
   const filas = useMemo(() => porStrike(d?.items || []), [d]);
   const precio = d?.precioSubyacente;
@@ -96,12 +97,12 @@ export default function OpcionesGriegas({ simbolo, empresa }) {
   if (!d?.items?.length) {
     return (
       <div className="stack">
-        <Empty title="Sin contratos de opciones">Sincroniza los contratos de {simbolo} para ver la cadena y las griegas.</Empty>
+        <Empty title={d?.vencimientos?.length ? 'Los contratos guardados ya vencieron' : 'Sin contratos de opciones'}>Sincroniza los contratos de {simbolo} para ver la cadena y las griegas.</Empty>
         <div className="toolbar">{sync}</div>
       </div>
     );
   }
-  const vencs = d.vencimientos || [];
+  const vencs = vencimientosVigentes(d.vencimientos);
   const operar = (o, accion) => setTicket({ legs: [{ accion, intencion: intencionPara(accion), contratoId: o.contratoId }], chain: d });
   return (
     <div className="stack">

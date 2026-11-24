@@ -23,6 +23,34 @@ export function etiquetarVencimiento(metricas, rango) {
   const etiqueta = rango.min + '-' + (Number.isFinite(rango.max) ? rango.max : '') + 'd';
   return metricas.map(m => m.nombre === 'iv_promedio' ? { ...m, periodo: etiqueta } : m);
 }
+const DIA = 86400000;
+const positivo = v => Number.isFinite(v) && v > 0;
+/** Misma regla que la web: bid > 0 y ask >= bid. 0/0 o bid 0 es «sin cotización», no precio 0. */
+export const cotizacionValida = s => positivo(s?.bid) && Number.isFinite(s?.ask) && s.ask >= s.bid;
+/** Prima por acción: punto medio de una cotización válida; si no, último precio > 0; si no, undefined (falta el dato). */
+export const primaDe = s => (cotizacionValida(s) ? (s.bid + s.ask) / 2 : positivo(s?.ultimo) ? s.ultimo : undefined);
+
+// Antigüedad de los snapshots de opciones, en días naturales de Nueva York: 2, o 4 si en medio hay fin de semana o feriado.
+// Los feriados de NYSE que no están aquí caen siempre junto a un fin de semana, que ya amplía el plazo.
+export const DIAS_SNAPSHOT = 2;
+export const DIAS_SNAPSHOT_CIERRE = 4;
+const diaNY = d => Date.parse(new Date(d).toLocaleDateString('en-CA', { timeZone: 'America/New_York' }));
+function sinMercado(dia) {
+  const d = new Date(dia), sem = d.getUTCDay(), num = d.getUTCDate(), mes = d.getUTCMonth() + 1;
+  if (sem === 0 || sem === 6) return true;
+  return ['1-1', '6-19', '7-4', '12-25'].includes(mes + '-' + num) || (mes === 11 && sem === 4 && num >= 22 && num <= 28); // Acción de Gracias
+}
+export function snapshotVigente(fechaDato, ahora = new Date()) {
+  const desde = diaNY(fechaDato), hasta = diaNY(ahora);
+  if (!Number.isFinite(desde)) return false;
+  const dias = Math.round((hasta - desde) / DIA);
+  if (dias <= DIAS_SNAPSHOT) return true;
+  if (dias > DIAS_SNAPSHOT_CIERRE) return false;
+  for (let d = desde + DIA; d <= hasta; d += DIA) if (sinMercado(d)) return true;
+  return false;
+}
+// Registro con el dato más reciente.
+const masReciente = lista => lista.reduce((a, b) => (!a || fecha(b.fuente.fechaDato) > fecha(a.fuente.fechaDato) ? b : a), undefined);
 const metrica = (registro, nombre) => registro.metricas?.find(m => m.nombre === nombre)?.valor;
 
 function ultimaFuente(registros, tipo) {
@@ -35,7 +63,7 @@ function ultimaFuente(registros, tipo) {
 export function createAnalisis({ cola, factory = repository }) {
   async function insumos(ctx, empresa, requiere, parametros = {}) {
     const input = { simbolo: empresa.simbolo, velas: [], fundamentales: [], reportes: [], noticias: [], opciones: [] };
-    const fuentes = [];
+    const fuentes = [], faltantes = [];
     let rangoVencimiento;
     const necesita = k => requiere.some(r => r.replace(/\?$/, '') === k); // 'x?' = insumo opcional
     if (necesita('velas')) {
@@ -76,13 +104,21 @@ export function createAnalisis({ cola, factory = repository }) {
       if (min !== undefined || max !== undefined) rangoVencimiento = { min: min ?? 0, max: max ?? Infinity };
       const hoy = new Date().setUTCHours(0, 0, 0, 0);
       const enRango = c => !rangoVencimiento || (d => d >= rangoVencimiento.min && d <= rangoVencimiento.max)((fecha(c.vencimiento) - hoy) / 86400000);
-      input.opciones = [...ultimos.values()].filter(s => contratos.has(s.contratoId) && cerca(contratos.get(s.contratoId)) && enRango(contratos.get(s.contratoId))).map(s => {
+      const candidatos = [...ultimos.values()].filter(s => {
         const c = contratos.get(s.contratoId);
-        return { tipo: c.tipo, strike: c.strike, vencimiento: c.vencimiento, bid: s.bid, ask: s.ask, volatilidadImplicita: s.volatilidadImplicita, griegas: s.griegas };
+        return c && cerca(c) && enRango(c) && fecha(c.vencimiento) >= hoy;
       });
-      fuentes.push(...ultimaFuente([...ultimos.values()], 'opciones'));
+      const vigentes = candidatos.filter(s => snapshotVigente(s.fuente.fechaDato));
+      if (vigentes.length < candidatos.length) {
+        faltantes.push(`opciones: ${candidatos.length - vigentes.length} de ${candidatos.length} cotizaciones ignoradas por antiguas (más de ${DIAS_SNAPSHOT} días; ${DIAS_SNAPSHOT_CIERRE} si hubo fin de semana o feriado)`);
+      }
+      input.opciones = vigentes.map(s => {
+        const c = contratos.get(s.contratoId);
+        return { tipo: c.tipo, strike: c.strike, vencimiento: c.vencimiento, ...(cotizacionValida(s) ? { bid: s.bid, ask: s.ask } : {}), volatilidadImplicita: s.volatilidadImplicita, griegas: s.griegas };
+      });
+      fuentes.push(...ultimaFuente(vigentes, 'opciones'));
     }
-    return { input, fuentes, rangoVencimiento };
+    return { input, fuentes, faltantes, rangoVencimiento };
   }
 
   // Ejecuta un core y devuelve datos + cambios listos para la Evaluacion.
@@ -91,12 +127,12 @@ export function createAnalisis({ cola, factory = repository }) {
     const parametros = { ...(perfil?.parametros || {}), ...parametrosExtra };
     const reglas = (perfil?.reglas || []).filter(r => r.core === core && r.activo !== false);
     const datos = { core, empresaId: empresa._id, ...(perfil ? { perfilId: perfil._id } : {}), versionAlgoritmo: modulo.VERSION, parametros, reglasAplicadas: reglas };
-    const { input, fuentes, rangoVencimiento } = await insumos(ctx, empresa, modulo.REQUIERE || [], parametros);
+    const { input, fuentes, faltantes, rangoVencimiento } = await insumos(ctx, empresa, modulo.REQUIERE || [], parametros);
     const r = modulo.evaluar({ ...input, fechaReferencia: new Date().toISOString(), parametros, reglas });
     const cambios = {
       ...(r.puntaje != null ? { puntaje: r.puntaje } : {}), cobertura: r.cobertura ?? 0,
       metricas: etiquetarVencimiento(metricasValidas(r.metricas), rangoVencimiento), motivos: (r.motivos || []).map(String).slice(0, 50),
-      datosFaltantes: (r.datosFaltantes || []).map(String).slice(0, 50), fuentes,
+      datosFaltantes: [...faltantes, ...(r.datosFaltantes || [])].map(String).slice(0, 50), fuentes,
     };
     return { datos, cambios };
   }
@@ -201,29 +237,38 @@ export function createAnalisis({ cola, factory = repository }) {
       const estrategia = await obtener('estrategias', ctx, config.estrategiaId, factory);
       const datos = { core: 'configuracion', configuracionId: config._id, empresaId: config.empresaId, versionAlgoritmo: estrategiasCore.VERSION, parametros: config.parametros || {} };
       return iniciarTrabajo({ name: 'evaluaciones', ctx, factory, cola, datos, ejecutar: async () => {
+        const ahora = new Date();
         const snaps = await todos('datos-mercado', ctx, { empresaId: config.empresaId, tipo: 'snapshot_opcion' }, factory);
-        const fuentes = [];
-        const componentes = [];
+        const fuentes = [], componentes = [], faltantes = [], vencidos = [];
         for (const c of config.componentes || []) {
           const contrato = await obtener('contratos', ctx, c.contratoId, factory);
-          const s = snaps.filter(x => x.contratoId === contrato._id).sort((a, b) => fecha(b.fuente.fechaDato) - fecha(a.fuente.fechaDato))[0];
-          const precio = s && s.bid != null && s.ask != null ? (s.bid + s.ask) / 2 : s?.ultimo;
+          const ultimo = masReciente(snaps.filter(x => x.contratoId === contrato._id));
+          const s = ultimo && snapshotVigente(ultimo.fuente.fechaDato, ahora) ? ultimo : undefined;
+          const precio = primaDe(s);
+          if (precio === undefined) faltantes.push((ultimo && !s ? 'cotización vigente de ' : 'precio de ') + contrato.simbolo);
+          if (fecha(contrato.vencimiento) < diaNY(ahora)) vencidos.push(contrato.simbolo);
           if (s) fuentes.push(...ultimaFuente([s], contrato.contratoExternoId));
-          componentes.push({ tipo: contrato.tipo, strike: contrato.strike, vencimiento: contrato.vencimiento, accion: c.accion, cantidad: c.cantidad, ...(precio != null ? { precio } : {}),
-            // IV y griegas indicativas del snapshot: Black-Scholes (estrategias@1.1.0) las verifica y calcula la probabilidad de ganancia.
+          componentes.push({ tipo: contrato.tipo, strike: contrato.strike, vencimiento: contrato.vencimiento, accion: c.accion,
+            cantidad: c.cantidad * (c.proporcion || 1), multiplicador: contrato.multiplicador || 100, ...(precio !== undefined ? { precio } : {}),
+            // IV y griegas indicativas del snapshot: Black-Scholes (estrategias.core) las verifica y calcula la probabilidad de ganancia.
             ...(Number.isFinite(s?.volatilidadImplicita) ? { volatilidadImplicita: s.volatilidadImplicita } : {}), ...(s?.griegas ? { griegas: s.griegas } : {}) });
         }
+        // Subyacente: la misma regla que el resumen de opciones (última cotización; si no hay, cierre de la última vela del intervalo).
         let precioSubyacente = Number.isFinite(body.precioSubyacente) ? body.precioSubyacente : undefined;
         if (precioSubyacente === undefined) {
-          const velas = await todos('datos-mercado', ctx, { empresaId: config.empresaId, tipo: 'vela' }, factory);
-          const ultima = velas.sort((a, b) => fecha(b.fuente.fechaDato) - fecha(a.fuente.fechaDato))[0];
-          precioSubyacente = ultima?.cierre;
+          const cot = masReciente((await todos('datos-mercado', ctx, { empresaId: config.empresaId, tipo: 'cotizacion' }, factory)).filter(q => positivo(q.ultimo)));
+          const intervalo = config.parametros?.intervalo || '1Day';
+          const vela = cot ? null : masReciente((await todos('datos-mercado', ctx, { empresaId: config.empresaId, tipo: 'vela' }, factory)).filter(v => (v.intervalo || '1Day') === intervalo));
+          precioSubyacente = cot?.ultimo ?? vela?.cierre;
         }
-        const r = estrategiasCore.evaluarConfiguracion({ estrategia: estrategia.codigo, componentes, precioSubyacente, multiplicador: 100, fechaReferencia: new Date().toISOString() });
-        const conPrecio = componentes.filter(c => c.precio != null).length;
-        return { metricas: metricasValidas(r.metricas), motivos: [...(r.errores || []), ...(r.motivos || [])].map(String).slice(0, 50),
-          cobertura: componentes.length ? conPrecio / componentes.length : 0,
-          datosFaltantes: componentes.length > conPrecio ? ['precio de ' + (componentes.length - conPrecio) + ' componente(s)'] : [], fuentes };
+        const r = estrategiasCore.evaluarConfiguracion({ estrategia: estrategia.codigo, componentes, precioSubyacente, fechaReferencia: ahora.toISOString() });
+        const errores = [...(r.errores || []), ...vencidos.map(x => `El contrato ${x} ya venció.`)];
+        const conPrecio = componentes.filter(c => c.precio !== undefined).length;
+        // Una estructura inválida o vencida nunca se reporta como completa: sin montos, cobertura 0 y configuracion_valida = 0.
+        return { metricas: [...metricasValidas(errores.length ? [] : r.metricas), { nombre: 'configuracion_valida', valor: errores.length ? 0 : 1, unidad: 'indicador' }],
+          motivos: [...errores, ...(r.motivos || [])].map(String).slice(0, 50),
+          cobertura: componentes.length && !errores.length ? conPrecio / componentes.length : 0,
+          datosFaltantes: faltantes, fuentes };
       } });
     },
   };

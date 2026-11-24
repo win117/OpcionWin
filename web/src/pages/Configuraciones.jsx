@@ -18,6 +18,7 @@ import { PARAM_FIELDS } from './Perfiles';
 import { ESTRATEGIA_LABELS, DISCLAIMER } from '../utils/constants';
 import { fmtDateTime, fmtMoney, fmtNum, fmtMetric, isNum } from '../utils/format';
 import { contratoLabel, empresaLabel } from '../utils/objects';
+import { cotizacionValida, mid } from '../utils/estrategiasOrden';
 import { EXPLICACIONES } from './Estrategias';
 
 const ESTADOS = [{ value: 'borrador', label: 'Borrador' }, { value: 'validada', label: 'Validada' }, { value: 'archivada', label: 'Archivada' }];
@@ -60,15 +61,19 @@ function MetricasConfiguracion({ evaluacion }) {
   const m = evaluacion.metricas || [];
   const get = n => m.find(x => x.nombre === n);
   const breakevens = m.filter(x => x.nombre.startsWith('breakeven'));
-  const principales = ['prima_neta', 'perdida_maxima', 'ganancia_maxima', 'delta_neta'];
+  const principales = ['prima_neta', 'perdida_maxima', 'ganancia_maxima', 'delta_neta', 'configuracion_valida'];
+  const invalida = get('configuracion_valida')?.valor === 0;
+  const conMontos = Boolean(get('prima_neta')); // sin prima no hay montos: «—», nunca «Ilimitada»
   const otras = m.filter(x => !principales.includes(x.nombre) && !x.nombre.startsWith('breakeven'));
   const val = n => { const x = get(n); return x ? fmtMetric(x.valor, x.unidad) : null; };
   return (
     <div className="stack">
+      {invalida && <Notice tone="danger" title="Configuración no válida.">{evaluacion.motivos?.[0]} No se calculan montos.</Notice>}
+      {conMontos && !get('perdida_maxima') && <Notice tone="danger" title="Pérdida ilimitada.">Esta combinación no tiene tope de pérdida.</Notice>}
       <dl className="stats stats--row">
         <div><dt>Prima neta</dt><dd>{val('prima_neta') ?? '—'}</dd></div>
-        <div><dt>Pérdida máxima</dt><dd>{val('perdida_maxima') ?? '—'}</dd></div>
-        <div><dt>Ganancia máxima</dt><dd>{val('ganancia_maxima') ?? (evaluacion.estado === 'completada' ? 'Ilimitada / no reportada' : '—')}</dd></div>
+        <div><dt>Pérdida máxima</dt><dd>{val('perdida_maxima') ?? (conMontos ? 'Ilimitada' : '—')}</dd></div>
+        <div><dt>Ganancia máxima</dt><dd>{val('ganancia_maxima') ?? (conMontos ? 'Ilimitada' : '—')}</dd></div>
         <div><dt>Breakevens</dt><dd>{breakevens.length ? breakevens.map(b => fmtMetric(b.valor, b.unidad)).join(' · ') : '—'}</dd></div>
         {get('delta_neta') && <div><dt>Delta neta</dt><dd>{val('delta_neta')}</dd></div>}
       </dl>
@@ -121,12 +126,13 @@ function Payoff({ configuracion, contratosById, spot }) {
   const [snap, setSnap] = useState({ busy: false, error: null, fuentes: {} });
   const legs = (configuracion.componentes || []).map(c => {
     const k = contratosById.get(c.contratoId);
-    return k ? { id: c._id, contrato: k, tipo: k.tipo, strike: k.strike, accion: c.accion, cantidad: c.cantidad * (c.proporcion || 1), multiplicador: k.multiplicador || 100, prima: Number(primas[c._id]) || 0 } : null;
+    return k ? { id: c._id, contrato: k, tipo: k.tipo, strike: k.strike, accion: c.accion, cantidad: c.cantidad * (c.proporcion || 1), multiplicador: k.multiplicador || 100, prima: primas[c._id] == null || primas[c._id] === '' ? null : Number(primas[c._id]) } : null;
   });
   const missing = legs.some(l => !l);
   const valid = legs.filter(Boolean);
-  const analysis = useMemo(() => analyzePayoff(valid), [JSON.stringify(valid)]); // eslint-disable-line react-hooks/exhaustive-deps
-  const sinPrimas = valid.every(l => !l.prima);
+  const variosVenc = new Set(valid.map(l => String(l.contrato.vencimiento).slice(0, 10))).size > 1;
+  const analysis = useMemo(() => (missing || variosVenc ? null : analyzePayoff(valid)), [JSON.stringify(valid), missing]); // eslint-disable-line react-hooks/exhaustive-deps
+  const faltanPrimas = valid.some(l => !isNum(l.prima));
 
   const cargarSnapshots = async () => {
     setSnap({ busy: true, error: null, fuentes: {} });
@@ -137,8 +143,8 @@ function Payoff({ configuracion, contratosById, spot }) {
         const res = await listLatest(p => mercado.snapshot(leg.contrato._id, p), {}, { dateOf: r => r.fuente?.fechaDato, limit: 1, maxPages: 5 });
         const s = res.items[0];
         if (!s) continue;
-        const mid = isNum(s.bid) && isNum(s.ask) ? (s.bid + s.ask) / 2 : s.ultimo;
-        if (isNum(mid)) { next[leg.id] = String(Math.round(mid * 100) / 100); fuentes[leg.id] = s.fuente; }
+        const prima = mid(s); // misma regla que el ticket: 0/0 no es una cotización
+        if (isNum(prima)) { next[leg.id] = String(Math.round(prima * 100) / 100); fuentes[leg.id] = { fuente: s.fuente, texto: cotizacionValida(s) ? 'punto medio bid/ask' : 'último precio operado (sin cotización)' }; }
       }
       setPrimas(next);
       setSnap({ busy: false, error: null, fuentes });
@@ -169,20 +175,22 @@ function Payoff({ configuracion, contratosById, spot }) {
                 <td>{contratoLabel(l.contrato)}</td>
                 <td><Badge value={l.accion} tone={l.accion === 'buy' ? 'success' : 'danger'}>{l.accion === 'buy' ? 'Compra' : 'Venta'}</Badge></td>
                 <td className="num">{fmtNum(l.cantidad, 0)} × {l.multiplicador}</td>
-                <td><input type="number" min="0" step="0.01" className="input--narrow" aria-label={`Prima de ${contratoLabel(l.contrato)}`} value={primas[l.id] ?? ''} placeholder="0" onChange={e => setPrimas(p => ({ ...p, [l.id]: e.target.value }))} /></td>
-                <td>{snap.fuentes[l.id] ? <SourceLine fuente={snap.fuentes[l.id]} extra="punto medio bid/ask" /> : <span className="muted">manual</span>}</td>
+                <td><input type="number" min="0" step="0.01" className="input--narrow" aria-label={`Prima de ${contratoLabel(l.contrato)}`} value={primas[l.id] ?? ''} placeholder="—" onChange={e => setPrimas(p => ({ ...p, [l.id]: e.target.value }))} /></td>
+                <td>{snap.fuentes[l.id] ? <SourceLine fuente={snap.fuentes[l.id].fuente} extra={snap.fuentes[l.id].texto} /> : <span className="muted">manual</span>}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      {sinPrimas && <Notice tone="warning">Sin primas, la curva muestra solo el valor intrínseco (no la ganancia/pérdida real).</Notice>}
+      {faltanPrimas && <Notice tone="warning">Faltan primas: escribe la de cada pata (o usa los snapshots) para calcular la curva, la ganancia y la pérdida. Una prima vacía no se toma como 0.</Notice>}
+      {variosVenc && <Notice tone="warning">Las patas vencen en fechas distintas: no hay un único pago al vencimiento que graficar.</Notice>}
+      {analysis?.lossUnbounded && <Notice tone="danger" title="Pérdida ilimitada.">Esta combinación no tiene tope de pérdida.</Notice>}
       {analysis && (
         <>
           <PayoffChart analysis={analysis} spot={Number(spot) || undefined} />
           <dl className="stats stats--row">
-            <div><dt>Ganancia máx. (rango)</dt><dd>{analysis.gainUnbounded ? 'Ilimitada' : fmtMoney(analysis.maxGain)}</dd></div>
-            <div><dt>Pérdida máx. (rango)</dt><dd>{analysis.lossUnbounded ? 'Ilimitada' : fmtMoney(analysis.maxLoss)}</dd></div>
+            <div><dt>Ganancia máx.</dt><dd>{analysis.gainUnbounded ? 'Ilimitada' : fmtMoney(analysis.maxGain)}</dd></div>
+            <div><dt>Pérdida máx.</dt><dd>{analysis.lossUnbounded ? 'Ilimitada' : fmtMoney(-analysis.maxLoss)}</dd></div>
             <div><dt>Breakevens</dt><dd>{analysis.breakevens.length ? analysis.breakevens.map(b => fmtMoney(b)).join(' · ') : '—'}</dd></div>
           </dl>
         </>

@@ -3,7 +3,8 @@
 import { direccion, ScoreBar } from '../../components/Gauge';
 import { Empty } from '../../components/States';
 import { CORE_LABELS } from '../../utils/constants';
-import { fmtDateTime, fmtNum, fmtPct, isNum } from '../../utils/format';
+import { fmtDateTime, fmtPct, isNum } from '../../utils/format';
+import { textoPuntaje } from '../../utils/estrategiasOrden';
 import { metrica } from '../../utils/objects';
 
 const ICONO = { up: '▲', down: '▼', flat: '◆', neutral: '·' };
@@ -57,7 +58,7 @@ export default function LecturaCores({ evaluaciones, coresActivos }) {
         {isNum(media) && (
           <p className="lectura__global">
             <span className="muted small">Promedio simple</span>
-            <span className={'dir dir--' + global.tono}>{ICONO[global.tono]} {global.texto} · {fmtNum(media, 0)}</span>
+            <span className={'dir dir--' + global.tono}>{ICONO[global.tono]} {global.texto} · {textoPuntaje(media)}</span>
           </p>
         )}
       </div>
