@@ -5,6 +5,7 @@ import { mercado } from '../../api/resources';
 import { useSondeo } from '../../hooks/useSondeo';
 import { CandleChart } from '../../components/CandleChart';
 import { ScoreBar } from '../../components/Gauge';
+import { Termino } from '../../components/Termino';
 import { ErrorMessage } from '../../components/States';
 import { ESTRATEGIAS, ESTRATEGIA_LABELS } from '../../utils/constants';
 import { giroEs } from '../../utils/sic';
@@ -61,8 +62,8 @@ export default function FichaEmpresa({ simbolo, vivo, onCerrar }) {
         <div><dt>En el año</dt><dd className={tono(d.cambioAnio)}>{signo(d.cambioAnio)}</dd></div>
         <div><dt>Capitalización (USD)</dt><dd>{fmtCompact(d.capitalizacion)}</dd></div>
         <div><dt>Volumen</dt><dd>{fmtCompact(d.volumen)}{volRel != null && <span className="muted small"> ({fmtFixed(volRel, 1)}× lo normal)</span>}</dd></div>
-        <div><dt>Volatilidad implícita</dt><dd>{isNum(d.ivPromedio) ? fmtPct(d.ivPromedio, 1) : '—'}</dd></div>
-        <div><dt>Volatilidad 20 días</dt><dd>{isNum(d.hv20) ? fmtPct(d.hv20, 1) : '—'}</dd></div>
+        <div><dt><Termino id="iv">Volatilidad implícita</Termino></dt><dd>{isNum(d.ivPromedio) ? fmtPct(d.ivPromedio, 1) : '—'}</dd></div>
+        <div><dt><Termino id="hv">Volatilidad 20 días</Termino></dt><dd>{isNum(d.hv20) ? fmtPct(d.hv20, 1) : '—'}</dd></div>
         <div><dt>Apertura</dt><dd>{fmtMoney(d.apertura)}</dd></div>
         <div><dt>Cierre anterior</dt><dd>{fmtMoney(d.cierreAnterior)}</dd></div>
       </dl>

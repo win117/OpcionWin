@@ -18,6 +18,7 @@ import Perfiles, { PerfilDetalle } from './pages/Perfiles';
 import Configuraciones, { ConfiguracionDetalle } from './pages/Configuraciones';
 import Conexiones from './pages/broker/Conexiones';
 import Sincronizaciones from './pages/Sincronizaciones';
+import Glosario from './pages/Glosario';
 import Auditoria from './pages/Auditoria';
 import NotFound from './pages/NotFound';
 
@@ -45,6 +46,7 @@ export default function App() {
         <Route path="analisis/:simbolo" element={<Analisis />} />
         <Route path="posiciones" element={<Posiciones />} />
         <Route path="ordenes" element={<Ordenes />} />
+        <Route path="glosario" element={<Glosario />} />
         <Route path="configuracion" element={<Configuracion />}>
           <Route index element={<Navigate to="perfiles" replace />} />
           <Route path="perfiles" element={<Perfiles />} />

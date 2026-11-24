@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { SyncButton } from '../../components/SyncButton';
 import { SourceLine, KeyValue } from '../../components/Source';
+import { Termino } from '../../components/Termino';
 import { Empty, ErrorMessage, Loading } from '../../components/States';
 import { useAsync } from '../../hooks/useAsync';
 import { listLatest, mercado } from '../../api/resources';
@@ -13,7 +14,7 @@ function Quote({ bid, ask, ultimo }) {
       <div><dt>Bid</dt><dd>{fmtMoney(bid)}</dd></div>
       <div><dt>Ask</dt><dd>{fmtMoney(ask)}</dd></div>
       <div><dt>Último</dt><dd>{fmtMoney(ultimo)}</dd></div>
-      <div><dt>Spread</dt><dd>{fmtMoney(spread)}</dd></div>
+      <div><dt><Termino id="spread">Spread</Termino></dt><dd>{fmtMoney(spread)}</dd></div>
     </dl>
   );
 }
@@ -65,7 +66,7 @@ export default function CotizacionTab({ simbolo }) {
             )}
           </>
         )}
-        {!d && !live.error && !live.busy && <Empty title="Sin consulta">Pulsa «Consultar proveedor».</Empty>}
+        {!d && !live.error && !live.busy && <Empty title="Sin consulta" accion={<button type="button" className="btn btn--sm" onClick={consultar}>Consultar proveedor</button>} />}
       </section>
     </div>
   );

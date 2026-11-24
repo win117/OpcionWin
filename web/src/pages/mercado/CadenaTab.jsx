@@ -3,6 +3,7 @@ import { SyncButton } from '../../components/SyncButton';
 import { SourceLine } from '../../components/Source';
 import { Table } from '../../components/Table';
 import { Field, Select } from '../../components/Field';
+import { Termino } from '../../components/Termino';
 import { Empty, ErrorMessage } from '../../components/States';
 import { useLookup } from '../../hooks/useLookup';
 import { contratos, mercado } from '../../api/resources';
@@ -84,15 +85,15 @@ export default function CadenaTab({ empresa, simbolo }) {
             rows={rows}
             emptyTitle="El proveedor no devolvió contratos para estos filtros"
             columns={[
-              { key: 'strike', label: 'Strike', align: 'right', render: r => <strong>{fmtFixed(r.strike, 2)}</strong> },
+              { key: 'strike', label: <Termino id="strike">Strike</Termino>, align: 'right', render: r => <strong>{fmtFixed(r.strike, 2)}</strong> },
               { key: 'vencimiento', label: 'Vencimiento', render: r => fmtDate(r.vencimiento) },
               { key: 'bid', label: 'Bid', align: 'right', render: r => fmtMoney(r.bid) },
               { key: 'ask', label: 'Ask', align: 'right', render: r => fmtMoney(r.ask) },
-              { key: 'iv', label: 'IV', align: 'right', render: r => fmtPct(r.iv, 1) },
-              { key: 'delta', label: 'Delta', align: 'right', render: r => fmtFixed(r.griegas.delta, 3) },
-              { key: 'gamma', label: 'Gamma', align: 'right', render: r => fmtFixed(r.griegas.gamma, 4) },
-              { key: 'theta', label: 'Theta', align: 'right', render: r => fmtFixed(r.griegas.theta, 4) },
-              { key: 'vega', label: 'Vega', align: 'right', render: r => fmtFixed(r.griegas.vega, 4) },
+              { key: 'iv', label: <Termino id="iv">IV</Termino>, align: 'right', render: r => fmtPct(r.iv, 1) },
+              { key: 'delta', label: <Termino id="delta">Delta</Termino>, align: 'right', render: r => fmtFixed(r.griegas.delta, 3) },
+              { key: 'gamma', label: <Termino id="gamma">Gamma</Termino>, align: 'right', render: r => fmtFixed(r.griegas.gamma, 4) },
+              { key: 'theta', label: <Termino id="theta">Theta</Termino>, align: 'right', render: r => fmtFixed(r.griegas.theta, 4) },
+              { key: 'vega', label: <Termino id="vega">Vega</Termino>, align: 'right', render: r => fmtFixed(r.griegas.vega, 4) },
             ]}
           />
           <SourceLine fuente={fuente} extra="griegas indicativas del proveedor" />
