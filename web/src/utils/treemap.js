@@ -45,8 +45,8 @@ const agrupar = (items, clave) => {
 };
 
 const TITULO_SECTOR = 22, TITULO_INDUSTRIA = 17, SEPARACION = 2;
-// Cuadro mínimo: cabe un símbolo a 11 px. Lo que sería menor se junta en un cuadro «+N».
-const MIN_ANCHO = 40, MIN_ALTO = 22, MIN_AREA_RESTO = 1600;
+// Cuadro mínimo: cabe un símbolo a 11 px. Lo que sería menor se junta en un cuadro «+N», chico y fuera de escala.
+const MIN_ANCHO = 36, MIN_ALTO = 20, AREA_RESTO = 2400;
 
 function llenar(lista, resto, x, y, w, h, valorResto) {
   const industrias = [], cuadros = [];
@@ -62,20 +62,20 @@ function llenar(lista, resto, x, y, w, h, valorResto) {
   return { industrias, cuadros };
 }
 
-// Muestra tantas empresas como quepan legibles (a lo más `maximo`) y junta las demás, de menor a mayor.
+// Muestra las empresas que caben legibles (a lo más `maximo`) y junta las demás en el resto.
 function llenarSector(items, x, y, w, h, maximo) {
-  const lista = [...items].sort((a, b) => b.valor - a.valor);
-  const total = lista.reduce((s, i) => s + i.valor, 0);
-  const minimoResto = (total * MIN_AREA_RESTO) / Math.max(1, w * h);
-  let n = Math.max(1, Math.min(lista.length, maximo, Math.floor((w * h) / (MIN_ANCHO * MIN_ALTO))));
+  let lista = [...items].sort((a, b) => b.valor - a.valor);
+  const resto = lista.splice(maximo);
   let factor = 1, r;
-  for (let intento = 0; intento < 24; intento += 1) {
-    const resto = lista.slice(n);
-    r = llenar(lista.slice(0, n), resto, x, y, w, h, Math.max(resto.reduce((s, i) => s + i.valor, 0), minimoResto) * factor);
+  for (let intento = 0; intento < 60; intento += 1) {
+    const suma = lista.reduce((s, i) => s + i.valor, 0), fraccion = Math.min(0.3, (AREA_RESTO * factor) / Math.max(1, w * h));
+    r = llenar(lista, resto, x, y, w, h, (suma * fraccion) / (1 - fraccion));
     const chicos = r.cuadros.filter(c => c.w < MIN_ANCHO || c.h < MIN_ALTO);
     if (!chicos.length) break;
-    if (n > 1) n = Math.max(1, n - Math.max(1, Math.floor(chicos.length / 3)));
-    else if (chicos.some(c => c.resto) && factor < 2) factor += 0.25;
+    // Salen primero los más chicos; al quedar espacio, los demás pueden caber.
+    const fuera = new Set(chicos.filter(c => !c.resto).sort((a, b) => a.w * a.h - b.w * b.h).slice(0, Math.max(1, Math.floor(chicos.length / 4))).map(c => c.simbolo));
+    if (fuera.size && lista.length > 1) { resto.push(...lista.filter(i => fuera.has(i.simbolo))); lista = lista.filter(i => !fuera.has(i.simbolo)); }
+    else if (chicos.some(c => c.resto) && factor < 3) factor += 0.5;
     else break;
   }
   return r;

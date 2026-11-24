@@ -40,7 +40,7 @@ function colorDe(v, modo, tope) {
 }
 
 const Cuadro = memo(function Cuadro({ simbolo, nombre, x, y, w, h, color, texto, elegido, enFoco }) {
-  const fuente = Math.max(11, Math.min(34, (w - 6) / (simbolo.length * 0.72), h * 0.36));
+  const fuente = Math.max(11, Math.min(34, (w - 6) / (simbolo.length * 0.78), h * 0.36));
   const conSimbolo = h > 15 && w - 3 >= simbolo.length * 7.6;
   const fuenteValor = Math.max(11, Math.min(15, fuente * 0.55));
   const conTexto = conSimbolo && h > (fuente + fuenteValor) * 1.2 && w - 4 > texto.length * fuenteValor * 0.56;
@@ -319,7 +319,7 @@ export default function MapaMercado() {
             <div className="mapa__pie">
               <Leyenda modo={modo} tope={tope} />
               {modo.termino && <Termino id={modo.termino}>¿Qué es {modo.label}?</Termino>}
-              <span className="muted small">{data ? `${data.total} empresas con opciones, por capitalización aproximada. Precio en vivo de IEX; cierre y volumen consolidados.` : ''}</span>
+              <span className="muted small">{data ? `${data.total} empresas con opciones, por capitalización aproximada. Los cuadros +N agrupan a las demás y no están a escala. Precio en vivo de IEX; cierre y volumen consolidados.` : ''}</span>
             </div>
           </div>
         )}
