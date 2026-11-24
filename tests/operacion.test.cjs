@@ -25,6 +25,14 @@ function fake(){
       posiciones:async()=>f.vivas,
     },
   };
+  f.alpaca.configurado=true;
+  f.enviadasWebull=[]; f.vivasWebull=[];
+  f.webull={configurado:true,
+    cuenta:async()=>({cuentaExternaId:'WB1',estado:'ACTIVE',efectivo:500,poderCompra:900,patrimonio:700,nivelOpciones:null}),
+    enviarOrden:async o=>{f.enviadasWebull.push(o);return{ordenExternaId:'wb-'+f.enviadasWebull.length,estado:'enviada',estadoProveedor:'SUBMITTED_REQUEST'};},
+    consultarOrden:async()=>({estado:'cancelada',estadoProveedor:'CANCELLED'}),cancelarOrden:async()=>undefined,
+    posiciones:async()=>f.vivasWebull,
+  };
   return f;
 }
 
@@ -179,5 +187,48 @@ test('resumen: une posiciones vivas con contratos/posiciones guardados y lista �
     e.integraciones.sinCredenciales=true;
     const sin=await e.call('GET','/broker/paper/resumen');
     assert.equal(sin.cuenta,null); assert.ok(sin.error);
+  } finally{e.cerrar();}
+});
+
+test('broker webull: disponibles, conexión, ticket, resumen, cancelación y cierre usan el adaptador de Webull',async()=>{
+  const e=await entorno();
+  try{
+    const d=await e.call('GET','/brokers/disponibles');
+    assert.deepEqual(d.items.map(i=>i.codigo),['alpaca','webull']);
+    assert.ok(d.items.every(i=>i.configurado&&i.operativo&&i.entornos.length===1&&i.entornos[0]==='paper'));
+    await e.call('POST','/broker/paper/conexion',{broker:'otro'},400);
+    const a=await e.call('POST','/broker/paper/conexion');
+    const w=await e.call('POST','/broker/paper/conexion',{broker:'webull'});
+    assert.equal(w.conexion.alias,'Webull paper'); assert.equal(w.cuenta.efectivo,500); assert.notEqual(w.conexion._id,a.conexion._id);
+    assert.equal((await e.call('POST','/broker/paper/conexion',{broker:'webull'})).conexion._id,w.conexion._id);
+    assert.equal((await e.call('GET','/brokers')).total,2);
+    const key=e.k();
+    const body={broker:'webull',empresaId:e.emp._id,tipo:'limit',precioLimite:2.5,cantidad:1,componentes:[pata(e.contratos.c100,'buy')]};
+    const r=await e.call('POST','/ordenes/ticket',body,201,{'Idempotency-Key':key});
+    assert.equal(r.orden.conexionId,w.conexion._id); assert.equal(r.orden.ordenExternaId,'wb-1'); assert.equal(r.orden.estado,'enviada');
+    assert.match(r.orden.eventos[0].mensaje,/^Webull paper/);
+    assert.equal(e.integraciones.enviadasWebull.length,1); assert.equal(e.integraciones.enviadas.length,0);
+    assert.equal(e.integraciones.enviadasWebull[0].componentes[0].simbolo,e.contratos.c100.contratoExternoId);
+    const rep=await e.call('POST','/ordenes/ticket',body,200,{'Idempotency-Key':key});
+    assert.equal(rep.orden._id,r.orden._id);
+    await e.call('POST','/ordenes/ticket',{...body,broker:'x'},400,{'Idempotency-Key':e.k()});
+    // filtro por conexión
+    assert.equal((await e.call('GET','/ordenes?conexionId='+w.conexion._id)).total,1);
+    assert.equal((await e.call('GET','/ordenes?conexionId='+a.conexion._id)).total,0);
+    // resumen por broker
+    e.integraciones.vivasWebull=[{posicionExternaId:'w1',simbolo:e.contratos.c100.simbolo,lado:'long',cantidad:1,precioPromedio:2,precioActual:3,valorMercado:300}];
+    const rs=await e.call('GET','/broker/paper/resumen?broker=webull');
+    assert.equal(rs.conexionId,w.conexion._id); assert.equal(rs.cuenta.poderCompra,900); assert.equal(rs.posiciones.length,1); assert.equal(rs.ordenes.length,1);
+    assert.ok(rs.posiciones[0].posicionId); assert.equal((await e.call('GET','/posiciones?conexionId='+w.conexion._id)).total,1);
+    assert.equal((await e.call('GET','/broker/paper/resumen')).posiciones.length,0); // alpaca sigue vacío
+    // cancelación y cierre
+    const c=await e.call('POST','/ordenes/'+r.orden._id+'/cancelacion'); assert.equal(c.estado,'cancelada');
+    const pos=(await e.call('GET','/posiciones?conexionId='+w.conexion._id)).items[0];
+    const cr=await e.call('POST','/posiciones/'+pos._id+'/cierre',{tipo:'market'},201,{'Idempotency-Key':e.k()});
+    assert.equal(cr.orden.conexionId,w.conexion._id); assert.equal(e.integraciones.enviadasWebull.at(-1).componentes[0].intencion,'sell_to_close');
+    assert.equal(e.integraciones.enviadas.length,0);
+    e.integraciones.webull.configurado=false;
+    const d2=await e.call('GET','/brokers/disponibles'); const wb=d2.items.find(i=>i.codigo==='webull');
+    assert.equal(wb.configurado,false); assert.equal(wb.operativo,false); assert.ok(wb.mensaje);
   } finally{e.cerrar();}
 });

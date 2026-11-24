@@ -40,7 +40,7 @@ export default function Empresas() {
           { key: 'cik', label: 'CIK', render: r => r.cik ? <code>{r.cik}</code> : '—' },
           { key: 'activo', label: 'Activa', render: r => <Badge value={r.activo !== false} /> },
         ]}
-        rowActions={row => <Link className="btn btn--sm" to={`/mercado/${encodeURIComponent(row.simbolo)}`}>Mercado</Link>}
+        rowActions={row => <Link className="btn btn--sm" to={`/analisis/${encodeURIComponent(row.simbolo)}`}>Analizar</Link>}
       />
     </>
   );

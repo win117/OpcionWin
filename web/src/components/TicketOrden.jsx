@@ -1,10 +1,11 @@
-// Ticket de orden PAPER: edición de patas → revisión → envío directo a Alpaca paper + seguimiento del estado.
+// Ticket de orden PAPER: edición de patas → revisión → envío directo al broker elegido (paper) + seguimiento del estado.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Modal } from './Modal';
 import { Badge } from './Badge';
 import { Field } from './Field';
 import { Spinner } from './States';
+import { useBroker } from '../context/BrokerContext';
 import { acciones, mercado, operacion } from '../api/resources';
 import { CORE_LABELS, ESTRATEGIA_LABELS } from '../utils/constants';
 import { fmtDateTime, fmtFixed, fmtMoney, fmtPct, isNum } from '../utils/format';
@@ -19,6 +20,7 @@ const nuevaPata = p => ({ id: ++seq, accion: p.accion || 'buy', intencion: p.int
 
 export default function TicketOrden({ open = true, onClose, empresa, chain: chainInicial, legs: legsIniciales = [], estrategiaCodigo, analisis }) {
   const navigate = useNavigate();
+  const { broker, nombre: brokerNombre, bloqueado: brokerBloqueado, info: brokerInfo } = useBroker();
   const [chain, setChain] = useState(chainInicial);
   const [vencSel, setVencSel] = useState(chainInicial?.vencimiento || '');
   const [cargaV, setCargaV] = useState({ loading: false, error: null });
@@ -42,13 +44,13 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
 
   const cargarCuenta = () => {
     setCuenta({ loading: true, data: null, error: null });
-    operacion.asegurarConexion()
+    operacion.asegurarConexion(broker)
       .then(data => setCuenta({ loading: false, data, error: null }))
       .catch(error => setCuenta({ loading: false, data: null, error }));
   };
   useEffect(() => {
     if (open) cargarCuenta();
-  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, broker]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const vencimientos = useMemo(() => {
     const l = chain?.vencimientos?.length ? chain.vencimientos : chain?.vencimiento ? [chain.vencimiento] : [];
@@ -135,6 +137,7 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
     setEnviando(true);
     setError(null);
     const body = {
+      broker,
       empresaId: empresa._id,
       ...(estrategiaCodigo ? { estrategiaCodigo } : {}),
       nombre: analisis && estrategiaCodigo ? nombreConContexto(empresa.simbolo, estrategiaCodigo, analisis) : nombreOrden(empresa.simbolo, patas, estrategiaCodigo),
@@ -186,7 +189,7 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
     setError(null);
     try { setOrden(await acciones.cancelarOrden(ordenId)); setSondeo('idle'); } catch (e) { setError(e); } finally { setCancelando(false); }
   };
-  const verCartera = () => { onClose?.(); navigate('/broker'); };
+  const verCartera = () => { onClose?.(); navigate('/posiciones'); };
 
   const ultimoEvento = orden?.eventos?.length ? orden.eventos[orden.eventos.length - 1] : null;
   const c = cuenta.data?.cuenta;
@@ -195,7 +198,7 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
   const footer = paso === 'editar' ? (
     <>
       <button type="button" className="btn" onClick={onClose}>Cancelar</button>
-      <button type="button" className="btn btn--primary" disabled={problemas.length > 0 || cuenta.loading || Boolean(cuenta.error)} onClick={() => setPaso('revisar')}>Revisar</button>
+      <button type="button" className="btn btn--primary" disabled={problemas.length > 0 || cuenta.loading || Boolean(cuenta.error) || brokerBloqueado} onClick={() => setPaso('revisar')}>Revisar</button>
     </>
   ) : paso === 'revisar' ? (
     <>
@@ -213,17 +216,18 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
   return (
     <Modal open={open} title={titulo} onClose={onClose} size="lg" footer={footer}>
       <div className="stack ticket">
-        <div className="banner-paper" role="note"><strong>PAPER · dinero simulado.</strong> Esta orden se envía a Alpaca paper trading; no se usa dinero real.</div>
+        <div className="banner-paper" role="note"><strong>PAPER · dinero simulado.</strong> Esta orden se envía a {brokerNombre} paper trading; no se usa dinero real.</div>
+        {brokerBloqueado && <div className="alert alert--warning" role="alert"><div><strong>{brokerNombre} no está operativo.</strong> {brokerInfo?.mensaje || 'Elige otro broker en la barra superior para enviar la orden.'}</div></div>}
 
         <div className="ticket__cuenta" aria-live="polite">
-          {cuenta.loading && <span className="muted small"><Spinner small /> Verificando conexión con Alpaca paper…</span>}
+          {cuenta.loading && <span className="muted small"><Spinner small /> Verificando conexión con {brokerNombre} paper…</span>}
           {cuenta.error && (
             <div className="alert alert--danger" role="alert">
-              <div><strong>No se pudo conectar con Alpaca paper.</strong> {cuenta.error.message} Revisa las credenciales del servidor.</div>
+              <div><strong>No se pudo conectar con {brokerNombre} paper.</strong> {cuenta.error.message} Revisa las credenciales del servidor.</div>
               <button type="button" className="btn btn--sm" onClick={cargarCuenta}>Reintentar</button>
             </div>
           )}
-          {c && <span className="small">Cuenta paper · Poder de compra <strong>{fmtMoney(c.poderCompra)}</strong> · Efectivo <strong>{fmtMoney(c.efectivo)}</strong>{c.estado ? <> · <Badge value={c.estado} tone="info" /></> : null}</span>}
+          {c && <span className="small">Cuenta {brokerNombre} paper · Poder de compra <strong>{fmtMoney(c.poderCompra)}</strong> · Efectivo <strong>{fmtMoney(c.efectivo)}</strong>{c.estado ? <> · <Badge value={c.estado} tone="info" /></> : null}</span>}
         </div>
 
         {analisis && !analisis.sinAnalisis && (
@@ -265,7 +269,7 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
                         <td><select value={it?.tipo || 'call'} onChange={e => cambiarTipo(l, e.target.value)} aria-label={`Tipo de la pata ${i + 1}`}><option value="call">Call</option><option value="put">Put</option></select></td>
                         <td><select value={l.contratoId} onChange={e => setPata(l.id, { contratoId: e.target.value })} aria-label={`Strike de la pata ${i + 1}`}>
                           {!it && <option value={l.contratoId}>—</option>}
-                          {strikes.map(s => <option key={s.contratoId} value={s.contratoId}>{fmtFixed(s.strike, 2)}</option>)}
+                          {strikes.map(s => <option key={s.contratoId} value={s.contratoId}>{fmtFixed(s.strike, 2)}{isNum(s.griegas?.delta) ? ` · Δ ${fmtFixed(s.griegas.delta, 2)}` : ''}{isNum(mid(s)) ? ` · ${fmtFixed(mid(s), 2)}` : ''}</option>)}
                         </select></td>
                         <td className="num">{isNum(it?.bid) ? fmtFixed(it.bid) : '—'}</td>
                         <td className="num">{isNum(it?.ask) ? fmtFixed(it.ask) : '—'}</td>
@@ -324,7 +328,7 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
           <div className="stack" aria-live="polite">
             <div className="ticket__estado">
               <Badge value={orden.estado} />
-              <span>{orden.estado === 'ejecutada' ? 'Orden ejecutada' : terminal ? 'Orden finalizada' : 'Orden enviada a Alpaca paper'}</span>
+              <span>{orden.estado === 'ejecutada' ? 'Orden ejecutada' : terminal ? 'Orden finalizada' : `Orden enviada a ${brokerNombre} paper`}</span>
               {sondeo === 'activo' && !terminal && <span className="muted small"><Spinner small /> Actualizando estado…</span>}
             </div>
             {ultimoEvento && <p>{ultimoEvento.mensaje} <span className="muted small">{fmtDateTime(ultimoEvento.fecha)}</span></p>}

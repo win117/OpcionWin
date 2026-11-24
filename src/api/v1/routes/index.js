@@ -25,6 +25,7 @@ import posiciones from './posiciones.routes';
 import sincronizaciones from './sincronizaciones.routes';
 import auditoria from './auditoria.routes';
 import acciones from './acciones.routes';
+import screener from './screener.routes';
 import { createIntegrations } from '../../../integrations';
 import { colaGlobal } from '../../../jobs/cola';
 export default function routeAPI(app, { factory = repository, auth = createSessionService(factory), integraciones = createIntegrations(process.env), cola = colaGlobal, ahora, cacheActivos } = {}) {
@@ -52,6 +53,7 @@ export default function routeAPI(app, { factory = repository, auth = createSessi
   secured.use('/sincronizaciones',sincronizaciones({factory}));
   secured.use('/auditoria',auditoria({factory}));
   secured.use('/mercado',mercado({factory,integraciones}));
+  secured.use('/screener',screener({factory,integraciones,cola,ahora}));
   secured.use('/cores',cores({factory}));
   router.use(secured);
   app.use(config.API_URL,router);

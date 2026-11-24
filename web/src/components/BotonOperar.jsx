@@ -28,8 +28,9 @@ export async function cargarCadena(simbolo, { diasMin = 7, diasMax = null } = {}
 /**
  * Props: empresa, estrategiaCodigo (si falta se usa la mejor clasificada, o LONG_CALL sin selección),
  * datos (opcional, ya cargados: { seleccion, estrategiasById, evaluaciones }), label, className.
+ * legs + chain (opcionales): patas ya elegidas por el usuario sobre esa cadena; si llegan, no se rearman.
  */
-export default function BotonOperar({ empresa, estrategiaCodigo, datos, label, className = 'btn btn--primary', disabled, diasMin, diasMax }) {
+export default function BotonOperar({ empresa, estrategiaCodigo, datos, label, className = 'btn btn--primary', disabled, diasMin, diasMax, legs: legsElegidas, chain: chainElegida }) {
   const [estado, setEstado] = useState({ busy: false, error: null, ticket: null });
 
   const abrir = async () => {
@@ -37,10 +38,14 @@ export default function BotonOperar({ empresa, estrategiaCodigo, datos, label, c
     const cfg = leerConfig(); // rango de días de la configuración de análisis (localStorage)
     const rango = { diasMin: diasMin ?? cfg.diasMin, diasMax: diasMax ?? cfg.diasMax };
     try {
-      const [d, chain] = await Promise.all([datos ? Promise.resolve(datos) : cargarDatosAnalisis(empresa), cargarCadena(empresa.simbolo, rango)]);
+      const elegidas = legsElegidas?.length && chainElegida;
+      const [d, chain] = await Promise.all([
+        datos ? Promise.resolve(datos) : cargarDatosAnalisis(empresa),
+        elegidas ? Promise.resolve(chainElegida) : cargarCadena(empresa.simbolo, rango),
+      ]);
       let codigo = estrategiaCodigo;
       if (!codigo) codigo = contextoAnalisis(d, null).topCodigo || 'LONG_CALL';
-      const { legs, error } = construirPatas(codigo, chain.items || [], chain.precioSubyacente);
+      const { legs, error } = elegidas ? { legs: legsElegidas } : construirPatas(codigo, chain.items || [], chain.precioSubyacente);
       if (error) throw new Error(error);
       setEstado({ busy: false, error: null, ticket: { legs, chain, codigo, analisis: contextoAnalisis(d, codigo) } });
     } catch (error) {

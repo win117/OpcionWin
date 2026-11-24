@@ -3,6 +3,7 @@ import { createCrudService } from '../services/crud.service';
 import { todos } from '../services/registros';
 import { empresaPorSimbolo } from '../services/sincronizacion.service';
 import { handle, respond } from './crud.controller';
+import { createMercadoEstado } from '../services/mercado-estado.service';
 
 const fecha = d => new Date(d).getTime();
 const limite = (valor, porDefecto, maximo) => {
@@ -35,6 +36,7 @@ async function panoramaSimbolo(alpaca, simbolo, ahora = Date.now()) {
 
 export default (factory, integraciones) => {
   const crud = name => createCrudService(name, factory);
+  const estadoMercado = createMercadoEstado({ integraciones });
   const forCompany = (name, extra = {}) => handle(async(req,res) => {
     const empresa = await empresaPorSimbolo(req.context, req.params.simbolo, factory).catch(() => { throw boom.notFound('Empresa no registrada.'); });
     respond(res,await crud(name).list(req.context,{...req.query,...extra,empresaId:empresa._id}));
@@ -50,6 +52,7 @@ export default (factory, integraciones) => {
     respond(res, { items, page: 1, limit: n, total: items.length, empresa: { _id: empresa._id, simbolo: empresa.simbolo, nombre: empresa.nombre } });
   });
   return {
+    estado: handle(async (_req, res) => respond(res, await estadoMercado())),
     quotes: serie('cotizacion'),
     history: serie('vela'),
     fundamentals: forCompany('fundamentales'),

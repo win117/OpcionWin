@@ -31,6 +31,9 @@ export class ApiError extends Error {
   }
 }
 
+/** Función aún sin implementar en el servidor (404 de ruta o 501). */
+export const esNoDisponible = error => error?.status === 404 || error?.status === 501;
+
 export function qs(params = {}) {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
@@ -46,6 +49,7 @@ function friendlyMessage(status, json) {
   if (status === 404 && (!message || message === 'Ruta no encontrada.')) {
     return 'Esta función aún no está disponible en el servidor (ruta no encontrada).';
   }
+  if (status === 501 && !message) return 'Esta función aún no está implementada en el servidor.';
   if (message) return message;
   if (status === 429) return 'Demasiadas solicitudes. Espera un momento e inténtalo de nuevo.';
   if (status >= 500) return 'El servidor no pudo completar la operación (error ' + status + ').';

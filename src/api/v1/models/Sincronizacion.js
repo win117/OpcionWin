@@ -2,10 +2,10 @@ import { text, choice, integer, reference, entitySchema, register, ESTADOS_TRABA
 
 
 export const schema = entitySchema({
-  usuarioId: text(), proveedor: text(), recurso: choice(['empresas', 'contratos', 'cotizaciones', 'historicos', 'fundamentales', 'institucional', 'noticias', 'ordenes', 'posiciones']),
+  usuarioId: text(), proveedor: text(), recurso: choice(['empresas', 'contratos', 'cotizaciones', 'historicos', 'fundamentales', 'institucional', 'noticias', 'ordenes', 'posiciones', 'universo']),
   conexionId: reference('ConexionBroker', false), simbolos: { type: [String], default: [] },
   desde: Date, hasta: Date, diasVencimientoMin: { type: Number, min: 0, max: 3650 }, diasVencimientoMax: { type: Number, min: 0, max: 3650 }, estado: choice(ESTADOS_TRABAJO, 'pendiente'),
-  procesados: integer(0), fallidos: integer(0), error: text(false), finalizadaEn: Date
+  procesados: integer(0), total: integer(0), fallidos: integer(0), error: text(false), finalizadaEn: Date
 });
 
 schema.pre('validate', function () {

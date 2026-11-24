@@ -2,6 +2,7 @@
 // Cada recurso hace "upsert" con _id determinista: repetir una sincronización no duplica datos.
 import boom from '@hapi/boom';
 import { repository } from '../../../repositories';
+import { adaptadorDe } from './broker.service';
 import { idDeterminista, todos, guardar, guardarLote, obtener, parchar } from './registros';
 
 const DIA = 86400000;
@@ -119,9 +120,12 @@ export function createSincronizador({ integraciones, factory = repository }) {
     },
   };
 
+  // Adaptador de trading según el broker de la conexión (alpaca | webull).
+  const adaptadorConexion = async (ctx, conexion) => adaptadorDe(integraciones, (await obtener('brokers', ctx, conexion.brokerId, factory)).codigo);
+
   const porConexion = {
     async posiciones(ctx, conexion, conteo) {
-      const lista = await alpaca.posiciones();
+      const lista = await (await adaptadorConexion(ctx, conexion)).posiciones();
       let n = 0;
       const vigentes = new Set();
       for (const p of lista) {
@@ -145,8 +149,9 @@ export function createSincronizador({ integraciones, factory = repository }) {
     },
     async ordenes(ctx, conexion) {
       const ordenes = (await todos('ordenes', ctx, { conexionId: conexion._id }, factory)).filter(o => o.ordenExternaId);
+      const adaptador = ordenes.length ? await adaptadorConexion(ctx, conexion) : null;
       for (const o of ordenes) {
-        const remoto = await alpaca.consultarOrden(o.ordenExternaId);
+        const remoto = await adaptador.consultarOrden(o.ordenExternaId);
         const ejecucion = remoto.precioPromedioEjecucion != null ? '; ejecutada a ' + remoto.precioPromedioEjecucion : '';
         if (remoto.estado !== o.estado) await parchar('ordenes', ctx, o._id, d => ({ ...d, estado: remoto.estado,
           eventos: [...(d.eventos || []), { tipo: 'sincronizacion', mensaje: 'Estado del broker: ' + remoto.estado + ejecucion }] }), factory);

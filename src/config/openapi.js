@@ -17,7 +17,7 @@ export function openapi() {
     paths[item]={get:operation('Consultar registro',p),put:operation('Reemplazar campos editables',p,true),delete:operation('Eliminar registro local',p)};
   };
   for(const [name,{Model}] of Object.entries(resources)){
-    if(name==='sesiones') continue;
+    if(name==='sesiones'||name==='screener') continue;
     crud('/'+name);
     for(const [field,type] of Object.entries(Model.schema.paths)){
       if(!type.schema) continue;
@@ -47,6 +47,10 @@ export function openapi() {
   paths['/mercado/opciones/resumen/{simbolo}']={get:operation('Contratos guardados con snapshot almacenado (IV y griegas) de un vencimiento (?vencimiento=AAAA-MM-DD, def. el más cercano); no llama al proveedor',[id('simbolo'),{name:'vencimiento',in:'query',schema:{type:'string',format:'date'}}])};
   paths['/selecciones/ejecuciones'].post=job('Ejecutar selección (empresa | estrategia | empresa_estrategia); admite ponderaciones:[{core,peso>=0}] y filtros.indicadores (señales por core)');
   paths['/mercado/opciones/cadena/{simbolo}']={get:operation('Cadena de opciones con IV y griegas del proveedor (?vencimiento&tipo)',[id('simbolo')])};
+  paths['/screener/universo/sincronizaciones']={post:job('Refresca el universo del screener en segundo plano: body {limite? (1..1000, def. 500), simbolos?[] (hasta 1000), opciones? (false omite IV)}. 202 con {_id, estado, procesados, total, fallidos, error?}; si ya hay una activa devuelve esa')};
+  paths['/screener/universo/sincronizaciones/{id}']={get:operation('Progreso del trabajo de universo: {_id, estado: pendiente|procesando|completada|fallida, procesados, total, fallidos, error?}',[id('id')])};
+  paths['/screener/ranking']={get:operation('Mejores empresas guardadas por estrategia (?estrategia=LONG_CALL|LONG_PUT|IRON_CONDOR&limite=1-50, def. 5): {items:[{simbolo,nombre,precio,cambioPct,puntaje,factores:[{nombre,valor,puntaje}],resumen,actualizadoEn}],universo:{total,actualizadoEn}}; sin estrategia: {estrategias:{LONG_CALL:[],LONG_PUT:[],IRON_CONDOR:[]},universo}. Lee datos guardados, no llama al proveedor',[{name:'estrategia',in:'query',required:false,schema:{type:'string',enum:['LONG_CALL','LONG_PUT','IRON_CONDOR']}},{name:'limite',in:'query',required:false,schema:{type:'integer'}}])};
+  paths['/mercado/estado']={get:operation('Estado del mercado (caché ~60 s): {abierto, proximaApertura, proximoCierre, indices:[{simbolo: SPY|QQQ|IWM|DIA, precio, cambioPct (fracción)}], fuente}')};
   const key={name:'Idempotency-Key',in:'header',required:true,schema:{type:'string'}};
   paths['/ordenes/{id}/envio']={post:{...operation('Enviar orden a Alpaca PAPER (idempotente)',[id('id'),key]),responses:{200:ok,400:{description:'Falta Idempotency-Key'},403:{description:'Entorno no paper'},409:{description:'Key distinta o estado inválido'}}}};
   paths['/ordenes/{id}/cancelacion']={post:operation('Cancelar orden (local o en Alpaca paper)',[id('id')])};

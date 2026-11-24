@@ -101,6 +101,21 @@ ejecutar cores → confluencia por estrategia → selección (3 modos) → confi
   email enmascarado en fallos). (4) Índice TTL de sesiones creado por el repositorio MongoDB al primer acceso (el del esquema no
   aplicaba con `autoIndex` apagado); en Supabase, 401 por `expiraEn` y purga de expiradas al iniciar sesión. 122 pruebas.
 
+- 2026-11-19: Screener de universo (~500 símbolos, `src/data/universo.js`). `POST /screener/universo/sincronizaciones` (trabajo de fondo,
+  recurso `sincronizaciones` con `recurso: 'universo'` y `total`), `GET .../:id` (progreso) y `GET /screener/ranking` (lee el recurso
+  nuevo `screener`; tabla `api_screener` en `database/schema.sql`). Puntaje = confluencia de `tecnico` + `indicadores` (IV de opciones
+  ATM a 20-50 días si hay) por estrategia. Alpaca: `velasLote`, `cotizacionesLote`, `reloj` (multi-símbolo, pocas solicitudes).
+  `GET /mercado/estado` (reloj + SPY/QQQ/IWM/DIA, caché 60 s). `cambioPct` es fracción (0.012 = 1.2 %), igual que el panorama.
+
+### Bitácora 2026-11-19 · Elegir broker: Alpaca o Webull
+Adaptador `webull.client.js` contra Webull OpenAPI (sandbox `api.sandbox.webull.com`, firma HMAC-SHA1 con clave `AppSecret&`, verificada con el vector oficial):
+cuenta/saldos, órdenes de opciones de una pata (SINGLE) y multi-pata (VERTICAL, STRADDLE, STRANGLE, CALENDAR, DIAGONAL, BUTTERFLY, CONDOR, IRON_BUTTERFLY,
+IRON_CONDOR, estrategia deducida de las patas), consulta/cancelación por `client_order_id` (si la clave de idempotencia no es alfanumérica de ≤32 se usa su hash SHA-256 truncado),
+posiciones. No soportado: órdenes de acciones desde el ticket, replace, TP/SL, OTO/OCO, nivel de opciones, datos de mercado (siguen en Alpaca). Live bloqueado (ADR-005).
+`broker.service`/`operacion.service`/`sincronizacion.service` eligen el adaptador por `broker.codigo` de la conexión (`env:ALPACA` | `env:WEBULL`).
+Contrato: `GET /brokers/disponibles`, `POST /broker/paper/conexion {broker?}`, `GET /broker/paper/resumen?broker=`, `broker` en `POST /ordenes/ticket`; el cierre usa el broker de la posición.
+Pendiente: validar en vivo con credenciales reales de Webull (crédito multi-pata asumido como side SELL con precio positivo).
+
 ## Cómo ejecutar
 - Desarrollo: `npm.cmd run dev` (API :PORT) y en otra terminal `npm.cmd run dev:web` (Vite con proxy).
 - Producción local: `npm.cmd run build:all` y `npm.cmd start` → interfaz en `http://HOST:PORT/`, Swagger en `/api/v1/api-docs`.
@@ -127,3 +142,16 @@ ejecutar cores → confluencia por estrategia → selección (3 modos) → confi
   cierre del trimestre y el día 45). Atendido con panel balanceado (`institucional@1.1.0`). Pendiente: guardar qué filers presentaron
   cada corte para distinguir salida real de presentación pendiente.
 - Probabilidad de ganancia (Black-Scholes) es neutral al riesgo y lognormal: no es una predicción del mundo real.
+
+### 2026-11-19 · Frontend: navegación superior, screener y análisis técnico
+- Barra lateral eliminada: barra superior (Inicio · Análisis · Posiciones · Órdenes · Configuración) con buscador de ticker, estado del mercado, selector de broker (Alpaca/Webull, `BrokerContext` en localStorage) y salir. Rutas antiguas redirigen (`/analizar/:s`, `/panel`, `/mercado/:s`, `/broker`, catálogos → `/configuracion/*`).
+- Inicio: índices + screener Top 5 por estrategia sobre el universo (`/screener/*`, `/mercado/estado`, `/brokers/disponibles`) con sincronización y progreso.
+- Análisis: «Analizar» sincroniza solo los recursos que piden los cores activos (`requiere` de `/cores/catalogo`) y solo evalúa/selecciona esos cores; gráfica con soportes/resistencias y señales, confluencia, indicadores y pestañas por estrategia con contratos, DTE, payoff y operación con el broker elegido. S/R y señales se calculan en el cliente (`utils/senales.js`, `utils/indicadores.js`).
+- Posiciones y Órdenes: páginas propias filtradas por el broker elegido; Configuración con sub-pestañas.
+
+### 2026-11-23 · Unificación de la versión funcional
+- Se integra en `version-funcional` el trabajo del 2026-11-19 (screener, brokers Alpaca/Webull, navegación superior y análisis técnico).
+- Corrección: «Desglose por core» mostraba vacíos Importancia y Puntos; ahora lee los pesos efectivos de la confluencia guardada.
+- Nuevo `scripts/smoke-screener.cjs` (Alpaca real + base real, sin órdenes, limpia al terminar). MongoDB: 492 símbolos en ~91 s, 7 sin datos.
+- Pendiente: crear `api_screener` en Supabase (PGRST205 hasta entonces); credenciales de Webull; empates a 100 en Iron Condor (orden alfabético);
+  retirar del universo FI, HES, ANSS, JNPR, IPG, WBA y CTLT (sin velas suficientes en Alpaca).

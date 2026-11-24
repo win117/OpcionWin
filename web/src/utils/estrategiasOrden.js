@@ -84,6 +84,84 @@ export function construirPatas(codigo, items = [], precio) {
 }
 
 /**
+ * Roles (patas) de cada estrategia para que el usuario elija el strike de cada una.
+ * delta = |Δ| objetivo; fb = strike de respaldo (× precio) si no hay griegas; ala = pata protectora de otra.
+ */
+export function rolesEstrategia(codigo) {
+  if (codigo === 'LONG_CALL') return [{ clave: 'call', etiqueta: 'Comprar Call', tipo: 'call', accion: 'buy', delta: 0.5, fb: 1, ayuda: 'Δ ≈ 0,50 (en el dinero): equilibrio entre costo y sensibilidad al alza.' }];
+  if (codigo === 'LONG_PUT') return [{ clave: 'put', etiqueta: 'Comprar Put', tipo: 'put', accion: 'buy', delta: 0.5, fb: 1, ayuda: 'Δ ≈ 0,50 (en el dinero): equilibrio entre costo y sensibilidad a la baja.' }];
+  if (codigo === 'IRON_CONDOR') {
+    return [
+      { clave: 'sp', etiqueta: 'Vender Put', tipo: 'put', accion: 'sell', delta: 0.2, fb: 0.95, ayuda: 'Δ ≈ 0,20: límite inferior del rango esperado (≈ 80 % de probabilidad de vencer fuera del dinero).' },
+      { clave: 'lp', etiqueta: 'Comprar Put (protección)', tipo: 'put', accion: 'buy', ala: { de: 'sp', dir: -1 }, ayuda: 'Por debajo del put vendido; ancho ≈ 2,5 % del precio. Limita la pérdida.' },
+      { clave: 'sc', etiqueta: 'Vender Call', tipo: 'call', accion: 'sell', delta: 0.2, fb: 1.05, ayuda: 'Δ ≈ 0,20: límite superior del rango esperado.' },
+      { clave: 'lc', etiqueta: 'Comprar Call (protección)', tipo: 'call', accion: 'buy', ala: { de: 'sc', dir: +1 }, ayuda: 'Por encima del call vendido; ancho ≈ 2,5 % del precio. Limita la pérdida.' },
+    ];
+  }
+  return [];
+}
+
+/**
+ * Candidatos de strike para un rol, ordenados por idoneidad (0–100, mayor = mejor).
+ * Idoneidad = 70 % ajuste (Δ objetivo o ancho del ala) + 30 % liquidez (spread bid/ask).
+ * `elegidos` = { clave → item } de las demás patas (las alas dependen de su pata vendida).
+ * Devuelve [{ item, idoneidad, ajuste, liquidez, motivo }]; el primero es el recomendado.
+ */
+export function candidatosStrike(rol, items = [], precio, elegidos = {}) {
+  const base = rol.ala ? elegidos[rol.ala.de] : null;
+  let lista = items.filter(i => i.contratoId && isNum(i.strike) && i.tipo === rol.tipo);
+  if (rol.ala) {
+    if (!base) return [];
+    lista = lista.filter(i => (rol.ala.dir < 0 ? i.strike < base.strike : i.strike > base.strike));
+  }
+  const ancho = isNum(precio) ? precio * 0.025 : 1;
+  const conDelta = lista.some(i => isNum(delta(i)) && Math.abs(delta(i)) > 0.02 && Math.abs(delta(i)) < 0.98);
+  const out = lista.map(item => {
+    let ajuste, motivo;
+    if (rol.ala) {
+      const dist = Math.abs(item.strike - base.strike);
+      ajuste = 1 - Math.min(1, Math.abs(dist - ancho) / (ancho * 2));
+      motivo = `Ancho ${dist.toFixed(2)} (objetivo ≈ ${ancho.toFixed(2)})`;
+    } else if (conDelta && isNum(delta(item))) {
+      const d = Math.abs(delta(item));
+      ajuste = 1 - Math.min(1, Math.abs(d - rol.delta) / 0.3);
+      motivo = `|Δ| ${d.toFixed(2)} (objetivo ${rol.delta.toFixed(2)})`;
+    } else {
+      const ref = isNum(precio) ? precio * rol.fb : item.strike;
+      ajuste = 1 - Math.min(1, Math.abs(item.strike - ref) / (Math.abs(ref) * 0.1 || 1));
+      motivo = conDelta ? 'Sin griegas en este strike' : `Distancia al strike de referencia ${ref.toFixed(2)}`;
+    }
+    const sp = spreadPct(item);
+    const liquidez = sp == null ? (isNum(mid(item)) ? 0.4 : 0) : 1 - Math.min(1, sp / 0.3);
+    return { item, ajuste, liquidez, motivo, idoneidad: Math.round(100 * (0.7 * ajuste + 0.3 * liquidez)) };
+  });
+  return out.sort((a, b) => b.idoneidad - a.idoneidad || a.item.strike - b.item.strike);
+}
+
+/** Selección recomendada { clave → item } para todos los roles (las alas se calculan tras su pata vendida). */
+export function seleccionRecomendada(codigo, items = [], precio) {
+  const sel = {};
+  for (const rol of rolesEstrategia(codigo)) {
+    const c = candidatosStrike(rol, items, precio, sel)[0];
+    if (c) sel[rol.clave] = c.item;
+  }
+  return sel;
+}
+
+/** Errores de coherencia de la selección del usuario (strikes cruzados, patas faltantes). */
+export function validarSeleccion(codigo, sel = {}) {
+  const roles = rolesEstrategia(codigo);
+  const errores = roles.filter(r => !sel[r.clave]).map(r => `Falta elegir el strike de «${r.etiqueta}».`);
+  if (codigo === 'IRON_CONDOR' && !errores.length) {
+    const { sp, lp, sc, lc } = sel;
+    if (lp.strike >= sp.strike) errores.push('El put comprado debe tener un strike menor que el put vendido.');
+    if (lc.strike <= sc.strike) errores.push('El call comprado debe tener un strike mayor que el call vendido.');
+    if (sp.strike >= sc.strike) errores.push('El put vendido debe quedar por debajo del call vendido (si no, no hay rango de ganancia).');
+  }
+  return errores;
+}
+
+/**
  * Reconstruye las patas en otra expiración. Con `codigo` usa construirPatas; sin él conserva tipo/acción/intención
  * de cada pata y elige el strike más cercano al anterior. `previas` = [{accion,intencion,item}] (item de la cadena anterior).
  */
@@ -170,7 +248,9 @@ export function contextoAnalisis(datos, codigo, ahora = Date.now()) {
   const fila = filas.find(f => f.codigo === codigo);
   const fecha = sel.createdAt;
   const t = Date.parse(fecha);
-  const puntajes = Object.values(datos.evaluaciones || {}).map(e => e?.puntaje).filter(isNum);
+  // Solo cuentan los cores que entraron en la selección (los apagados no influyen).
+  const usados = sel.coresSeleccionados || [];
+  const puntajes = Object.entries(datos.evaluaciones || {}).filter(([core]) => !usados.length || usados.includes(core)).map(([, e]) => e?.puntaje).filter(isNum);
   return {
     sinAnalisis: false,
     codigo,

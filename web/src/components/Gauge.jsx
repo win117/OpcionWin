@@ -15,7 +15,7 @@ export function direccion(puntaje) {
   if (!isNum(puntaje)) return { texto: 'Sin datos', tono: 'neutral' };
   if (puntaje <= 40) return { texto: 'Bajista', tono: 'down' };
   if (puntaje >= 60) return { texto: 'Alcista', tono: 'up' };
-  return { texto: 'Neutral', tono: 'flat' };
+  return { texto: 'En rango', tono: 'flat' };
 }
 
 /** Indicador direccional 0 bajista · 50 neutral · 100 alcista. */
@@ -38,7 +38,7 @@ export function DirectionalGauge({ puntaje, size = 200 }) {
       <figcaption>
         <span className="gauge__value">{has ? fmtNum(puntaje, 0) : '—'}<small>/100</small></span>
         <span className={'dir dir--' + dir.tono}>{dir.texto}</span>
-        <span className="gauge__legend">0 bajista · 50 neutral · 100 alcista</span>
+        <span className="gauge__legend">0 bajista · 50 en rango · 100 alcista</span>
       </figcaption>
     </figure>
   );

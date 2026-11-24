@@ -18,6 +18,7 @@ export const resources = {
   'ordenes': { Model: models.Orden, table: 'api_ordenes' },
   'posiciones': { Model: models.Posicion, table: 'api_posiciones' },
   'sincronizaciones': { Model: models.Sincronizacion, table: 'api_sincronizaciones' },
+  'screener': { Model: models.Screener, table: 'api_screener' },
   'auditoria': { Model: models.EventoAuditoria, table: 'api_auditoria' },
 };
 // Filtros de igualdad de repositorio: solo claves alfanuméricas y valores string.

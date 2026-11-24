@@ -53,20 +53,21 @@ export default ({ factory, integraciones, cola, ahora, cacheActivos }) => {
   router.post('/configuraciones/:id/evaluaciones', handle(async (req, res) => aceptado(res, await trabajo(req, 'evaluaciones', 'evaluacion.crear', () => analisis.evaluarConfiguracion(req.context, req.params.id, req.body ? input(req.body) : {})))));
   router.post('/estrategias/catalogo-base', handle(async (req, res) => respond(res, [...(await analisis.asegurarEstrategias(req.context)).values()])));
 
-  router.post('/ordenes/:id/envio', handle(async (req, res) => respond(res, await auditar(req, 'orden.enviar', 'ordenes', req.params.id, () => broker.enviar(req.context, req.params.id, req.get('Idempotency-Key'))), 200, 'Orden enviada a Alpaca paper.')));
+  router.post('/ordenes/:id/envio', handle(async (req, res) => respond(res, await auditar(req, 'orden.enviar', 'ordenes', req.params.id, () => broker.enviar(req.context, req.params.id, req.get('Idempotency-Key'))), 200, 'Orden enviada al broker (paper).')));
   router.post('/ordenes/:id/cancelacion', handle(async (req, res) => respond(res, await auditar(req, 'orden.cancelar', 'ordenes', req.params.id, () => broker.cancelar(req.context, req.params.id)))));
   router.post('/conexiones-broker/:id/verificacion', handle(async (req, res) => respond(res, await auditar(req, 'conexion.verificar', 'conexiones-broker', req.params.id, () => broker.verificar(req.context, req.params.id)))));
 
   // Operación paper en un paso (ADR-011).
-  router.post('/broker/paper/conexion', handle(async (req, res) => respond(res, await operacion.ensureConexion(req.context))));
-  router.get('/broker/paper/resumen', handle(async (req, res) => respond(res, await operacion.resumen(req.context))));
+  router.get('/brokers/disponibles', handle(async (_req, res) => respond(res, await operacion.disponibles())));
+  router.post('/broker/paper/conexion', handle(async (req, res) => respond(res, await operacion.ensureConexion(req.context, req.body))));
+  router.get('/broker/paper/resumen', handle(async (req, res) => respond(res, await operacion.resumen(req.context, req.query.broker))));
   router.post('/ordenes/ticket', handle(async (req, res) => {
-    const { repetida, ...data } = await auditar(req, 'orden.ticket', 'ordenes', r => r?.orden?._id || r?._id, () => operacion.ticket(req.context, req.body, req.get('Idempotency-Key')));
-    respond(res, data, repetida ? 200 : 201, repetida ? 'Orden ya existente para esa Idempotency-Key.' : 'Orden creada y enviada a Alpaca paper.');
+    const { repetida, brokerNombre, ...data } = await auditar(req, 'orden.ticket', 'ordenes', r => r?.orden?._id || r?._id, () => operacion.ticket(req.context, req.body, req.get('Idempotency-Key')));
+    respond(res, data, repetida ? 200 : 201, repetida ? 'Orden ya existente para esa Idempotency-Key.' : 'Orden creada y enviada a ' + brokerNombre + ' paper.');
   }));
   router.post('/posiciones/:id/cierre', handle(async (req, res) => {
-    const { repetida, ...data } = await auditar(req, 'posicion.cerrar', 'posiciones', req.params.id, () => operacion.cierre(req.context, req.params.id, req.body, req.get('Idempotency-Key')));
-    respond(res, data, repetida ? 200 : 201, repetida ? 'Orden ya existente para esa Idempotency-Key.' : 'Orden de cierre enviada a Alpaca paper.');
+    const { repetida, brokerNombre, ...data } = await auditar(req, 'posicion.cerrar', 'posiciones', req.params.id, () => operacion.cierre(req.context, req.params.id, req.body, req.get('Idempotency-Key')));
+    respond(res, data, repetida ? 200 : 201, repetida ? 'Orden ya existente para esa Idempotency-Key.' : 'Orden de cierre enviada a ' + brokerNombre + ' paper.');
   }));
   return router;
 };

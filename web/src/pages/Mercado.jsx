@@ -47,7 +47,7 @@ export default function Mercado() {
           <Field label="Empresa registrada" className="field--inline">
             <Select
               value={simbolo}
-              onChange={v => navigate(v ? `/mercado/${encodeURIComponent(v)}?tab=${tab}` : '/mercado')}
+              onChange={v => navigate(v ? `/configuracion/mercado/${encodeURIComponent(v)}?tab=${tab}` : '/configuracion/mercado')}
               options={options}
               placeholder={lookup.loading ? 'Cargando…' : 'Selecciona una empresa'}
             />

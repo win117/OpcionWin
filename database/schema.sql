@@ -210,6 +210,17 @@ ALTER TABLE public.api_auditoria ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.api_auditoria FROM PUBLIC, anon, authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.api_auditoria TO service_role;
 CREATE INDEX IF NOT EXISTS api_auditoria_owner ON public.api_auditoria(owner_id, id);
+CREATE TABLE IF NOT EXISTS public.api_screener (
+  id text PRIMARY KEY,
+  owner_id text NOT NULL,
+  document jsonb NOT NULL CHECK (jsonb_typeof(document) = 'object'),
+  revision integer NOT NULL DEFAULT 1 CHECK (revision > 0),
+  CHECK (document ? '_id' AND document->>'_id' = id)
+);
+ALTER TABLE public.api_screener ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.api_screener FROM PUBLIC, anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.api_screener TO service_role;
+CREATE INDEX IF NOT EXISTS api_screener_owner ON public.api_screener(owner_id, id);
 CREATE UNIQUE INDEX IF NOT EXISTS api_empresas_natural ON public.api_empresas(owner_id, (document->>'simbolo'), (document->>'mercado'));
 CREATE UNIQUE INDEX IF NOT EXISTS api_estrategias_natural ON public.api_estrategias(owner_id, (document->>'codigo'));
 CREATE UNIQUE INDEX IF NOT EXISTS api_brokers_natural ON public.api_brokers(owner_id, (document->>'codigo'));
@@ -217,5 +228,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS api_contratos_natural ON public.api_contratos(
 CREATE UNIQUE INDEX IF NOT EXISTS api_noticias_natural ON public.api_noticias(owner_id, (document->>'proveedor'), (document->>'noticiaExternaId'));
 CREATE UNIQUE INDEX IF NOT EXISTS api_ordenes_natural ON public.api_ordenes(owner_id, (document->>'conexionId'), (document->>'idempotencyKey'));
 CREATE UNIQUE INDEX IF NOT EXISTS api_posiciones_natural ON public.api_posiciones(owner_id, (document->>'conexionId'), (document->>'posicionExternaId'));
+CREATE UNIQUE INDEX IF NOT EXISTS api_screener_natural ON public.api_screener(owner_id, (document->>'simbolo'));
 CREATE UNIQUE INDEX IF NOT EXISTS api_sesiones_natural ON public.api_sesiones(owner_id, (document->>'tokenHash'));
 COMMIT;

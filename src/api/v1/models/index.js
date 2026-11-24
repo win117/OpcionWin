@@ -17,3 +17,4 @@ export { default as Orden } from './Orden';
 export { default as Posicion } from './Posicion';
 export { default as Sincronizacion } from './Sincronizacion';
 export { default as EventoAuditoria } from './EventoAuditoria';
+export { default as Screener } from './Screener';

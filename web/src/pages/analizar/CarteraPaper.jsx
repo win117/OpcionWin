@@ -76,8 +76,9 @@ function CerrarModal({ posicion, onClose, onDone }) {
   );
 }
 
-export default function CarteraPaper({ titulo = 'Cartera paper' }) {
-  const st = useAsync(() => operacion.resumen(), []);
+/** vista: 'todo' | 'posiciones' | 'ordenes'. `broker`: código del broker elegido (alpaca|webull). */
+export default function CarteraPaper({ titulo = 'Cartera paper', broker, vista = 'todo' }) {
+  const st = useAsync(() => operacion.resumen(broker), [broker]);
   const [cerrar, setCerrar] = useState(null);
   const [cancelando, setCancelando] = useState(null);
   const [errAccion, setErrAccion] = useState(null);
@@ -92,7 +93,7 @@ export default function CarteraPaper({ titulo = 'Cartera paper' }) {
   const d = st.data;
   const cuenta = d?.cuenta;
   const posiciones = d?.posiciones || [];
-  const ordenes = [...(d?.ordenes || [])].sort((a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0)).slice(0, 10);
+  const ordenes = [...(d?.ordenes || [])].sort((a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0)).slice(0, vista === 'ordenes' ? 50 : 10);
 
   const cancelar = async o => {
     setCancelando(o._id); setErrAccion(null);
@@ -120,11 +121,11 @@ export default function CarteraPaper({ titulo = 'Cartera paper' }) {
                 <div><dt>Poder de compra</dt><dd>{fmtMoney(cuenta.poderCompra)}</dd></div>
               </dl>
             ) : (
-              <div className="alert alert--warning" role="note">No hay datos de la cuenta paper{d.error ? ': ' + d.error : '.'} Revisa las credenciales de Alpaca en el servidor.</div>
+              <div className="alert alert--warning" role="note">No hay datos de la cuenta paper{broker ? ' de ' + broker : ''}{d.error ? ': ' + d.error : '.'} Revisa las credenciales del broker en el servidor.</div>
             )}
 
-            <h3>Posiciones abiertas</h3>
-            {posiciones.length === 0 ? <p className="muted small">Sin posiciones abiertas.</p> : (
+            {vista !== 'ordenes' && <h3>Posiciones abiertas</h3>}
+            {vista !== 'ordenes' && (posiciones.length === 0 ? <p className="muted small">Sin posiciones abiertas.</p> : (
               <div className="table-wrap">
                 <table className="table table--dense">
                   <caption className="sr-only">Posiciones abiertas</caption>
@@ -149,10 +150,10 @@ export default function CarteraPaper({ titulo = 'Cartera paper' }) {
                   </tbody>
                 </table>
               </div>
-            )}
+            ))}
 
-            <h3>Órdenes recientes</h3>
-            {ordenes.length === 0 ? <p className="muted small">Sin órdenes recientes.</p> : (
+            {vista !== 'posiciones' && <h3>Órdenes recientes</h3>}
+            {vista !== 'posiciones' && (ordenes.length === 0 ? <p className="muted small">Sin órdenes recientes.</p> : (
               <div className="table-wrap">
                 <table className="table table--dense">
                   <caption className="sr-only">Órdenes recientes</caption>
@@ -175,7 +176,7 @@ export default function CarteraPaper({ titulo = 'Cartera paper' }) {
                   </tbody>
                 </table>
               </div>
-            )}
+            ))}
           </>
         )}
       </div>

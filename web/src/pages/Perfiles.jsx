@@ -41,13 +41,13 @@ export default function Perfiles() {
         createLabel="Nuevo perfil"
         extraValidate={validateParams}
         columns={[
-          { key: 'nombre', label: 'Nombre', render: r => <Link to={`/perfiles/${r._id}`}><strong>{r.nombre}</strong></Link> },
+          { key: 'nombre', label: 'Nombre', render: r => <Link to={`/configuracion/perfiles/${r._id}`}><strong>{r.nombre}</strong></Link> },
           { key: 'cores', label: 'Cores', className: 'col-wrap', render: r => r.coresSeleccionados?.map(c => CORE_LABELS[c]).join(', ') },
           { key: 'reglas', label: 'Reglas', align: 'right', render: r => r.reglas?.length ?? 0 },
           { key: 'version', label: 'Versión', align: 'right', render: r => r.version ?? 1 },
           { key: 'activo', label: 'Activo', render: r => <Badge value={r.activo !== false} /> },
         ]}
-        rowActions={row => <Link className="btn btn--sm" to={`/perfiles/${row._id}`}>Reglas</Link>}
+        rowActions={row => <Link className="btn btn--sm" to={`/configuracion/perfiles/${row._id}`}>Reglas</Link>}
       />
     </>
   );
@@ -77,7 +77,7 @@ export function PerfilDetalle() {
       <PageHeader
         title={p ? `Perfil · ${p.nombre}` : 'Perfil de análisis'}
         subtitle={p ? `Versión ${p.version ?? 1} · actualizado ${fmtDateTime(p.updatedAt)}` : null}
-        actions={<Link className="btn btn--sm" to="/perfiles">Volver</Link>}
+        actions={<Link className="btn btn--sm" to="/configuracion/perfiles">Volver</Link>}
       />
       {perfil.loading && !p && <Loading />}
       <ErrorMessage error={perfil.error} onRetry={perfil.reload} />

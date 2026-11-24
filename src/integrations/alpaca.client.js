@@ -230,10 +230,10 @@ export const createAlpacaClient = ({
   const trading = (ruta, opciones = {}) => { exigirCredenciales(); return http.request({ url: `${ALPACA_PAPER_URL}${ruta}`, ...opciones }); };
 
   // Recorre páginas con next_page_token hasta agotar, alcanzar `tope` elementos o maxPaginas.
-  const paginar = async (llamar, extraer, tope = Infinity) => {
+  const paginar = async (llamar, extraer, tope = Infinity, paginasMax = maxPaginas) => {
     const items = [];
     let token;
-    for (let pagina = 0; pagina < maxPaginas; pagina += 1) {
+    for (let pagina = 0; pagina < paginasMax; pagina += 1) {
       const cuerpo = await llamar(token);
       items.push(...extraer(cuerpo || {}));
       token = cuerpo?.next_page_token;
@@ -303,6 +303,45 @@ export const createAlpacaClient = ({
     };
   };
 
+  // Velas de varios símbolos en pocas solicitudes (endpoint multi-símbolo). Devuelve { SIMBOLO: [vela] } (solo con datos).
+  const velasLote = async (simbolos, { intervalo = '1Day', desde, hasta, ajuste = 'split' } = {}) => {
+    const lista = [...new Set((Array.isArray(simbolos) ? simbolos : []).map(exigirSimbolo))];
+    const salida = {};
+    if (!lista.length) return salida;
+    const pares = await paginar(
+      token => datos('/v2/stocks/bars', {
+        symbols: lista, timeframe: intervalo, start: desde, end: hasta,
+        limit: 10000, feed, adjustment: ajuste, sort: 'asc', page_token: token,
+      }),
+      cuerpo => Object.entries(cuerpo.bars || {}).flatMap(([s, barras]) => (barras || []).map(b => [s, normalizarVela(b)])),
+      Infinity, 60,
+    );
+    for (const [s, vela] of pares) (salida[s] ||= []).push(vela);
+    return salida;
+  };
+
+  // Snapshots de varios símbolos en una solicitud. Devuelve { SIMBOLO: { ultimo, cierreAnterior, cierre, volumen, fechaDato } }.
+  const cotizacionesLote = async simbolos => {
+    const lista = [...new Set((Array.isArray(simbolos) ? simbolos : []).map(exigirSimbolo))];
+    const salida = {};
+    if (!lista.length) return salida;
+    const cuerpo = await datos('/v2/stocks/snapshots', { symbols: lista, feed });
+    for (const [s, snap] of Object.entries(cuerpo || {})) {
+      if (!snap) continue;
+      salida[s] = {
+        ultimo: num(snap.latestTrade?.p), cierre: num(snap.dailyBar?.c), cierreAnterior: num(snap.prevDailyBar?.c),
+        volumen: num(snap.dailyBar?.v), fechaDato: snap.latestTrade?.t || snap.dailyBar?.t || null,
+      };
+    }
+    return salida;
+  };
+
+  // Reloj del mercado (/v2/clock).
+  const reloj = async () => {
+    const r = await trading('/v2/clock');
+    return { abierto: Boolean(r?.is_open), proximaApertura: r?.next_open || null, proximoCierre: r?.next_close || null, marcaTiempo: r?.timestamp || null };
+  };
+
   const contratos = async ({ subyacente, vencimientoDesde, vencimientoHasta, tipo, strikeMin, strikeMax, estado = 'active' } = {}) => {
     const s = exigirSimbolo(subyacente);
     if (tipo != null && !['call', 'put'].includes(tipo)) throw validacion('tipo debe ser call o put.');
@@ -321,7 +360,7 @@ export const createAlpacaClient = ({
   };
 
   // Acepta un subyacente (cadena completa) o una lista de símbolos OCC.
-  const snapshotsOpciones = async (subyacenteOSimbolos, { tipo, vencimiento, vencimientoDesde, vencimientoHasta, strikeMin, strikeMax } = {}) => {
+  const snapshotsOpciones = async (subyacenteOSimbolos, { tipo, vencimiento, vencimientoDesde, vencimientoHasta, strikeMin, strikeMax, limite = 1000, paginas } = {}) => {
     const extraer = cuerpo => Object.entries(cuerpo.snapshots || {}).map(([sim, snap]) => normalizarSnapshotOpcion(sim, snap));
     if (Array.isArray(subyacenteOSimbolos)) {
       const simbolos = subyacenteOSimbolos.map(exigirSimbolo);
@@ -344,9 +383,9 @@ export const createAlpacaClient = ({
         expiration_date_gte: fechaIso(vencimientoDesde),
         expiration_date_lte: fechaIso(vencimientoHasta),
         strike_price_gte: strikeMin, strike_price_lte: strikeMax,
-        limit: 1000, page_token: token,
+        limit: Math.max(1, Math.min(Number(limite) || 1000, 1000)), page_token: token,
       }),
-      extraer,
+      extraer, Infinity, paginas || maxPaginas,
     );
   };
 
@@ -406,7 +445,7 @@ export const createAlpacaClient = ({
     feed,
     opcionesFeed,
     configurado,
-    buscarActivo, listarActivos, velas, cotizacion, contratos, snapshotsOpciones, noticias,
+    buscarActivo, listarActivos, velas, velasLote, cotizacionesLote, reloj, cotizacion, contratos, snapshotsOpciones, noticias,
     cuenta, enviarOrden, consultarOrden, cancelarOrden, posiciones,
   };
 };

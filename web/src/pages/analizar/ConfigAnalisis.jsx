@@ -2,8 +2,8 @@
 import { useState } from 'react';
 import { useAsync } from '../../hooks/useAsync';
 import { cores as coresApi } from '../../api/resources';
-import { errorRangoDias } from './flujo';
-import { CORES, CORE_LABELS, CORE_DESCRIPCION } from '../../utils/constants';
+import { errorRangoDias, resolverConfig } from './flujo';
+import { CORES, CORE_LABELS, CORE_DESCRIPCION, RECURSO_LABELS } from '../../utils/constants';
 
 /** Catálogo de señales; si falla, devuelve null y la UI oculta la selección de señales. */
 export function useCatalogo() {
@@ -13,7 +13,7 @@ export function useCatalogo() {
   return { catalogo: s.data, loading: s.loading };
 }
 
-export default function ConfigAnalisis({ config, onChange, catalogo, corriendo, onAnalizar }) {
+export default function ConfigAnalisis({ config, onChange, catalogo, corriendo, onAnalizar, embebido = false }) {
   const [abiertos, setAbiertos] = useState({});
   const setCore = (core, cambios) => onChange({ ...config, cores: { ...config.cores, [core]: { ...config.cores[core], ...cambios } } });
   const setExcl = (core, lista) => onChange({ ...config, excluidas: { ...config.excluidas, [core]: lista } });
@@ -27,13 +27,12 @@ export default function ConfigAnalisis({ config, onChange, catalogo, corriendo, 
   const errDias = errorRangoDias(config);
   const setDias = (k, v) => onChange({ ...config, [k]: v === '' ? NaN : Number(v) });
   const valDias = v => (Number.isFinite(v) ? v : '');
+  const { recursos } = resolverConfig(config, catalogo);
   const resumen = `${seleccionados.length} ${seleccionados.length === 1 ? 'core' : 'cores'}` + (totalM ? ` · ${marcadasM} de ${totalM} métricas` : '');
 
   return (
-    <section className="card cfg-card" aria-labelledby="cfg-titulo">
-      <div className="card__header">
-        <div><h2 id="cfg-titulo">Configurar análisis</h2><p className="muted small">Elige los cores, su peso (0–5) y las métricas que entran al cálculo.</p></div>
-      </div>
+    <section className={(embebido ? '' : 'card ') + 'cfg-card'} aria-label="Configurar análisis">
+      <p className="muted small">Elige los cores, su peso (0–5) y las métricas. Al analizar solo se sincronizan los datos que piden los cores activos y solo ellos se evalúan.</p>
       <ul className="cfg-cores">
         {CORES.map(core => {
           const c = config.cores[core];
@@ -87,7 +86,9 @@ export default function ConfigAnalisis({ config, onChange, catalogo, corriendo, 
       </ul>
       <div className="cfg-opciones">
         <label className="check"><input type="checkbox" checked={config.sincronizar} onChange={e => onChange({ ...config, sincronizar: e.target.checked })} disabled={corriendo} /><span>Sincronizar datos antes de analizar</span></label>
-        <label className="check"><input type="checkbox" checked={config.institucional} onChange={e => onChange({ ...config, institucional: e.target.checked })} disabled={corriendo || !config.sincronizar} /><span>Incluir 13F institucional <small className="muted">(lento: 1–3 min)</small></span></label>
+        <label className="check"><input type="checkbox" checked={config.institucional} onChange={e => onChange({ ...config, institucional: e.target.checked })} disabled={corriendo || !config.sincronizar || !config.cores.institucional.on} /><span>Descargar 13F institucional <small className="muted">(lento: 1–3 min; requiere el core Institucional)</small></span></label>
+        <label className="check"><input type="checkbox" checked={config.contratos} onChange={e => onChange({ ...config, contratos: e.target.checked })} disabled={corriendo || !config.sincronizar} /><span>Traer contratos de opciones <small className="muted">(strikes, vencimientos y griegas de las estrategias sugeridas)</small></span></label>
+        {config.sincronizar && <p className="muted small" aria-live="polite">Se sincronizará: empresa{recursos.length ? ', ' + recursos.map(r => RECURSO_LABELS[r].toLowerCase()).join(', ') : ''}.</p>}
       </div>
       <fieldset className="cfg-dias" disabled={corriendo}>
         <legend className="field__label">Rango de vencimientos (días)</legend>
@@ -102,10 +103,10 @@ export default function ConfigAnalisis({ config, onChange, catalogo, corriendo, 
       </fieldset>
       <div className="cfg-accion">
         <p className="cfg-resumen" aria-live="polite">{resumen}</p>
-        <button type="button" className="btn btn--primary btn--lg" onClick={onAnalizar} disabled={corriendo || !seleccionados.length || Boolean(errDias)}>
+        {!embebido && <button type="button" className="btn btn--primary btn--lg" onClick={onAnalizar} disabled={corriendo || !seleccionados.length || Boolean(errDias)}>
           {corriendo ? 'Analizando…' : 'Analizar'}
-        </button>
-        {!seleccionados.length && <span className="muted small">Selecciona al menos un core con peso mayor que 0.</span>}
+        </button>}
+        {!embebido && !seleccionados.length && <span className="muted small">Selecciona al menos un core con peso mayor que 0.</span>}
       </div>
     </section>
   );

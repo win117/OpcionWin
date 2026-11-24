@@ -370,9 +370,9 @@ test('SEC: parser 13F y normalización de nombres', () => {
   assert.equal(normalizarEmisor('MICROSOFT CORP'), 'MICROSOFT');
 });
 
-test('Webull: no implementado sin red', async () => {
+test('Webull: sin credenciales y datos de mercado no implementados, sin red', async () => {
   const webull = createWebullClient();
-  await assert.rejects(webull.enviarOrden({}), e => e.codigo === 'NO_IMPLEMENTADO' && e.proveedor === 'webull');
+  await assert.rejects(webull.enviarOrden({}), e => e.codigo === 'SIN_CREDENCIALES' && e.proveedor === 'webull');
   await assert.rejects(webull.velas('AAPL'), e => e.codigo === 'NO_IMPLEMENTADO');
 });
 

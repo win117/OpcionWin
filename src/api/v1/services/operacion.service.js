@@ -1,9 +1,9 @@
 // Operación paper en un paso (ADR-011): conexión asegurada, resumen en vivo, ticket de órdenes y cierre de posiciones.
-// Solo Alpaca PAPER (ADR-005/006). Crea una Configuracion por orden y reutiliza createBroker para enviar.
+// Alpaca o Webull, solo PAPER (ADR-004/005/006), según el broker elegido. Crea una Configuracion por orden y reutiliza createBroker para enviar.
 import boom from '@hapi/boom';
 import { repository } from '../../../repositories';
 import { crear, obtener, todos } from './registros';
-import { createBroker } from './broker.service';
+import { createBroker, BROKERS, adaptadorDe } from './broker.service';
 import { createSincronizador } from './sincronizacion.service';
 import { createAnalisis } from './analisis.service';
 import { ESTRATEGIAS } from '../models/shared';
@@ -27,22 +27,35 @@ export function parsearOcc(simbolo) {
 }
 
 export function createOperacion({ integraciones, factory = repository, cola, ahora = () => new Date() }) {
-  const { alpaca } = integraciones;
   const broker = createBroker({ integraciones, factory });
   const sync = createSincronizador({ integraciones, factory });
   const analisis = createAnalisis({ cola, factory });
 
-  // Encuentra o crea broker alpaca y la conexión paper no revocada del usuario. Idempotente.
-  async function asegurarConexion(ctx) {
-    let [b] = await todos('brokers', ctx, { codigo: 'alpaca' }, factory);
-    if (!b) b = await crear('brokers', ctx, { codigo: 'alpaca', nombre: 'Alpaca', activo: true, entornos: ['paper'] }, factory);
-    const conexiones = await todos('conexiones-broker', ctx, { brokerId: b._id, entorno: 'paper' }, factory);
-    return conexiones.find(c => c.estado !== 'revocada')
-      || crear('conexiones-broker', ctx, { brokerId: b._id, alias: 'Alpaca paper', entorno: 'paper', credencialRef: 'env:ALPACA' }, factory);
+  // Código de broker pedido por el cliente (def. alpaca).
+  function codigoBroker(v) {
+    if (v == null || v === '') return 'alpaca';
+    if (typeof v !== 'string' || !BROKERS[v]) throw boom.badRequest('broker debe ser ' + Object.keys(BROKERS).join(' o ') + '.');
+    return v;
   }
 
-  async function asegurarYVerificar(ctx) {
-    const conexion = await asegurarConexion(ctx);
+  // Encuentra o crea el broker del catálogo y la conexión paper no revocada del usuario para ese broker. Idempotente.
+  async function asegurarConexion(ctx, codigo = 'alpaca') {
+    const meta = BROKERS[codigoBroker(codigo)];
+    let [b] = await todos('brokers', ctx, { codigo: meta.codigo }, factory);
+    if (!b) b = await crear('brokers', ctx, { codigo: meta.codigo, nombre: meta.nombre, activo: true, entornos: ['paper'] }, factory);
+    const conexiones = await todos('conexiones-broker', ctx, { brokerId: b._id, entorno: 'paper' }, factory);
+    return conexiones.find(c => c.estado !== 'revocada')
+      || crear('conexiones-broker', ctx, { brokerId: b._id, alias: meta.nombre + ' paper', entorno: 'paper', credencialRef: meta.ref }, factory);
+  }
+
+  async function nombreBrokerDe(ctx, conexionId) {
+    const c = await obtener('conexiones-broker', ctx, conexionId, factory).catch(() => null);
+    const b = c ? await obtener('brokers', ctx, c.brokerId, factory).catch(() => null) : null;
+    return BROKERS[b?.codigo]?.nombre || 'Broker';
+  }
+
+  async function asegurarYVerificar(ctx, codigo) {
+    const conexion = await asegurarConexion(ctx, codigo);
     const { conexionId, estadoConexion, ...cuenta } = await broker.verificar(ctx, conexion._id);
     return { conexion: { _id: conexion._id, alias: conexion.alias, estado: estadoConexion }, cuenta };
   }
@@ -89,18 +102,33 @@ export function createOperacion({ integraciones, factory = repository, cola, aho
 
   return {
     asegurarConexion,
+    nombreBrokerDe,
 
-    // 1) POST /broker/paper/conexion
-    ensureConexion: ctx => asegurarYVerificar(ctx),
+    // 0) GET /brokers/disponibles
+    async disponibles() {
+      return { items: Object.values(BROKERS).map(m => {
+        const a = integraciones[m.codigo];
+        const configurado = Boolean(a?.configurado);
+        return { codigo: m.codigo, nombre: m.nombre, configurado, operativo: configurado, entornos: ['paper'],
+          ...(configurado ? {} : { mensaje: m.codigo === 'webull'
+            ? 'Faltan WEBULL_APP_KEY / WEBULL_APP_SECRET en el servidor (o WEBULL_ENTORNO/WEBULL_BASE_URL no permitidos: solo paper).'
+            : 'Faltan ALPACA_KEY_ID / ALPACA_SECRET_KEY en el servidor.' }) };
+      }) };
+    },
 
-    // 2) GET /broker/paper/resumen
-    async resumen(ctx) {
-      const conexion = await asegurarConexion(ctx);
+    // 1) POST /broker/paper/conexion  (body opcional { broker })
+    ensureConexion: (ctx, body) => asegurarYVerificar(ctx, codigoBroker(body?.broker)),
+
+    // 2) GET /broker/paper/resumen?broker=
+    async resumen(ctx, brokerParam) {
+      const codigo = codigoBroker(brokerParam);
+      const adaptador = adaptadorDe(integraciones, codigo);
+      const conexion = await asegurarConexion(ctx, codigo);
       let cuenta = null, error;
       try { const { conexionId, estadoConexion, ...resto } = await broker.verificar(ctx, conexion._id); cuenta = resto; }
       catch (e) { error = mensajeError(e); }
       try { await sync.ejecutar(ctx, { recurso: 'posiciones', conexionId: conexion._id }); } catch { /* tolerado: se muestra lo vivo */ }
-      const vivas = await alpaca.posiciones();
+      const vivas = await adaptador.posiciones();
       const contratos = new Map((await todos('contratos', ctx, { proveedor: 'alpaca' }, factory)).map(c => [c.contratoExternoId, c]));
       const guardadas = new Map((await todos('posiciones', ctx, { conexionId: conexion._id }, factory)).filter(p => p.estado === 'abierta').map(p => [p.posicionExternaId, p]));
       const posiciones = vivas.map(p => {
@@ -118,14 +146,15 @@ export function createOperacion({ integraciones, factory = repository, cola, aho
         .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 15)
         .map(o => ({ _id: o._id, estado: o.estado, tipo: o.tipo, cantidad: o.cantidad, precioLimite: o.precioLimite ?? null, credito: Boolean(o.credito), componentes: o.componentes,
           createdAt: o.createdAt, ordenExternaId: o.ordenExternaId ?? null, eventos: (o.eventos || []).slice(-3) }));
-      return { conexionId: conexion._id, cuenta, ...(error ? { error } : {}), posiciones, ordenes };
+      return { conexionId: conexion._id, broker: codigo, cuenta, ...(error ? { error } : {}), posiciones, ordenes };
     },
 
     // 3) POST /ordenes/ticket
     async ticket(ctx, body, idempotencyKey) {
       const key = claveIdempotencia(idempotencyKey);
       const previa = await existente(ctx, key);
-      if (previa) return { ...previa, repetida: true };
+      if (previa) return { ...previa, repetida: true, brokerNombre: await nombreBrokerDe(ctx, previa.orden.conexionId) };
+      const codigo = codigoBroker(body?.broker);
       const base = validarOrdenBase(body);
       if (!Number.isSafeInteger(base.cantidad) || base.cantidad < 1 || base.cantidad > 100) throw boom.badRequest('cantidad debe ser un entero entre 1 y 100.');
       if (!Array.isArray(body.componentes) || body.componentes.length < 1 || body.componentes.length > 4) throw boom.badRequest('componentes: de 1 a 4 patas.');
@@ -152,16 +181,17 @@ export function createOperacion({ integraciones, factory = repository, cola, aho
       const estrategia = body.estrategiaCodigo || estrategiaPorPatas(componentes, contratos);
       const venc = fechaDia([...contratos].sort((a, b) => new Date(a.vencimiento) - new Date(b.vencimiento))[0].vencimiento);
       const nombre = String(body.nombre || `${body.estrategiaCodigo || (estrategia)} ${empresa.simbolo} ${venc}`).slice(0, 200);
-      const conexion = await asegurarConexion(ctx);
+      adaptadorDe(integraciones, codigo);
+      const conexion = await asegurarConexion(ctx, codigo);
       const { cantidad, ...resto } = base;
-      return crearYEnviar(ctx, key, { conexion, empresaId: empresa._id, estrategia, nombre, orden: { ...resto, cantidad }, componentes });
+      return { ...await crearYEnviar(ctx, key, { conexion, empresaId: empresa._id, estrategia, nombre, orden: { ...resto, cantidad }, componentes }), brokerNombre: BROKERS[codigo].nombre };
     },
 
     // 4) POST /posiciones/:id/cierre
     async cierre(ctx, posicionId, body, idempotencyKey) {
       const key = claveIdempotencia(idempotencyKey);
       const previa = await existente(ctx, key);
-      if (previa) return { orden: previa.orden, repetida: true };
+      if (previa) return { orden: previa.orden, repetida: true, brokerNombre: await nombreBrokerDe(ctx, previa.orden.conexionId) };
       const base = validarOrdenBase({ ...(body || {}), cantidad: 1, credito: false });
       const posicion = await obtener('posiciones', ctx, posicionId, factory);
       if (posicion.estado !== 'abierta') throw boom.conflict('La posición no está abierta.');
@@ -175,7 +205,7 @@ export function createOperacion({ integraciones, factory = repository, cola, aho
       const { cantidad, ...resto } = base; void cantidad;
       const { orden } = await crearYEnviar(ctx, key, { conexion, empresaId: contrato.empresaId, estrategia: contrato.tipo === 'call' ? 'LONG_CALL' : 'LONG_PUT',
         nombre: 'Cierre ' + contrato.simbolo, orden: { ...resto, cantidad: posicion.cantidad }, componentes });
-      return { orden };
+      return { orden, brokerNombre: await nombreBrokerDe(ctx, conexion._id) };
     },
   };
 }

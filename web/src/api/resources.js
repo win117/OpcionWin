@@ -96,6 +96,37 @@ export const mercado = {
   cotizacionEnVivo: simbolo => api.get(`/mercado/cotizaciones/${sym(simbolo)}/en-vivo`),
   cadena: (simbolo, params) => api.get(`/mercado/opciones/cadena/${sym(simbolo)}` + qs(params)),
   opcionesResumen: (simbolo, params) => api.get(`/mercado/opciones/resumen/${sym(simbolo)}` + qs(params)),
+  estado: () => api.get('/mercado/estado'),
+};
+
+/**
+ * Estado del mercado para la barra superior y el inicio. Usa GET /mercado/estado y, si aún no existe en el servidor,
+ * cae al panorama de índices (sin abierto/cerrado). Devuelve { abierto, proximaApertura, proximoCierre, indices, fuente }.
+ */
+export const INDICES_MERCADO = ['SPY', 'QQQ', 'IWM', 'DIA'];
+export async function cargarEstadoMercado() {
+  try {
+    return await mercado.estado();
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error;
+    const p = await mercado.panorama({ simbolos: INDICES_MERCADO.join(',') });
+    return {
+      abierto: null, proximaApertura: null, proximoCierre: null, fuente: 'panorama',
+      indices: (p?.items || []).filter(i => !i.error).map(i => ({ simbolo: i.simbolo, nombre: i.nombre, precio: i.ultimo, cambioPct: i.cambioPct })),
+    };
+  }
+}
+
+// Screener sobre el universo precargado (~500 empresas): sincronización y ranking por estrategia.
+export const screener = {
+  sincronizarUniverso: body => api.post('/screener/universo/sincronizaciones', body),
+  sincronizacion: id => api.get(`/screener/universo/sincronizaciones/${enc(id)}`),
+  ranking: params => api.get('/screener/ranking' + qs(params)),
+};
+
+// Brokers disponibles para operar (Alpaca, Webull) y su estado.
+export const brokersApi = {
+  disponibles: () => api.get('/brokers/disponibles'),
 };
 
 export const activos = {
@@ -137,8 +168,8 @@ export const sesiones = {
 
 // Operación directa en Alpaca PAPER (ticket de orden, cartera y cierre de posiciones).
 export const operacion = {
-  asegurarConexion: () => api.post('/broker/paper/conexion'),
-  resumen: () => api.get('/broker/paper/resumen'),
+  asegurarConexion: broker => api.post('/broker/paper/conexion', broker ? { broker } : undefined),
+  resumen: broker => api.get('/broker/paper/resumen' + qs({ broker })),
   ticket: (body, key) => api.post('/ordenes/ticket', body, { headers: { 'Idempotency-Key': key } }),
   cerrarPosicion: (id, body, key) => api.post(`/posiciones/${enc(id)}/cierre`, body, { headers: { 'Idempotency-Key': key } }),
   orden: id => api.get(`/ordenes/${enc(id)}`),

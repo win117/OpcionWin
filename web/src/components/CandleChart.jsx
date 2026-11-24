@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { createChart, CrosshairMode } from 'lightweight-charts';
+import { createChart, CrosshairMode, LineStyle } from 'lightweight-charts';
 
 function cssVar(name, fallback) {
   const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -23,11 +23,12 @@ import { rangoVisible } from '../utils/velas';
  * Velas o línea + volumen. `velas`: [{ time (segundos UTC), open, high, low, close, volume }] ascendente y sin duplicados.
  * `tipo`: 'velas'|'linea'. `rango`: clave de utils/velas (null = todo). Una sola instancia; los datos se actualizan in situ.
  */
-export function CandleChart({ velas, height = 380, intradia = false, overlays, tipo = 'velas', volumen = true, rango = null }) {
+export function CandleChart({ velas, height = 380, intradia = false, overlays, tipo = 'velas', volumen = true, rango = null, lineasPrecio, marcadores }) {
   const container = useRef(null);
   const chartRef = useRef(null);
   const seriesRef = useRef({});
   const lineasRef = useRef(new Map());
+  const nivelesRef = useRef([]);
 
   useEffect(() => {
     const el = container.current;
@@ -61,6 +62,7 @@ export function CandleChart({ velas, height = 380, intradia = false, overlays, t
       chartRef.current = null;
       seriesRef.current = {};
       lineas.clear();
+      nivelesRef.current = [];
     };
   }, [height]);
 
@@ -98,6 +100,24 @@ export function CandleChart({ velas, height = 380, intradia = false, overlays, t
       l.setData(o.data);
     }
   }, [overlays, velas, height]);
+
+  // Líneas horizontales de precio (soportes/resistencias): [{ precio, color (var CSS o color), titulo }].
+  useEffect(() => {
+    const { candles } = seriesRef.current;
+    if (!candles) return;
+    for (const l of nivelesRef.current) { try { candles.removePriceLine(l); } catch { /* ya eliminada */ } }
+    nivelesRef.current = (lineasPrecio || []).map(n => candles.createPriceLine({
+      price: n.precio, color: cssVar(n.color, n.color), lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: n.titulo,
+    }));
+  }, [lineasPrecio, velas, height]);
+
+  // Marcadores de señales: [{ time, position, color, shape, text }] (se ordenan por tiempo).
+  useEffect(() => {
+    const { candles } = seriesRef.current;
+    if (!candles) return;
+    const ms = [...(marcadores || [])].sort((a, b) => a.time - b.time).map(m => ({ ...m, color: cssVar(m.color, m.color) }));
+    candles.setMarkers(ms);
+  }, [marcadores, velas, height]);
 
   useEffect(() => {
     const chart = chartRef.current;

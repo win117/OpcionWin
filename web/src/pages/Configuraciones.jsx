@@ -41,14 +41,14 @@ export default function Configuraciones() {
         createLabel="Nueva configuración"
         filters={[{ name: 'estado', label: 'Estado', options: ESTADOS }]}
         columns={[
-          { key: 'nombre', label: 'Nombre', render: r => <Link to={`/configuraciones/${r._id}`}><strong>{r.nombre}</strong></Link> },
+          { key: 'nombre', label: 'Nombre', render: r => <Link to={`/configuracion/configuraciones/${r._id}`}><strong>{r.nombre}</strong></Link> },
           { key: 'empresa', label: 'Empresa', render: r => empresasL.byId.get(r.empresaId)?.simbolo || '—' },
           { key: 'estrategia', label: 'Estrategia', render: r => ESTRATEGIA_LABELS[estrategiasL.byId.get(r.estrategiaId)?.codigo] || '—' },
           { key: 'componentes', label: 'Patas', align: 'right', render: r => r.componentes?.length ?? 0 },
           { key: 'estado', label: 'Estado', render: r => <Badge value={r.estado} /> },
           { key: 'updatedAt', label: 'Actualizada', render: r => fmtDateTime(r.updatedAt) },
         ]}
-        rowActions={row => <Link className="btn btn--sm" to={`/configuraciones/${row._id}`}>Abrir</Link>}
+        rowActions={row => <Link className="btn btn--sm" to={`/configuracion/configuraciones/${row._id}`}>Abrir</Link>}
       />
     </>
   );
@@ -221,7 +221,7 @@ export function ConfiguracionDetalle() {
       <PageHeader
         title={c ? c.nombre : 'Configuración'}
         subtitle={c ? `${empresaLabel(empresa) || '—'} · ${ESTRATEGIA_LABELS[estrategia?.codigo] || '—'}` : null}
-        actions={<Link className="btn btn--sm" to="/configuraciones">Volver</Link>}
+        actions={<Link className="btn btn--sm" to="/configuracion/configuraciones">Volver</Link>}
       />
       {config.loading && !c && <Loading />}
       <ErrorMessage error={config.error} onRetry={config.reload} />

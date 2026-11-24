@@ -1,0 +1,23 @@
+import { useId } from 'react';
+import { useBroker } from '../context/BrokerContext';
+
+/** Selector del broker con el que se opera: «Alpaca · paper». */
+export function BrokerSelector() {
+  const { broker, setBroker, disponibles, info, error, verificado } = useBroker();
+  const id = useId();
+  const nota = info?.mensaje || (error ? 'No se pudo consultar la disponibilidad de brokers; se asume el estado habitual.' : '');
+  return (
+    <div className="broker-sel" title={nota || undefined}>
+      <label htmlFor={id} className="sr-only">Broker para operar</label>
+      <span className={'dot ' + (info?.operativo === false ? 'dot--off' : info?.operativo ? 'dot--ok' : 'dot--neutral')} aria-hidden="true" />
+      <select id={id} value={broker} onChange={e => setBroker(e.target.value)} aria-describedby={nota ? id + '-n' : undefined}>
+        {disponibles.map(b => (
+          <option key={b.codigo} value={b.codigo}>
+            {b.nombre} · {b.entornos?.[0] || 'paper'}{verificado && b.operativo === false ? ' (no operativo)' : ''}
+          </option>
+        ))}
+      </select>
+      {nota && <span id={id + '-n'} className="sr-only">{nota}</span>}
+    </div>
+  );
+}

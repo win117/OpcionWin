@@ -41,7 +41,7 @@ Para debatir una decisión: cambiar su estado a Propuesta, anotar el argumento e
 **Consecuencias.** Una sola instancia. Migrable a cola externa sin cambiar el contrato HTTP.
 
 ## ADR-004 · Proveedores
-**Decisión.** Alpaca Market Data (velas, cotizaciones, cadena de opciones con griegas feed `indicative`, noticias) y Trading paper. SEC EDGAR (`companyfacts`, `company_tickers`, 13F-HR de una lista configurable de instituciones). Webull queda como adaptador pendiente (sin API pública estable de opciones para este alcance).
+**Decisión.** Alpaca Market Data (velas, cotizaciones, cadena de opciones con griegas feed `indicative`, noticias) y Trading paper. SEC EDGAR (`companyfacts`, `company_tickers`, 13F-HR de una lista configurable de instituciones). Webull OpenAPI (implementado 2026-11-19): adaptador de trading de opciones contra el entorno de pruebas `api.sandbox.webull.com` (firma HMAC-SHA1, `src/integrations/webull.client.js`); el usuario elige el broker (Alpaca o Webull) por conexión. Los datos de mercado siguen viniendo de Alpaca; los contratos se sincronizan desde Alpaca y su símbolo OCC se convierte al formato de patas de Webull.
 **Consecuencias.** Feed IEX gratuito es parcial (no consolidado). Las griegas de Alpaca son indicativas. Se etiquetan `fuente.feed`. 13F tiene retraso de hasta 45 días tras el trimestre: no es flujo en tiempo real.
 
 ## ADR-005 · Órdenes solo paper
@@ -49,7 +49,7 @@ Para debatir una decisión: cambiar su estado a Propuesta, anotar el argumento e
 **Consecuencias.** Seguridad ante uso académico. Habilitar live requerirá nueva ADR, confirmación explícita por orden y pruebas.
 
 ## ADR-006 · Credenciales por referencia
-**Decisión.** `ConexionBroker.credencialRef` acepta `env:ALPACA` (usa ALPACA_KEY_ID/SECRET del servidor). No se guardan claves en la base. Nunca se devuelven al cliente.
+**Decisión.** `ConexionBroker.credencialRef` acepta `env:ALPACA` (ALPACA_KEY_ID/SECRET del servidor) o `env:WEBULL` (WEBULL_APP_KEY/APP_SECRET/ACCOUNT_ID). No se guardan claves en la base. Nunca se devuelven al cliente.
 **Alternativas.** Cifrado de claves por usuario en base (pendiente si hay múltiples usuarios con cuentas distintas).
 
 ## ADR-007 · Frontend
