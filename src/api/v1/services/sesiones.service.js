@@ -4,6 +4,8 @@ import { promisify } from 'node:util';
 import boom from '@hapi/boom';
 import config from '../../../config/config';
 import { repository } from '../../../repositories';
+import { createRetencion } from '../../../repositories/retencion';
+import { createLimitador } from '../../../middlewares/limitador';
 import { object, validated } from './crud.service';
 import { registrarEvento, enmascararEmail } from './auditoria.service';
 const scrypt = promisify(scryptCallback);
@@ -19,6 +21,9 @@ export async function fileUsers(settings = config) {
   catch { throw boom.serverUnavailable('Configura usuarios con scripts/create-user.cjs (local) o la variable AUTH_USERS_JSON (despliegue).'); }
 }
 export function createSessionService(factory = repository, users = fileUsers) {
+  const retencion = createRetencion({ factory });
+  // Como máximo 20 eventos de acceso fallido por hora y usuario ('anonimo' agrupa los correos desconocidos).
+  const fallosAuditados = createLimitador({ max: 20, ventanaMs: 3600000 });
   // Supabase no tiene TTL: la expiración se aplica en authenticate (expiraEn <= ahora → 401) y aquí se purgan
   // las expiradas al iniciar sesión (mejor esfuerzo; en MongoDB lo hace además el índice TTL).
   async function limpiarExpiradas(context) {
@@ -38,7 +43,11 @@ export function createSessionService(factory = repository, users = fileUsers) {
       const expected = Buffer.from(user?.passwordHash || '00'.repeat(64), 'hex');
       if (!user || expected.length !== derived.length || !timingSafeEqual(expected, derived)) {
         // Sin contraseña; con usuario conocido queda en su propio registro, si no en 'anonimo'.
-        await registrarEvento({ userId: user?.id || 'anonimo', database: baseDatos }, { accion: 'login', recurso: 'sesiones', resultado: 'error', detalle: 'Credenciales inválidas: ' + enmascararEmail(email) }, factory);
+        const destino = { userId: user?.id || 'anonimo', database: baseDatos };
+        if (!fallosAuditados.sumar(baseDatos + ':' + destino.userId)) {
+          await registrarEvento(destino, { accion: 'login', recurso: 'sesiones', resultado: 'error', detalle: 'Credenciales inválidas: ' + enmascararEmail(email) }, factory);
+          retencion(destino); // sin esperar: no debe retrasar la respuesta
+        }
         throw boom.unauthorized('Credenciales inválidas.');
       }
       const context = { userId: user.id, database: baseDatos };
@@ -49,6 +58,7 @@ export function createSessionService(factory = repository, users = fileUsers) {
       await factory('sesiones', context).create(document);
       await registrarEvento(context, { accion: 'login', recurso: 'sesiones', recursoId: id }, factory);
       await limpiarExpiradas(context);
+      retencion(context); // sin esperar: no debe retrasar el inicio de sesión
       return { token, tokenType: 'Bearer', usuarioId: user.id, baseDatos, expiraEn };
     },
     async authenticate(token) {
@@ -59,6 +69,8 @@ export function createSessionService(factory = repository, users = fileUsers) {
       const row = await factory('sesiones', context).get(context.sessionId);
       if (!row || row.document.revocadaEn || new Date(row.document.expiraEn) <= new Date() ||
           row.document.baseDatos !== context.database || row.document.tokenHash !== hash(token)) throw boom.unauthorized('Sesión inválida o expirada.');
+      // La sesión deja de valer si el usuario se eliminó o desactivó después de iniciarla.
+      if (!(await users()).some(u => u.id === context.userId && u.activo !== false)) throw boom.unauthorized('El usuario ya no está activo.');
       return context;
     },
     async current(context) {

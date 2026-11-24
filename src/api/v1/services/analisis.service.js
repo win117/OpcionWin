@@ -3,7 +3,7 @@ import boom from '@hapi/boom';
 import { repository } from '../../../repositories';
 import { cores, confluencia, estrategias as estrategiasCore } from '../../../cores';
 import { CORES, ESTRATEGIAS } from '../models/shared';
-import { todos, obtener, crear } from './registros';
+import { todos, obtener, crear, idDeterminista } from './registros';
 import { iniciarTrabajo } from './trabajos.service';
 
 const fecha = d => new Date(d).getTime();
@@ -141,7 +141,14 @@ export function createAnalisis({ cola, factory = repository }) {
     const existentes = await todos('estrategias', ctx, undefined, factory);
     const mapa = new Map(existentes.map(e => [e.codigo, e]));
     for (const codigo of ESTRATEGIAS) if (!mapa.has(codigo)) {
-      mapa.set(codigo, await crear('estrategias', ctx, { codigo, nombre: NOMBRES[codigo][0], descripcion: NOMBRES[codigo][1], activo: true }, factory));
+      // _id determinista: dos solicitudes simultáneas no crean duplicados; la que pierde lee el registro de la otra.
+      try {
+        mapa.set(codigo, await crear('estrategias', ctx, { _id: idDeterminista(ctx.userId, 'estrategia', codigo), codigo, nombre: NOMBRES[codigo][0], descripcion: NOMBRES[codigo][1], activo: true }, factory));
+      } catch (error) {
+        const [creada] = boom.isBoom(error) && error.output.statusCode === 409 ? await todos('estrategias', ctx, { codigo }, factory) : [];
+        if (!creada) throw error;
+        mapa.set(codigo, creada);
+      }
     }
     return mapa;
   }
