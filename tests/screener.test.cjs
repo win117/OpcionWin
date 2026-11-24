@@ -168,14 +168,15 @@ test('Opciones: el resumen excluye vencidos, elige el más cercano vigente e inf
 
 test('Límite de Alpaca: ráfaga inicial, nunca más de 180 por minuto y las operaciones pasan primero', async () => {
   let t = 0;
-  const turno = createLimitador({ ahora: () => t, esperar: async ms => { t += ms; } });
+  const reloj = async ms => { await new Promise(setImmediate); t += ms; }; // avanza el reloj cuando ya salieron las llamadas con ficha
+  const turno = createLimitador({ ahora: () => t, esperar: reloj });
   const horas = [];
   await Promise.all(Array.from({ length: 400 }, () => turno(false).then(() => horas.push(t))));
   assert.equal(horas[29], 0, 'las primeras 30 salen sin espera');
   const maximo = Math.max(...horas.map(h => horas.filter(x => x >= h && x < h + 60000).length));
   assert.ok(maximo <= 180, 'en un minuto: ' + maximo);
 
-  const orden = [], lento = createLimitador({ rafaga: 1, ahora: () => t, esperar: async ms => { t += ms; } });
+  const orden = [], lento = createLimitador({ rafaga: 1, ahora: () => t, esperar: reloj });
   await Promise.all([...['a', 'b', 'c'].map(n => lento(false).then(() => orden.push(n))), lento(true).then(() => orden.push('orden'))]);
   assert.deepEqual(orden, ['a', 'orden', 'b', 'c']);
 });

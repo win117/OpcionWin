@@ -418,6 +418,8 @@ function redSec({ ranking = true, recientes = ['111', '222', '333', '444'], rang
       if (ciks.length) hits = hits.filter(h => ciks.includes(String(Number(h._source.ciks[0]))));
       return r(JSON.stringify({ hits: { total: { value: hits.length }, hits } }));
     }
+    const portada = /\/data\/(\d+)\/\d+\/primary_doc\.xml$/.exec(u.pathname);
+    if (portada) return r(`<edgarSubmission><ns1:tableValueTotal>${1000 - Number(portada[1])}</ns1:tableValueTotal></edgarSubmission>`, portada[1] === '444' ? { status: 404 } : {});
     const m = /\/data\/(\d+)\/\d+?(\d\d)\/tabla\.xml$/.exec(u.pathname);
     if (m && m[1] === '333') return r('', { status: 404 });
     if (m) return r(xml13F([{ n: 'LILLY ELI &amp; CO', c: '532457108', v: 5, s: Number(m[1]) * (m[2] === '09' ? 10 : 9) }, { n: 'LILLY ELI &amp; CO', c: '532457AA1', v: 1, s: 1, t: 'PRN' }, { n: 'OTRA', c: '000000000', v: 1, s: 1 }, ...(m[1] === '666' ? [{ n: 'ELI LILLY AND CO', c: '532457108', v: 1, s: 1 }] : [])]));
@@ -444,7 +446,8 @@ test('13F: instituciones descubiertas en la SEC; un fondo que falla no detiene a
 test('13F: sin ranking oficial degrada y lo informa; un trimestre a medio presentar no se compara', async () => {
   for (const opciones of [{ ranking: false }, { rango: 200 }]) {
     const [r] = await redSec(opciones).sec.tenencias13F({ nombreEmisor: 'ELI LILLY & Co' });
-    assert.equal(r.tenencias.length, 3); assert.match(r.datosFaltantes[0], /ranking/);
+    assert.deepEqual(r.tenencias.map(t => t.identificadorInstitucion), ['0000000111', '0000000222'], 'ordenadas por el valor de su portada; sin portada quedan fuera');
+    assert.match(r.datosFaltantes[0], /ranking/);
   }
   const reportes = await redSec({ recientes: ['111'] }).sec.tenencias13F({ nombreEmisor: 'ELI LILLY & Co' });
   assert.deepEqual(reportes.map(r => r.fechaCorte), ['2026-06-30', '2026-03-31']);

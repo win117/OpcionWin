@@ -3,7 +3,8 @@
 //      ~95 MB solo se descargan dos tablas pequeñas con solicitudes por rango (4 solicitudes en total, válidas una semana).
 //   2) CUSIP del emisor: búsqueda de texto completo de EDGAR por nombre; se leen las tablas pequeñas donde más pesa el emisor.
 //   3) Tenedores: búsqueda por CUSIP limitada a las mayores instituciones del ranking, una por corte trimestral.
-// Si el ranking falla se usan las tablas más largas que contienen el CUSIP (aproximación) y se informa en `datosFaltantes`.
+// Si el ranking falla se aproxima con las instituciones de tablas más largas, ordenadas por el valor total de su portada, y se
+// informa en `datosFaltantes`.
 import { inflateRawSync } from 'node:zlib';
 import { IntegrationError } from './errors';
 
@@ -16,6 +17,7 @@ export const MAX_PANEL = 12; // instituciones cuyas tablas se leen por empresa
 const RANKING_VIGENTE_MS = 7 * DIA, RANKING_REINTENTO_MS = 10 * 60000, CUSIP_VIGENTE_MS = 30 * DIA;
 const COLA_ZIP = 65536, MAX_TABLA_ZIP = 8e6;
 const TABLAS_PARA_CUSIP = 6; // tablas pequeñas que se revisan como máximo
+const MAX_PORTADAS = 80; // portadas leídas como máximo si no hay ranking oficial
 const TAMANO_PAGINA = 100, VENTANA_BUSQUEDA = 10000, MAX_PAGINAS = 3; // límites de la búsqueda de EDGAR
 
 const fallo = (mensaje, codigo = 'PROVEEDOR') => new IntegrationError({ proveedor: 'sec', codigo, mensaje });
@@ -191,12 +193,27 @@ export function createDescubrimiento13F({ pedir, procesar, leerTabla, ahora = Da
     for (const t of tablas) if (t.corte === corte && !(mapa.get(t.cik)?.publicada >= t.publicada)) mapa.set(t.cik, t);
     return mapa;
   }
-  // Sin ranking: las tablas más largas son las de menor peso relativo del valor, al final del orden de la búsqueda.
+  // Sin ranking: de las tablas más largas (menor peso relativo del valor: al final del orden de la búsqueda) se lee el valor total
+  // declarado en su portada (documentos de pocos KB) y se ordenan por él. Vale un día.
+  let aproximada = null;
   async function aproximarMayores(frases, corte) {
+    if (aproximada && ahora() - aproximada.t < DIA) return aproximada.lista;
     const filtro = { frases, ...ventana(corte) };
     const { total } = await buscar(filtro);
-    const { tablas } = await buscar({ ...filtro, posicion: Math.max(0, Math.min(total, VENTANA_BUSQUEDA) - TAMANO_PAGINA) });
-    return [...porInstitucion(tablas.reverse(), corte).keys()].slice(0, MAX_RANKING);
+    const ultima = Math.max(0, Math.min(total, VENTANA_BUSQUEDA) - TAMANO_PAGINA), tablas = [];
+    for (const posicion of new Set([ultima, Math.max(0, ultima - TAMANO_PAGINA)])) tablas.push(...(await buscar({ ...filtro, posicion })).tablas.reverse());
+    const candidatas = [...porInstitucion(tablas, corte).values()].slice(0, MAX_PORTADAS);
+    const valores = new Map();
+    for (const t of candidatas) {
+      try {
+        const portada = await pedir(t.url.replace(/[^/]+$/, 'primary_doc.xml'), { respuesta: 'text' });
+        valores.set(t.cik, Number(/<(?:\w+:)?tableValueTotal>\s*(\d+)/i.exec(portada)?.[1]) || 0);
+      } catch { /* sin portada: queda fuera */ }
+    }
+    const lista = [...valores].filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, MAX_RANKING).map(([cik]) => cik);
+    if (!lista.length) throw fallo('La SEC no entregó datos para elegir instituciones 13F.');
+    aproximada = { t: ahora(), lista };
+    return lista;
   }
 
   /** Instituciones que reportan el valor: { cusips, cortes: [{ corte, tablas }], datosFaltantes }. */
@@ -206,9 +223,8 @@ export function createDescubrimiento13F({ pedir, procesar, leerTabla, ahora = Da
     const datosFaltantes = [];
     let ciks = await mayores();
     if (!ciks) {
-      datosFaltantes.push('ranking de instituciones de la SEC no disponible: panel elegido por la extensión de sus tablas 13F');
+      datosFaltantes.push('ranking de instituciones de la SEC no disponible: panel aproximado con las instituciones de tablas más extensas');
       ciks = await aproximarMayores(lista, trimestres[1]);
-      if (!ciks.length) return { cusips: lista, cortes: [], datosFaltantes };
     }
     const porCorte = [];
     for (const corte of trimestres) porCorte.push({ corte, mapa: porInstitucion(await buscarTodas({ frases: lista, ciks, ...ventana(corte) }), corte) });

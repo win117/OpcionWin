@@ -64,6 +64,7 @@ Descubrimiento 13F (verificado 2026-11-23; `www.sec.gov` rechaza con 403 un User
 - 13F: solo `13F-HR` (sin enmiendas); se excluyen filas `PRN` y opciones (`putCall`). Retraso de hasta 45 días tras el trimestre:
   un corte con menos de la mitad de las presentaciones del anterior no se usa todavía.
 - El panel institucional son hasta 12 de las 40 mayores instituciones que reportan el valor; no es el total de tenedores.
-  Si la SEC no entrega el ranking, se eligen las de tablas más extensas y se anota en `datosFaltantes`.
+  Si la SEC no entrega el ranking, se leen las portadas (`primary_doc.xml`, `tableValueTotal`) de hasta 80 instituciones de tablas
+  extensas y se anota en `datosFaltantes`.
 - El CUSIP se deduce por nombre de emisor en tablas 13F pequeñas (palabras sin orden ni sufijos); un nombre muy abreviado puede no
   encontrarse. Las tablas (hasta ~23 MB) se leen por trozos y solo se guardan las filas del emisor.
