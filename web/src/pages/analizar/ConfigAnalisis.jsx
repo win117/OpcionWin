@@ -1,5 +1,6 @@
 // «Configurar análisis»: cores, pesos, señales (catálogo) y opciones de sincronización.
 import { useState } from 'react';
+import { Termino } from '../../components/Termino';
 import { useAsync } from '../../hooks/useAsync';
 import { cores as coresApi } from '../../api/resources';
 import { errorRangoDias, resolverConfig } from './flujo';
@@ -28,11 +29,11 @@ export default function ConfigAnalisis({ config, onChange, catalogo, corriendo, 
   const setDias = (k, v) => onChange({ ...config, [k]: v === '' ? NaN : Number(v) });
   const valDias = v => (Number.isFinite(v) ? v : '');
   const { recursos } = resolverConfig(config, catalogo);
-  const resumen = `${seleccionados.length} ${seleccionados.length === 1 ? 'core' : 'cores'}` + (totalM ? ` · ${marcadasM} de ${totalM} métricas` : '');
+  const resumen = `${seleccionados.length} ${seleccionados.length === 1 ? 'core' : 'cores'}` + (totalM ? `, ${marcadasM} de ${totalM} métricas` : '');
 
   return (
     <section className={(embebido ? '' : 'card ') + 'cfg-card'} aria-label="Configurar análisis">
-      <p className="muted small">Elige los cores, su peso (0–5) y las métricas. Al analizar solo se sincronizan los datos que piden los cores activos y solo ellos se evalúan.</p>
+      <p className="muted small">Elige los <Termino id="core">cores</Termino>, su peso (0–5) y las métricas. Al analizar solo se sincronizan los datos que piden los cores activos y solo ellos se evalúan.</p>
       <ul className="cfg-cores">
         {CORES.map(core => {
           const c = config.cores[core];
@@ -91,7 +92,7 @@ export default function ConfigAnalisis({ config, onChange, catalogo, corriendo, 
         {config.sincronizar && <p className="muted small" aria-live="polite">Se sincronizará: empresa{recursos.length ? ', ' + recursos.map(r => RECURSO_LABELS[r].toLowerCase()).join(', ') : ''}.</p>}
       </div>
       <fieldset className="cfg-dias" disabled={corriendo}>
-        <legend className="field__label">Rango de vencimientos (días)</legend>
+        <legend className="field__label">Rango de <Termino id="vencimiento">vencimientos</Termino> (días)</legend>
         <div className="cfg-dias__campos">
           <label className="cfg-peso"><span className="muted small">Días a vencimiento mín.</span>
             <input type="number" min="0" max="730" step="1" inputMode="numeric" value={valDias(config.diasMin)} aria-describedby="cfg-dias-ayuda" aria-invalid={errDias ? true : undefined} onChange={e => setDias('diasMin', e.target.value)} /></label>

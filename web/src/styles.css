@@ -790,6 +790,18 @@ a.indice:hover { background: var(--surface-2); }
   .mapa__buscar { max-width: none; }
 }
 
+/* ===== Detalle y progreso ===== */
+.detalle { position: relative; overflow: hidden; }
+.detalle__estado { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 6px; min-height: 36px; }
+.detalle__barra { position: absolute; inset: auto 0 0; height: 3px; background: var(--surface-3); }
+.detalle__barra span { display: block; height: 100%; background: var(--accent); transition: width .3s ease; }
+.detalle__error { color: var(--danger-fg); }
+.stats__nota { display: block; font-size: var(--t-12); font-weight: 400; } .stats__nota--aviso { color: var(--warning-fg); font-weight: 600; }
+.progreso summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; cursor: pointer; min-height: 28px; }
+.progreso summary::after { content: "Ver pasos"; margin-left: auto; align-self: center; font-size: var(--t-14); color: var(--accent); }
+.progreso[open] summary::after { content: "Ocultar pasos"; }
+.progreso__titulo { font-weight: 600; }
+
 /* ===== Glosario ===== */
 .termino__caja { display: inline; }
 .termino { display: inline; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: inherit; text-decoration: underline dotted; text-decoration-color: var(--control-border); text-underline-offset: 3px; cursor: help; }
