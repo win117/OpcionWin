@@ -108,3 +108,17 @@ cifras difieren fuera de [0.25, 25], gana la que cuadra con el dinero negociado 
 **Consecuencias.** Entran solas las empresas nuevas y salen las que dejan de cotizar. Quedan fuera las extranjeras (20-F/40-F) y los fondos.
 El sector es una agrupación del código SIC, menos fina que GICS. Con dos clases de acciones, el total se reparte por igual.
 **A debate.** Pagar una fuente GICS y datos SIP en tiempo real.
+
+## ADR-014 · (PROPUESTA, sin aplicar) Calibración de los puntajes de compatibilidad
+**Contexto.** Auditoría del 2026-11-24, con números verificados ejecutando los cores:
+1. Iron Condor y Long Call/Put usan escalas distintas pero se comparan: sin información, Iron Condor = 100 y Call/Put = 50. Con dos cores en sesgo 0.40,
+   confianza 0.8 e IV/HV 1.2: Long Call 70 e Iron Condor 75, aunque ambos cores se leen «Alcista».
+2. Una contradicción dentro de un core cuenta como mercado lateral: señales [1,−1,1,−1] pesan 20 veces más que un mercado plano de verdad.
+   Una caída de 14.8 % en 20 días da al técnico un sesgo ≈ 0 y, con ese core solo, Iron Condor = 99.
+3. El ajuste IV/HV premia justo el riesgo de resultados: IV 45 % frente a HV 25 % antes de un reporte suma +15 al Iron Condor.
+4. Long Call/Put ignoran lo cara que está la volatilidad: IV 60 % y 30 % dan el mismo puntaje.
+5. La confianza se calcula pero no llega al puntaje: un solo titular negativo da Long Put = 100.
+**Propuesta.** (a) Iron Condor centrado en 50 y multiplicado por el acuerdo; IV/HV centrado en 1.15. (b) Cada core devuelve su neutralidad propia.
+(c) Ajuste IV/HV ≤ 0 si hay resultados antes del vencimiento (falta una fuente de fechas). (d) Penalizar Call/Put cuando la IV es alta.
+(e) Acercar el puntaje a 50 según la confianza. Se calibran juntas porque interactúan.
+**Estado.** Requiere decisión del usuario: cambia todos los puntajes y el Top 5.

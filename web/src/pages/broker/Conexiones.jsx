@@ -13,7 +13,7 @@ const PAPER_ONLY = [{ value: 'paper', label: 'paper (simulado)' }, { value: 'liv
 function PaperBanner() {
   return (
     <div className="banner-paper" role="note">
-      <strong>Entorno paper — sin dinero real.</strong> Las órdenes se envían únicamente a Alpaca paper trading; el entorno live está bloqueado.
+      <strong>Dinero simulado.</strong> Las órdenes van a la cuenta de práctica del broker que elijas (Alpaca o Webull); operar con dinero real está bloqueado.
     </div>
   );
 }
@@ -71,7 +71,7 @@ function ConexionesTab({ brokersL }) {
           { key: 'alias', label: 'Alias', render: r => <strong>{r.alias}</strong> },
           { key: 'broker', label: 'Broker', render: r => brokersL.byId.get(r.brokerId)?.nombre || '—' },
           { key: 'entorno', label: 'Entorno', render: r => <Badge value={r.entorno} tone={r.entorno === 'paper' ? 'info' : 'danger'} /> },
-          { key: 'cuenta', label: 'Cuenta', render: r => r.cuentaExternaId || '—' },
+          { key: 'cuenta', label: 'Cuenta', render: r => (r.cuentaExternaId ? '•••• ' + String(r.cuentaExternaId).slice(-4) : '—') },
           { key: 'estado', label: 'Estado', render: r => <Badge value={r.estado} /> },
         ]}
         rowActions={(row, reload) => (

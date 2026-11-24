@@ -172,3 +172,16 @@ Pendiente: validar en vivo con credenciales reales de Webull (crédito multi-pat
   `useSondeo`; Top 5 sin botones; al abrir una empresa con datos viejos se actualizan solos.
 - Pendiente: probar con el mercado abierto; las velas de «Análisis» siguen siendo IEX (el ranking usa SIP); sector según SIC (p. ej. Visa y
   Mastercard figuran en servicios); los índices de referencia (SPY, QQQ, IWM, DIA) y los filers 13F siguen configurados en código.
+
+### 2026-11-24 · Auditoría y mejoras con subagentes
+Tres auditorías (funcionalidad/seguridad, cores/finanzas, diseño) y mejoras en ramas separadas, integradas y probadas juntas:
+- **Órdenes:** un reintento ya no da por enviado lo que falló (busca la orden en el broker, la adopta o la reenvía); cierre de estructuras completas
+  (`POST /posiciones/cierre-grupo`), ejecuciones parciales, patas de Webull con su lado propio, CRUD de órdenes y posiciones protegido.
+- **Plataforma:** listados y borrados sin tope de 10 000 filas, límites por IP, correo y usuario (`TRUST_PROXY`), encabezados de seguridad, gzip,
+  índices de MongoDB al arrancar, retención de registros, tiempo límite también para el cuerpo de las respuestas.
+- **Mercado:** instituciones 13F obtenidas de la SEC, índices configurables (`INDICES_REFERENCIA`) con nombre del proveedor, limitador de Alpaca
+  ≤180/min, `GET /mercado/movimientos`; se eliminó la sincronización manual del universo y código sin uso.
+- **Riesgo:** pérdida y ganancia máximas para cualquier combinación de patas, filtros de liquidez, probabilidad de ganancia y griegas en dólares antes
+  de enviar, vencimiento objetivo de 35-45 días, etiquetas que coinciden con el número.
+- **Diseño:** cabecera de 56 px, barra inferior en móvil, tema elegible, mapa accesible y en español, glosario, configuración agrupada.
+- Propuesta de calibración de puntajes: ADR-014 (sin aplicar).
