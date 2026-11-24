@@ -25,7 +25,7 @@ const valorDe = (item, modo) => (modo.puntaje ? item.puntajes?.[modo.id] ?? null
 const textoDe = (v, modo) => (!isNum(v) ? '—' : modo.puntaje ? fmtNum(v, 0) : (v > 0 ? '+' : '') + fmtFixed(v * 100, 2) + '%');
 function colorDe(v, modo) {
   if (!isNum(v)) return 'var(--mapa-nodata)';
-  if (modo.puntaje) return `color-mix(in oklab, var(--mapa-puntaje) ${Math.round(Math.max(0, Math.min(1, (v - 30) / 65)) * 100)}%, var(--mapa-cero))`;
+  if (modo.puntaje) return `var(--mapa-p${v < 40 ? 1 : v < 60 ? 2 : v < 80 ? 3 : 4})`;
   const k = Math.round(Math.min(1, Math.abs(v) / modo.tope) * 100);
   return `color-mix(in oklab, var(${v >= 0 ? '--mapa-sube' : '--mapa-baja'}) ${k}%, var(--mapa-cero))`;
 }
