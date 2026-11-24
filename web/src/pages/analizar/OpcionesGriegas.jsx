@@ -2,14 +2,16 @@
 import { useMemo, useState } from 'react';
 import TicketOrden from '../../components/TicketOrden';
 import { cargarCadena } from '../../components/BotonOperar';
-import { intencionPara, vencimientosVigentes } from '../../utils/estrategiasOrden';
+import { diasHasta, intencionPara, vencimientosVigentes } from '../../utils/estrategiasOrden';
+import { Termino } from '../../components/Termino';
 import { SyncButton } from '../../components/SyncButton';
 import { Empty, ErrorMessage, Loading, Notice } from '../../components/States';
 import { Select } from '../../components/Field';
 import { useAsync } from '../../hooks/useAsync';
 import { mercado } from '../../api/resources';
-import { fmtFixed, fmtMoney, fmtPct, isNum } from '../../utils/format';
+import { fmtDate, fmtFixed, fmtMoney, fmtPct, isNum } from '../../utils/format';
 
+const COLUMNAS = [['IV', 'iv'], ['Δ', 'delta'], ['Γ', 'gamma'], ['Θ', 'theta'], ['ν', 'vega'], ['Bid', null], ['Ask', null]];
 const f = (v, d = 3) => (isNum(v) ? fmtFixed(v, d) : '—');
 const px = v => (isNum(v) ? fmtFixed(v, 2) : '—');
 const iv = v => (isNum(v) ? fmtPct(v, 1) : '—');
@@ -77,9 +79,9 @@ function Lado({ o, lado, onOperar }) {
   );
 }
 
-export default function OpcionesGriegas({ simbolo, empresa }) {
+export default function OpcionesGriegas({ simbolo, empresa, vencimiento = '' }) {
   const [ticket, setTicket] = useState(null);
-  const [venc, setVenc] = useState('');
+  const [venc, setVenc] = useState(vencimiento);
   const state = useAsync(() => (venc ? mercado.opcionesResumen(simbolo, { vencimiento: venc }) : cargarCadena(simbolo)), [simbolo, venc]);
   const d = state.data;
   const filas = useMemo(() => porStrike(d?.items || []), [d]);
@@ -103,26 +105,26 @@ export default function OpcionesGriegas({ simbolo, empresa }) {
     );
   }
   const vencs = vencimientosVigentes(d.vencimientos);
-  const operar = (o, accion) => setTicket({ legs: [{ accion, intencion: intencionPara(accion), contratoId: o.contratoId }], chain: d });
+  const operar = (o, accion) => setTicket({ abridor: document.activeElement, legs: [{ accion, intencion: intencionPara(accion), contratoId: o.contratoId }], chain: d });
   return (
     <div className="stack">
       <div className="toolbar">
         {vencs.length > 0 && (
           <label className="toolbar__filter"><span className="muted">Vencimiento </span>
-            <Select value={d.vencimiento || venc} onChange={setVenc} options={vencs.map(v => ({ value: v, label: v }))} aria-label="Vencimiento" />
+            <Select value={d.vencimiento || venc} onChange={setVenc} options={vencs.map(v => ({ value: v, label: `${fmtDate(v)}, ${diasHasta(v)} días` }))} aria-label="Vencimiento" />
           </label>
         )}
         {sync}
       </div>
       {state.error && <Notice tone="warning">No se pudo actualizar: {state.error.message}</Notice>}
-      <p className="muted small">Subyacente {fmtMoney(precio)} · {d.total ?? d.items.length} contratos · ITM sombreado, strike ATM resaltado.</p>
+      <p className="muted small">Acción a {fmtMoney(precio)}, {d.total ?? d.items.length} contratos. Sombreado: <Termino id="itm">dentro del dinero</Termino>. Con borde: <Termino id="atm">en el dinero</Termino>. Toca un precio para operarlo.</p>
       <Sonrisa filas={filas} precio={precio} />
-      <div className="table-wrap">
+      <div className="table-wrap chain__caja">
         <table className="table table--dense chain">
           <caption className="sr-only">Cadena de opciones de {simbolo}</caption>
           <thead>
             <tr><th colSpan="7" scope="colgroup" className="chain__grp chain__grp--call">Calls</th><th rowSpan="2" scope="col">Strike</th><th colSpan="7" scope="colgroup" className="chain__grp chain__grp--put">Puts</th></tr>
-            <tr>{['IV', 'Δ', 'Γ', 'Θ', 'ν', 'Bid', 'Ask'].map(h => <th key={'c' + h} scope="col" className="num">{h}</th>)}{['IV', 'Δ', 'Γ', 'Θ', 'ν', 'Bid', 'Ask'].map(h => <th key={'p' + h} scope="col" className="num">{h}</th>)}</tr>
+            <tr>{COLUMNAS.map(([h, id]) => <th key={'c' + h} scope="col" className="num">{id ? <Termino id={id}>{h}</Termino> : h}</th>)}{COLUMNAS.map(([h, id]) => <th key={'p' + h} scope="col" className="num">{id ? <Termino id={id}>{h}</Termino> : h}</th>)}</tr>
           </thead>
           <tbody>
             {filas.map(r => (
@@ -135,7 +137,7 @@ export default function OpcionesGriegas({ simbolo, empresa }) {
           </tbody>
         </table>
       </div>
-      {ticket && empresa && <TicketOrden open empresa={empresa} chain={ticket.chain} legs={ticket.legs} onClose={() => setTicket(null)} />}
+      {ticket && empresa && <TicketOrden open empresa={empresa} chain={ticket.chain} legs={ticket.legs} abridor={ticket.abridor} onClose={() => setTicket(null)} />}
     </div>
   );
 }

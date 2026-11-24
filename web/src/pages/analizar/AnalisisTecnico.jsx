@@ -2,6 +2,7 @@
 import { useMemo } from 'react';
 import GraficoPanel from './GraficoPanel';
 import { Empty } from '../../components/States';
+import { Termino } from '../../components/Termino';
 import { CORE_LABELS } from '../../utils/constants';
 import { resumenIndicadores } from '../../utils/indicadores';
 import { confluencia, estadoSenales, eventosSenales, soportesResistencias, etiquetaEvento } from '../../utils/senales';
@@ -24,8 +25,8 @@ function Confluencia({ conf, eventos, coresActivos }) {
   const recientes = eventos.slice(-6).reverse();
   return (
     <section className="card" aria-labelledby="conf-titulo">
-      <div className="card__header"><div><h3 id="conf-titulo">Confluencia de señales</h3><p className="muted small">Cuántas señales de tendencia (medias y MACD) apuntan en la misma dirección. RSI, estocástico y Bollinger son informativos y no se cuentan (solo cores activos: {coresActivos.map(c => CORE_LABELS[c]).join(', ') || 'ninguno'}).</p></div></div>
-      {sinCores ? <Empty title="Sin señales que contar">Activa el core Técnico o Indicadores en la configuración y asegúrate de tener al menos 20 velas.</Empty> : (
+      <div className="card__header"><div><h3 id="conf-titulo">Confluencia de señales</h3><p className="muted small">Cuántas señales de tendencia (medias y MACD) apuntan en la misma dirección. RSI, estocástico y Bollinger no se cuentan. <Termino id="core">Factores</Termino> activos: {coresActivos.map(c => CORE_LABELS[c]).join(', ') || 'ninguno'}.</p></div></div>
+      {sinCores ? <Empty title="Sin señales que contar">Activa el factor Técnico o Indicadores en «Configurar» y asegúrate de tener al menos 20 velas.</Empty> : (
         <>
           <div className="conf-resumen" role="group" aria-label="Recuento de señales">
             <div className="conf-count conf-count--up"><strong>{conf.alcistas.length}</strong><span>Alcistas</span></div>
@@ -41,7 +42,7 @@ function Confluencia({ conf, eventos, coresActivos }) {
           {conf.coinciden.length > 0 && conf.sesgo !== 'neutral' && (
             <p className="small"><strong>Coinciden:</strong> {conf.coinciden.map(s => s.nombre).join(' · ')}</p>
           )}
-          {conf.excluidas > 0 && <p className="muted small">{conf.excluidas} señales de cores apagados no se cuentan.</p>}
+          {conf.excluidas > 0 && <p className="muted small">{conf.excluidas} señales de factores apagados no se cuentan.</p>}
         </>
       )}
       {recientes.length > 0 && (
@@ -62,32 +63,32 @@ function Indicadores({ estado, resumen, evalIndicadores }) {
   const iv = metrica(evalIndicadores?.metricas, 'iv_promedio');
   const ivHv = metrica(evalIndicadores?.metricas, 'iv_hv_ratio');
   const por = id => estado.find(s => s.id === id);
-  const fila = (nombre, valor, sen, nota) => (
-    <li key={nombre} className="ind">
+  const fila = (clave, nombre, valor, sen, nota) => (
+    <li key={clave} className="ind">
       <span className="ind__n">{nombre}</span>
+      {sen && <Chip dir={sen.direccion} />}
       <strong className="ind__v">{valor}</strong>
-      {sen ? <Chip dir={sen.direccion} /> : <span className="muted small">{nota || ''}</span>}
-      {sen && <span className="muted small ind__d">{sen.detalle}</span>}
+      {(sen?.detalle || nota) && <span className="muted small ind__d">{sen?.detalle || nota}</span>}
     </li>
   );
   const f = (v, d = 2) => (isNum(v) ? fmtFixed(v, d) : '—');
   return (
     <section className="card" aria-labelledby="ind-titulo">
-      <div className="card__header"><h3 id="ind-titulo">Indicadores</h3><span className="muted small">Velas diarias almacenadas. «Informativo»: describe sobrecompra/sobreventa; el core Indicadores lee esos osciladores como momentum.</span></div>
+      <div className="card__header"><h3 id="ind-titulo">Indicadores</h3><span className="muted small">Velas diarias almacenadas. «Informativo»: describe sobrecompra o sobreventa, sin dar dirección.</span></div>
       <ul className="ind-grid">
-        {fila('RSI (14)', f(resumen.rsi, 1), por('rsi'))}
-        {fila('MACD (12/26/9)', `${f(resumen.macd, 3)} · señal ${f(resumen.macdSenal, 3)} · hist ${f(resumen.macdHist, 3)}`, por('macd'))}
-        {fila('Estocástico (14,3)', `%K ${f(resumen.estocasticoK, 1)} · %D ${f(resumen.estocasticoD, 1)}`, por('estocastico'))}
-        {fila('Bollinger (20, 2)', `${f(resumen.bollingerInf)} – ${f(resumen.bollingerSup)} · %B ${f(resumen.bollingerPctB)}`, por('bollinger'))}
-        {fila('ATR (14)', `${f(resumen.atr)} (${f(resumen.atrPct, 1)} % del precio)`, null, 'Volatilidad diaria típica')}
-        {fila('HV 20 / 60 días', `${isNum(resumen.hv20) ? fmtPct(resumen.hv20, 1) : '—'} / ${isNum(resumen.hv60) ? fmtPct(resumen.hv60, 1) : '—'}`, null, 'Volatilidad histórica anualizada')}
-        {fila('IV promedio', isNum(iv) ? fmtPct(iv, 1) : '—', null, isNum(iv) ? (isNum(ivHv) ? `IV/HV20 = ${fmtNum(ivHv, 2)}` : '') : 'Requiere el core Indicadores y contratos sincronizados')}
+        {fila('rsi', 'RSI (14)', f(resumen.rsi, 1), por('rsi'))}
+        {fila('macd', 'MACD (12/26/9)', `${f(resumen.macd, 3)} · señal ${f(resumen.macdSenal, 3)} · hist ${f(resumen.macdHist, 3)}`, por('macd'))}
+        {fila('est', 'Estocástico (14,3)', `%K ${f(resumen.estocasticoK, 1)} · %D ${f(resumen.estocasticoD, 1)}`, por('estocastico'))}
+        {fila('boll', 'Bollinger (20, 2)', `${f(resumen.bollingerInf)} – ${f(resumen.bollingerSup)} · %B ${f(resumen.bollingerPctB)}`, por('bollinger'))}
+        {fila('atr', 'ATR (14)', `${f(resumen.atr)} (${f(resumen.atrPct, 1)} % del precio)`, null, 'Volatilidad diaria típica')}
+        {fila('hv', <><Termino id="hv">HV</Termino> 20 / 60 días</>, `${isNum(resumen.hv20) ? fmtPct(resumen.hv20, 1) : '—'} / ${isNum(resumen.hv60) ? fmtPct(resumen.hv60, 1) : '—'}`, null, 'Volatilidad histórica anualizada')}
+        {fila('iv', <><Termino id="iv">IV</Termino> promedio</>, isNum(iv) ? fmtPct(iv, 1) : '—', null, isNum(iv) ? (isNum(ivHv) ? `IV/HV20 = ${fmtNum(ivHv, 2)}` : '') : 'Requiere el factor Indicadores y contratos de opciones')}
       </ul>
     </section>
   );
 }
 
-export default function AnalisisTecnico({ simbolo, velas, coresActivos, evalIndicadores, onCambio }) {
+export default function AnalisisTecnico({ simbolo, registrada = true, velas, coresActivos, evalIndicadores, onCambio }) {
   const { diarias } = velas;
   const calc = useMemo(() => ({
     niveles: soportesResistencias(diarias),
@@ -101,8 +102,8 @@ export default function AnalisisTecnico({ simbolo, velas, coresActivos, evalIndi
   return (
     <div className="stack">
       <section className="card" aria-labelledby="graf-titulo">
-        <div className="card__header"><h2 id="graf-titulo">Gráfica técnica</h2></div>
-        <GraficoPanel simbolo={simbolo} diarias={diarias} loading={velas.loading} error={velas.error} onReload={velas.reload} onCambio={onCambio} niveles={calc.niveles} eventos={eventosGrafica} />
+        <div className="card__header"><h2 id="graf-titulo">Precio y señales</h2></div>
+        <GraficoPanel simbolo={simbolo} registrada={registrada} diarias={diarias} loading={velas.loading} error={velas.error} onReload={velas.reload} onCambio={onCambio} niveles={calc.niveles} eventos={eventosGrafica} />
       </section>
       {diarias.length >= 20 && (
         <div className="grid grid--2">
