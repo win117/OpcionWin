@@ -3,10 +3,8 @@
 import { createAlpacaClient } from './alpaca.client';
 import { createSecClient } from './sec.client';
 import { createWebullClient } from './webull.client';
-import { FILERS_13F } from './institucionales';
 
 export { IntegrationError } from './errors';
-export { FILERS_13F } from './institucionales';
 export { createAlpacaClient, createSecClient, createWebullClient };
 
 const limpio = v => (typeof v === 'string' ? v.trim() : '');
@@ -22,7 +20,7 @@ export const createIntegrations = (env = process.env, fetch = globalThis.fetch) 
     sec: { configurado: sec.configurado },
     webull: { configurado: webull.configurado },
   });
-  return { alpaca, sec, webull, filers13F: FILERS_13F, estado };
+  return { alpaca, sec, webull, estado };
 };
 
 export default createIntegrations;

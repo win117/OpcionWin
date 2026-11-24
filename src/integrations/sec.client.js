@@ -3,6 +3,9 @@
 // Documentación verificada: ver src/integrations/README.md.
 import { IntegrationError } from './errors';
 import { createHttp } from './http';
+import { claveEmisor, createDescubrimiento13F } from './institucionales';
+
+export { normalizarEmisor } from './institucionales';
 
 const PROVEEDOR = 'sec';
 export const SEC_WWW = 'https://www.sec.gov';
@@ -32,41 +35,56 @@ export const formatearCik = cik => {
   return digitos.padStart(10, '0');
 };
 
-// Normaliza nombres de emisor para comparar ("Apple Inc." ≈ "APPLE INC").
-const SUFIJOS = new Set(['INC', 'INCORPORATED', 'CORP', 'CORPORATION', 'CO', 'COMPANY', 'LTD', 'LIMITED', 'PLC', 'LLC', 'LP', 'SA', 'NV', 'AG', 'HLDGS', 'HOLDINGS', 'GROUP', 'THE', 'COM', 'NEW', 'DEL', 'CL', 'CLASS', 'A', 'B', 'C']);
-export const normalizarEmisor = nombre => String(nombre ?? '')
-  .toUpperCase()
-  .replace(/&AMP;/g, '&')
-  .replace(/[^A-Z0-9& ]+/g, ' ')
-  .split(/\s+/)
-  .filter(p => p && !SUFIJOS.has(p))
-  .join(' ');
-
 const decodificar = s => s
   .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
 
 // Analizador mínimo de la tabla de información 13F (con o sin prefijo de espacio de nombres).
-export const parsearTabla13F = xml => {
-  const filas = [];
-  const bloque = /<(?:[\w-]+:)?infoTable\b[^>]*>([\s\S]*?)<\/(?:[\w-]+:)?infoTable>/gi;
-  const campo = (contenido, nombre) => {
-    const m = new RegExp(`<(?:[\\w-]+:)?${nombre}\\b[^>]*>([\\s\\S]*?)</(?:[\\w-]+:)?${nombre}>`, 'i').exec(contenido);
-    return m ? decodificar(m[1].trim()) : null;
+const ETIQUETAS = Object.fromEntries(['nameOfIssuer', 'titleOfClass', 'cusip', 'value', 'sshPrnamt', 'sshPrnamtType', 'putCall']
+  .map(n => [n, new RegExp(`<(?:[\\w-]+:)?${n}\\b[^>]*>([\\s\\S]*?)</(?:[\\w-]+:)?${n}>`, 'i')]));
+const BLOQUE = /<(?:[\w-]+:)?infoTable\b[^>]*>([\s\S]*?)<\/(?:[\w-]+:)?infoTable>/gi;
+const filaTabla = contenido => {
+  const campo = nombre => { const m = ETIQUETAS[nombre].exec(contenido); return m ? decodificar(m[1].trim()) : null; };
+  return {
+    nombreEmisor: campo('nameOfIssuer'),
+    clase: campo('titleOfClass'),
+    cusip: (campo('cusip') || '').toUpperCase(),
+    valor: Number(campo('value')) || 0,
+    cantidad: Number(campo('sshPrnamt')) || 0,
+    tipoCantidad: (campo('sshPrnamtType') || '').toUpperCase(),
+    putCall: campo('putCall'),
   };
-  let m;
-  while ((m = bloque.exec(String(xml ?? ''))) !== null) {
-    const c = m[1];
-    filas.push({
-      nombreEmisor: campo(c, 'nameOfIssuer'),
-      clase: campo(c, 'titleOfClass'),
-      cusip: (campo(c, 'cusip') || '').toUpperCase(),
-      valor: Number(campo(c, 'value')) || 0,
-      cantidad: Number(campo(c, 'sshPrnamt')) || 0,
-      tipoCantidad: (campo(c, 'sshPrnamtType') || '').toUpperCase(),
-      putCall: campo(c, 'putCall'),
-    });
-  }
-  return filas;
+};
+export const parsearTabla13F = (xml, coincide = () => true) => [...String(xml ?? '').matchAll(BLOQUE)].map(m => filaTabla(m[1])).filter(coincide);
+
+// Tablas enormes (decenas de MB): se leen por trozos y solo se conservan las filas que coinciden.
+const MAX_BYTES_TABLA = 120e6, MAX_PENDIENTE = 1e6, MAX_MS_TABLA = 120000;
+export const leerTablaPorTrozos = async (res, coincide, { maxBytes = MAX_BYTES_TABLA, maxMs = MAX_MS_TABLA } = {}) => {
+  if (!res.body?.getReader) return parsearTabla13F(await res.text(), coincide);
+  const lector = res.body.getReader(), decodificador = new TextDecoder();
+  const filas = [];
+  let pendiente = '', bytes = 0, vencido = false;
+  const limite = setTimeout(() => { vencido = true; lector.cancel().catch(() => {}); }, maxMs);
+  const error = mensaje => new IntegrationError({ proveedor: PROVEEDOR, codigo: 'RED', mensaje });
+  try {
+    for (;;) {
+      const { done, value } = await lector.read().catch(() => { throw error('Se interrumpió la descarga de una tabla 13F.'); });
+      if (vencido) throw error('Una tabla 13F tardó demasiado en descargarse.');
+      bytes += value?.length || 0;
+      pendiente += done ? decodificador.decode() : decodificador.decode(value, { stream: true });
+      let consumido = 0;
+      for (const m of pendiente.matchAll(BLOQUE)) {
+        const fila = filaTabla(m[1]);
+        if (coincide(fila)) filas.push(fila);
+        consumido = m.index + m[0].length;
+      }
+      if (consumido) pendiente = pendiente.slice(consumido);
+      if (done) return filas;
+      if (bytes > maxBytes || pendiente.length > MAX_PENDIENTE) {
+        await lector.cancel().catch(() => {});
+        throw error('Una tabla 13F excede el tamaño admitido.');
+      }
+    }
+  } finally { clearTimeout(limite); }
 };
 
 // Construye periodos a partir de companyfacts usando los frames de SEC (valores ya deduplicados).
@@ -139,8 +157,16 @@ export const createSecClient = ({
 } = {}) => {
   const agente = typeof userAgent === 'string' ? userAgent.trim() : '';
   const configurado = Boolean(agente);
+  // Algunas respuestas (tablas enormes, rangos binarios) no se leen como texto: las procesa la función marcada en el fragmento de la URL.
+  const procesos = new Map();
+  let consecutivo = 0;
+  const fetchConProceso = async (url, init) => {
+    const [destino, marca] = String(url).split('#');
+    const res = await fetchFn(destino, init), fn = procesos.get(marca);
+    return fn && res.ok ? { ok: true, status: res.status, headers: res.headers, text: () => fn(res) } : res;
+  };
   const http = createHttp({
-    proveedor: PROVEEDOR, fetch: fetchFn, timeoutMs, esperar, ahora,
+    proveedor: PROVEEDOR, fetch: typeof fetchFn === 'function' ? fetchConProceso : fetchFn, timeoutMs, esperar, ahora,
     intervaloMs: Math.max(100, Number(esperaMs) || 0), // nunca más de 10 req/s
     headers: configurado ? { 'User-Agent': agente } : {},
   });
@@ -148,6 +174,14 @@ export const createSecClient = ({
     if (!configurado) throw new IntegrationError({ proveedor: PROVEEDOR, codigo: 'SIN_CREDENCIALES', mensaje: 'Falta SEC_USER_AGENT (nombre y contacto) en el servidor.' });
     return http.request({ url, ...opciones });
   };
+
+  const procesar = async (url, headers, fn) => {
+    const marca = `p${consecutivo += 1}`;
+    procesos.set(marca, fn);
+    try { return await pedir(`${url}#${marca}`, { headers, respuesta: 'text' }); } finally { procesos.delete(marca); }
+  };
+  const leerTabla = (url, coincide) => procesar(url, {}, res => leerTablaPorTrozos(res, coincide));
+  const descubrimiento = createDescubrimiento13F({ pedir, procesar, leerTabla, ahora: ahora || Date.now });
 
   let tickers = null; // caché en memoria del archivo company_tickers.json
   const cargarTickers = async () => {
@@ -213,52 +247,80 @@ export const createSecClient = ({
     return salida;
   };
 
-  const tablaInformacion = async (cik, accn) => {
+  const urlTabla = async (cik, accn) => {
     const carpeta = `${SEC_WWW}/Archives/edgar/data/${Number(formatearCik(cik))}/${String(accn).replace(/-/g, '')}`;
     const indice = await pedir(`${carpeta}/index.json`);
     const archivos = (indice?.directory?.item || []).map(i => i.name).filter(n => /\.xml$/i.test(n) && !/^primary_doc\.xml$/i.test(n));
     const archivo = archivos.find(n => /info/i.test(n)) || archivos[0];
     if (!archivo) throw new IntegrationError({ proveedor: PROVEEDOR, status: 404, codigo: 'NO_ENCONTRADO', mensaje: `Tabla de información 13F no encontrada (${accn}).` });
-    return parsearTabla13F(await pedir(`${carpeta}/${archivo}`, { respuesta: 'text' }));
+    return `${carpeta}/${archivo}`;
   };
 
-  const tenencias13F = async ({ filers, nombreEmisor, cusip, cortes = 2 } = {}) => {
-    if (!Array.isArray(filers) || !filers.length) throw new IntegrationError({ proveedor: PROVEEDOR, codigo: 'VALIDACION', mensaje: 'Se requiere al menos un filer.' });
-    const cusipBuscado = cusip ? String(cusip).trim().toUpperCase() : null;
-    const emisorBuscado = normalizarEmisor(nombreEmisor);
-    if (!cusipBuscado && !emisorBuscado) throw new IntegrationError({ proveedor: PROVEEDOR, codigo: 'VALIDACION', mensaje: 'Se requiere nombreEmisor o cusip.' });
-    const coincide = fila => (cusipBuscado ? fila.cusip === cusipBuscado : normalizarEmisor(fila.nombreEmisor) === emisorBuscado);
-    const n = Math.max(1, Math.min(Number(cortes) || 2, 8));
-
-    const porCorte = new Map();
-    const omitidos = [];
-    for (const filer of filers) {
-      const { cik, nombre } = typeof filer === 'object' ? filer : { cik: filer, nombre: String(filer) };
-      const cik10 = formatearCik(cik);
-      let presentaciones;
-      try {
-        presentaciones = await presentaciones13F(cik10, n);
-      } catch (e) {
-        if (e?.codigo === 'NO_ENCONTRADO') { omitidos.push({ cik: cik10, motivo: e.mensaje }); continue; }
-        throw e;
-      }
-      for (const p of presentaciones) {
-        const filas = (await tablaInformacion(cik10, p.accn)).filter(f => f.tipoCantidad !== 'PRN' && !f.putCall && coincide(f));
-        if (!porCorte.has(p.fechaCorte)) porCorte.set(p.fechaCorte, { fechaCorte: p.fechaCorte, fechaPublicacion: p.fechaPublicacion, referencias: [], tenencias: [] });
-        const corte = porCorte.get(p.fechaCorte);
-        if (p.fechaPublicacion > corte.fechaPublicacion) corte.fechaPublicacion = p.fechaPublicacion;
-        corte.referencias.push(p.accn);
-        if (!filas.length) continue;
-        // Varias filas por filer (gestores, clases): se suman.
-        corte.tenencias.push({
-          institucion: nombre || cik10,
-          identificadorInstitucion: cik10,
-          acciones: filas.reduce((t, f) => t + f.cantidad, 0),
-          valorReportado: filas.reduce((t, f) => t + f.valor, 0),
-          unidad: 'USD',
-        });
-      }
+  // Las presentaciones 13F no cambian: lo leído de cada tabla se reutiliza entre usuarios y sincronizaciones.
+  const leidas = new Map();
+  const tenenciasDeTabla = async (url, clave, coincide) => {
+    const id = `${url}|${clave}`;
+    if (!leidas.has(id)) {
+      const filas = await leerTabla(url, f => f.tipoCantidad !== 'PRN' && !f.putCall && coincide(f));
+      // Varias filas por institución (gestores, clases): se suman.
+      leidas.set(id, { filas: filas.length, acciones: filas.reduce((t, f) => t + f.cantidad, 0), valorReportado: filas.reduce((t, f) => t + f.valor, 0) });
+      if (leidas.size > 1000) leidas.delete(leidas.keys().next().value);
     }
+    return leidas.get(id);
+  };
+
+  /**
+   * Tenencias de un emisor por corte trimestral, del más reciente al más antiguo. Sin `filers`, las instituciones se descubren
+   * en la SEC (institucionales.js). Un error en una institución la omite (`omitidos`); lo que faltó se resume en `datosFaltantes`.
+   */
+  const tenencias13F = async ({ filers, nombreEmisor, cusip, cortes = 2 } = {}) => {
+    if (filers != null && (!Array.isArray(filers) || !filers.length)) throw new IntegrationError({ proveedor: PROVEEDOR, codigo: 'VALIDACION', mensaje: 'Se requiere al menos un filer.' });
+    const emisorBuscado = claveEmisor(nombreEmisor);
+    if (!cusip && !emisorBuscado) throw new IntegrationError({ proveedor: PROVEEDOR, codigo: 'VALIDACION', mensaje: 'Se requiere nombreEmisor o cusip.' });
+    const n = Math.max(1, Math.min(Number(cortes) || 2, 8));
+    let cusips = cusip ? [String(cusip).trim().toUpperCase()] : null;
+
+    const porCorte = new Map(), omitidos = new Map(), datosFaltantes = [];
+    let primerError = null;
+    // Un fallo aislado no detiene a las demás instituciones; sin credenciales no tiene sentido seguir.
+    const aislar = async (cik, fn) => {
+      try { return await fn(); } catch (e) {
+        if (e?.codigo === 'SIN_CREDENCIALES') throw e;
+        primerError ||= e;
+        omitidos.set(cik, e?.mensaje || 'Error al leer el 13F.');
+        return null;
+      }
+    };
+    const tablas = []; // { cik, nombre, fechaCorte, fechaPublicacion, accn, url }
+    if (filers) {
+      for (const filer of filers) {
+        const { cik, nombre } = typeof filer === 'object' ? filer : { cik: filer, nombre: String(filer) };
+        const cik10 = formatearCik(cik);
+        for (const p of await aislar(cik10, () => presentaciones13F(cik10, n)) || []) {
+          const url = await aislar(cik10, () => urlTabla(cik10, p.accn));
+          if (url) tablas.push({ cik: cik10, nombre: nombre || cik10, ...p, url });
+        }
+      }
+    } else {
+      const d = await descubrimiento.tenedores({ nombreEmisor, cusip, cortes: n });
+      cusips = d.cusips;
+      datosFaltantes.push(...d.datosFaltantes);
+      for (const c of d.cortes) for (const t of c.tablas) tablas.push({ cik: t.cik, nombre: t.nombre, fechaCorte: c.corte, fechaPublicacion: t.publicada, accn: t.adsh, url: t.url });
+      if (!tablas.length) throw new IntegrationError({ proveedor: PROVEEDOR, codigo: 'NO_ENCONTRADO', mensaje: `Ninguna institución consultada reporta ${nombreEmisor || cusip} en su 13F.` });
+    }
+    const coincide = fila => (cusips ? cusips.includes(fila.cusip) : claveEmisor(fila.nombreEmisor) === emisorBuscado);
+    for (const t of tablas) {
+      const suma = await aislar(t.cik, () => tenenciasDeTabla(t.url, cusips ? cusips.join(',') : emisorBuscado, coincide));
+      if (!suma) continue;
+      if (!porCorte.has(t.fechaCorte)) porCorte.set(t.fechaCorte, { fechaCorte: t.fechaCorte, fechaPublicacion: t.fechaPublicacion, referencias: [], tenencias: [] });
+      const corte = porCorte.get(t.fechaCorte);
+      if (t.fechaPublicacion > corte.fechaPublicacion) corte.fechaPublicacion = t.fechaPublicacion;
+      corte.referencias.push(t.accn);
+      if (suma.filas) corte.tenencias.push({ institucion: t.nombre, identificadorInstitucion: t.cik, acciones: suma.acciones, valorReportado: suma.valorReportado, unidad: 'USD' });
+    }
+    if (!porCorte.size && primerError) throw primerError;
+    if (omitidos.size) datosFaltantes.push(`${omitidos.size} institución(es) sin leer`);
+    const lista = [...omitidos].map(([cik, motivo]) => ({ cik, motivo }));
     return [...porCorte.values()]
       .sort((a, b) => (a.fechaCorte < b.fechaCorte ? 1 : -1))
       .slice(0, n)
@@ -267,7 +329,8 @@ export const createSecClient = ({
         fechaPublicacion: c.fechaPublicacion,
         fuente: { proveedor: PROVEEDOR, fechaDato: c.fechaPublicacion, referencia: c.referencias.join(',').slice(0, 2000) },
         tenencias: c.tenencias,
-        ...(omitidos.length ? { omitidos } : {}),
+        ...(lista.length ? { omitidos: lista } : {}),
+        ...(datosFaltantes.length ? { datosFaltantes } : {}),
       }));
   };
 

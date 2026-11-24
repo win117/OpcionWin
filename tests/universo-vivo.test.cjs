@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { memoryFactory } = require('./helpers/memory.cjs');
-const { createUniversoVivo, combinarCotizacion, TTL_ABIERTO_MS, PROPIETARIO_SISTEMA } = require('../dist/api/v1/services/universo-vivo.service');
+const { createUniversoVivo, combinarCotizacion, opcionesParaIv, TTL_ABIERTO_MS, PROPIETARIO_SISTEMA } = require('../dist/api/v1/services/universo-vivo.service');
 const { createCatalogo, elegirCapitalizacion, sectorDeSic, trimestres } = require('../dist/api/v1/services/catalogo-universo.service');
 const { conReintento, createScreener } = require('../dist/api/v1/services/screener.service');
 const { createSecClient } = require('../dist/integrations/sec.client');
@@ -16,13 +16,13 @@ const limite = () => Object.assign(new Error('429'), { name: 'IntegrationError',
 // 5 símbolos: dos clases de la misma empresa, uno extranjero, uno sin opciones y uno que dejó de cotizar.
 function fakes({ abierto = true, fallarIv = 0 } = {}) {
   const llamadas = { cotizaciones: [], velas: [], opciones: 0, perfiles: [], listar: 0 };
-  const estado = { precio: 100, abierto, caido: false, fallarIv };
+  const estado = { precio: 100, abierto, caido: false, fallarIv, edadIv: 60000, sinCatalogo: false };
   const ACT = [['UNO', true], ['DOSA', true], ['DOSB', true], ['EXTR', true], ['SINOP', false], ['VIEJA', true]];
   const CIK = { UNO: '0000000001', DOSA: '0000000002', DOSB: '0000000002', EXTR: '0000000003', SINOP: '0000000004', VIEJA: '0000000005' };
   const integraciones = {
     alpaca: {
       feed: 'iex', configurado: true,
-      listarActivos: async () => { llamadas.listar++; return ACT.map(([simbolo, opciones]) => ({ simbolo, nombre: simbolo + ' Corp Class A Common Stock', negociable: true, opciones })); },
+      listarActivos: async () => { llamadas.listar++; if (estado.sinCatalogo) throw Object.assign(new Error('red'), { name: 'IntegrationError', codigo: 'RED', mensaje: 'Sin red.' }); return ACT.map(([simbolo, opciones]) => ({ simbolo, nombre: simbolo + ' Corp Class A Common Stock', negociable: true, opciones })); },
       reloj: async () => ({ abierto: estado.abierto }),
       cotizacionesLote: async (lista, { feed } = {}) => {
         llamadas.cotizaciones.push({ n: lista.length, feed });
@@ -30,7 +30,7 @@ function fakes({ abierto = true, fallarIv = 0 } = {}) {
         return Object.fromEntries(lista.map(s => [s, { ultimo: feed ? 99 : estado.precio, cierre: 98, cierreAnterior: 95, volumen: 1e6, apertura: 96, maximo: 101, minimo: 94, fechaSesion: iso(AHORA - 13 * 3600000), fechaDato: iso(s === 'VIEJA' ? AHORA - 20 * DIA : AHORA - 60000) }]));
       },
       velasLote: async (lista, o) => { llamadas.velas.push(o.feed); return Object.fromEntries(lista.map((s, k) => [s, Array.from({ length: 260 }, (_, i) => { const c = 80 + (k ? -1 : 1) * i * 0.05 + Math.sin(i / 3); return { fecha: iso(AHORA - (260 - i) * DIA), apertura: c, maximo: c + 1, minimo: c - 1, cierre: c, volumen: 1e6 }; })])); },
-      snapshotsOpciones: async s => { llamadas.opciones++; if (estado.fallarIv > 0) { estado.fallarIv--; throw limite(); } return [{ contratoExternoId: s + '261218C00100000', bid: 1, ask: 1.1, volatilidadImplicita: 0.4, griegas: {} }]; },
+      snapshotsOpciones: async s => { llamadas.opciones++; if (estado.fallarIv > 0) { estado.fallarIv--; throw limite(); } return [{ contratoExternoId: s + '261218C00100000', bid: 1, ask: 1.1, volatilidadImplicita: 0.4, griegas: {}, fechaDato: iso(AHORA - estado.edadIv) }]; },
     },
     sec: {
       tickers: async () => new Map(Object.entries(CIK).map(([s, cik]) => [s, { cik }])),
@@ -99,9 +99,10 @@ test('Pasada completa: ranking automático, IV, perfiles y descarte de extranjer
   const uno = m.items.find(i => i.simbolo === 'UNO');
   assert.equal(uno.nombre, 'UNO Corp'); assert.equal(uno.sector, 'Tecnología'); assert.equal(uno.precio, 100); assert.equal(uno.capitalizacion, 5e10);
   assert.ok(uno.puntajes.LONG_CALL >= 0 && uno.cambio5d != null);
+  assert.equal(uno.ivPromedio, 0.4); assert.ok(uno.hv20 > 0);
   assert.equal(u.estado().fase, 'lista'); assert.equal(u.estado().conIv, 3, 'el límite del proveedor se reintenta, no se pierde el dato');
   assert.ok(f.llamadas.velas.every(x => x === 'sip'));
-  const r = await createScreener({ integraciones: f.integraciones, factory: memoryFactory(), universo: u }).ranking({ userId: 'u', database: 'mongodb' }, { limite: 2 });
+  const r = await createScreener({ factory: memoryFactory(), universo: u }).ranking({ userId: 'u', database: 'mongodb' }, { limite: 2 });
   assert.equal(r.estrategias.LONG_CALL.length, 2); assert.equal(r.universo.total, 3); assert.equal(r.universo.fase, 'lista');
 });
 
@@ -141,6 +142,79 @@ test('Persistencia: un reinicio recupera el ranking al instante y sin volver a p
   assert.ok(!g.llamadas.perfiles.includes('0000000001'), 'el giro ya conocido se reutiliza');
   assert.equal((await factory('screener', { userId: 'otro', database: 'mongodb' }).list({})).length, 0);
   assert.equal((await factory('screener', { userId: PROPIETARIO_SISTEMA, database: 'mongodb' }).list({})).length, 3);
+});
+
+test('Catálogo caído: espera creciente de 1 a 30 minutos, error visible y recuperación', async () => {
+  let t = AHORA;
+  const f = fakes(), u = crear(f, { ahora: () => t });
+  f.estado.sinCatalogo = true;
+  await u.actualizarAhora();
+  assert.equal(u.estado().fase, 'error'); assert.match(u.estado().catalogo.error, /Sin red/); assert.match(u.estado().aviso, /Sin red/);
+  assert.equal(u.estado().catalogo.actualizadoEn, null);
+  for (const [espera, esperadas] of [[30000, 1], [31000, 2], [61000, 2], [60000, 3]]) { t += espera; await u.actualizarAhora(); assert.equal(f.llamadas.listar, esperadas); }
+  await assert.rejects(u.mapa(), e => e.output.statusCode === 503);
+  assert.equal(f.llamadas.listar, 3, 'durante la espera no se consulta al proveedor');
+  for (let i = 0; i < 6; i++) { t += 30 * 60000; await u.actualizarAhora(); }
+  assert.equal(f.llamadas.listar, 9, 'la espera no pasa de 30 minutos');
+  f.estado.sinCatalogo = false; t += 30 * 60000;
+  await u.actualizarAhora();
+  assert.equal(u.estado().fase, 'lista'); assert.equal(u.estado().catalogo.error, undefined); assert.ok(u.estado().catalogo.actualizadoEn);
+});
+
+test('Arranque: con datos guardados la fase es «lista» aunque el proveedor esté caído', async () => {
+  const f = fakes(), factory = memoryFactory();
+  await crear(f, { factory }).actualizarAhora();
+  const g = fakes(); g.estado.sinCatalogo = true; g.estado.caido = true;
+  const u = crear(g, { factory });
+  u.iniciar();
+  try {
+    for (let i = 0; i < 50 && !u.listo(); i++) await new Promise(r => setTimeout(r, 5));
+    assert.equal(u.estado().fase, 'lista'); assert.equal(u.filas().length, 3);
+  } finally { u.detener(); }
+});
+
+test('Guardado: una fila inválida no impide guardar las demás y queda registrada', async () => {
+  const f = fakes(), factory = memoryFactory(), previa = f.integraciones.alpaca.velasLote;
+  f.integraciones.alpaca.velasLote = async (l, o) => { const v = await previa(l, o); v.UNO[100].maximo = undefined; return v; };
+  const errores = [], original = console.error;
+  console.error = (...a) => errores.push(a.join(' '));
+  try { await crear(f, { factory }).actualizarAhora(); } finally { console.error = original; }
+  const filas = await factory('screener', { userId: PROPIETARIO_SISTEMA, database: 'mongodb' }).list({});
+  assert.deepEqual(filas.map(x => x.document.simbolo).sort(), ['DOSA', 'DOSB']);
+  assert.ok(errores.some(e => /1 fila\(s\) no se guardan\. UNO/.test(e)), errores.join('|'));
+});
+
+test('Movimientos: alzas, bajas y volumen inusual desde memoria, sin consultar proveedores', async () => {
+  let t = AHORA;
+  const f = fakes(), u = crear(f, { ahora: () => t });
+  assert.deepEqual(u.movimientos(), { abierto: null, actualizadoEn: null, desactualizado: true, total: 0, alzas: [], bajas: [], volumenInusual: [] });
+  const previa = f.integraciones.alpaca.cotizacionesLote;
+  f.integraciones.alpaca.cotizacionesLote = async (l, o) => { const q = await previa(l, o); if (q.DOSA) q.DOSA.ultimo = 90; if (q.DOSB) q.DOSB.volumen = 3e6; return q; };
+  await u.actualizarAhora();
+  const antes = JSON.stringify(f.llamadas), m = u.movimientos();
+  assert.equal(JSON.stringify(f.llamadas), antes);
+  assert.equal(m.abierto, true); assert.equal(m.desactualizado, false); assert.equal(m.total, 3);
+  assert.deepEqual(m.alzas.map(i => i.simbolo), ['DOSB', 'UNO']); assert.deepEqual(m.bajas.map(i => i.simbolo), ['DOSA']);
+  assert.deepEqual(m.volumenInusual.map(i => [i.simbolo, i.volumenRelativo]), [['DOSB', 3], ['DOSA', 1], ['UNO', 1]]);
+  assert.deepEqual(m.alzas[1], { simbolo: 'UNO', nombre: 'UNO Corp', precio: 100, cambioPct: 0.052632, volumenRelativo: 1, capitalizacion: 5e10 });
+  t += TTL_ABIERTO_MS + 1;
+  assert.equal(u.movimientos().desactualizado, true);
+});
+
+test('Volatilidad implícita: solo opciones de menos de una sesión y en el dinero', async () => {
+  const velas = ['2026-11-19', '2026-11-20', '2026-11-23', '2026-11-24'].map(d => ({ fecha: d + 'T05:00:00Z' }));
+  const op = (strike, fechaDato, extra = {}) => ({ strike, tipo: 'call', vencimiento: '2026-12-18', volatilidadImplicita: 0.3, fechaDato, ...extra });
+  const base = { precio: 100, velas, hoy: '2026-11-24' }, hoy = '2026-11-24T16:00:00Z', ayer = '2026-11-23T20:00:00Z';
+  // Abierto: valen hoy y la sesión anterior; cerrado (con la sesión de hoy terminada): solo hoy.
+  const lista = [op(95, hoy), op(99, hoy), op(102, ayer), op(101, '2026-11-20T20:00:00Z'), op(100, null), op(100, hoy, { volatilidadImplicita: null })];
+  assert.deepEqual(opcionesParaIv(lista, { ...base, abierto: true }).map(o => o.strike), [99, 102]);
+  assert.deepEqual(opcionesParaIv(lista, { ...base, abierto: false }).map(o => o.strike), [99, 95]);
+  // Fin de semana: la última sesión es la del viernes.
+  assert.deepEqual(opcionesParaIv([op(100, '2026-11-20T20:00:00Z'), op(101, '2026-11-19T20:00:00Z')], { precio: 100, velas: velas.slice(0, 2), hoy: '2026-11-22', abierto: false }).map(o => o.strike), [100]);
+  const f = fakes(), u = crear(f);
+  f.estado.edadIv = 5 * DIA;
+  await u.actualizarAhora();
+  assert.equal(u.estado().conIv, 0, 'una IV de hace 5 días no se usa');
 });
 
 test('conReintento: reintenta solo el límite del proveedor', async () => {

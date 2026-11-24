@@ -110,10 +110,14 @@ export function createSincronizador({ integraciones, factory = repository }) {
     },
     async institucional(ctx, simbolo) {
       const empresa = await empresaPorSimbolo(ctx, simbolo, factory);
+      // Las instituciones se descubren en la SEC; `filers13F` solo permite fijar un panel (p. ej. en pruebas).
       const reportes = await sec.tenencias13F({ filers: integraciones.filers13F, nombreEmisor: empresa.nombre, cortes: 2 });
       for (const r of reportes) {
         await guardar('institucional', ctx, idDeterminista(empresa._id, '13f', iso(r.fechaCorte)), {
-          empresaId: empresa._id, fuente: r.fuente, fechaCorte: r.fechaCorte, fechaPublicacion: r.fechaPublicacion, tenencias: r.tenencias,
+          empresaId: empresa._id,
+          // Lo que no se pudo leer queda escrito junto a los datos guardados.
+          fuente: r.datosFaltantes?.length ? { ...r.fuente, referencia: `Datos faltantes: ${r.datosFaltantes.join('; ')} | ${r.fuente.referencia || ''}`.slice(0, 2000) } : r.fuente,
+          fechaCorte: r.fechaCorte, fechaPublicacion: r.fechaPublicacion, tenencias: r.tenencias,
         }, factory);
       }
       return reportes.length;

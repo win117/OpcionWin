@@ -10,7 +10,8 @@
 import boom from '@hapi/boom';
 import { conReintento, parsearOcc, puntuarSimbolo, VERSION } from './screener.service';
 import { createCatalogo } from './catalogo-universo.service';
-import { createMercadoReloj } from './mercado-reloj.service';
+import { createMercadoReloj, diaNY } from './mercado-reloj.service';
+import { validated } from './crud.service';
 import { ESTRATEGIAS } from '../models/shared';
 import { guardarLote, idDeterminista, todos } from './registros';
 
@@ -28,13 +29,16 @@ export const TTL_ABIERTO_MS = 10000;
 export const TTL_CERRADO_MS = MIN;
 export const REPUNTUAR_ABIERTO_MS = 15 * MIN;
 export const REPUNTUAR_CERRADO_MS = 6 * 60 * MIN;
-// 600 ms entre solicitudes = 100/min: deja la mitad del cupo de Alpaca (200/min) para lo que hagan los usuarios.
-export const RITMO_IV_MS = 600;
+// 800 ms entre solicitudes = 75/min: deja más de la mitad del cupo de Alpaca (200/min) para el mapa y lo que hagan los usuarios.
+export const RITMO_IV_MS = 800;
 const IV_VIGENTE_MS = 2 * 60 * MIN;
+// Si el catálogo falla se reintenta a 1, 2, 4… hasta 30 minutos.
+export const ESPERA_CATALOGO_MIN_MS = MIN;
+export const ESPERA_CATALOGO_MAX_MS = 30 * MIN;
+const STRIKES_CERCANOS = 2; // por vencimiento y tipo
+const MAX_MOVIMIENTOS = 10;
 
 const redondear = (x, d = 4) => (Number.isFinite(x) ? Math.round(x * 10 ** d) / 10 ** d : null);
-const formatoNY = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
-const diaNY = t => formatoNY.format(new Date(t));
 const variacion = (velas, n) => {
   const a = velas.at(-1 - n)?.cierre, b = velas.at(-1)?.cierre;
   return a > 0 && Number.isFinite(b) ? redondear(b / a - 1, 6) : null;
@@ -65,6 +69,23 @@ export function combinarCotizacion(iex, sip, { abierto, hoy }) {
   };
 }
 
+/**
+ * Opciones útiles para la volatilidad implícita: cotizadas hace menos de una sesión (la de hoy o, con el mercado abierto, la
+ * anterior) y en el dinero (por vencimiento y tipo, los dos strikes más cercanos al precio: ahí la IV es más líquida y no la
+ * distorsiona el sesgo de los strikes lejanos). Las sesiones salen de las propias velas, así que respetan los feriados.
+ */
+export function opcionesParaIv(opciones, { precio, velas, abierto, hoy }) {
+  const sesiones = velas.map(v => diaNY(v.fecha)).filter(d => (abierto ? d < hoy : d <= hoy));
+  const desde = sesiones.at(-1);
+  const grupos = new Map();
+  for (const o of opciones) {
+    if (!desde || !o.fechaDato || diaNY(o.fechaDato) < desde || !(o.volatilidadImplicita > 0)) continue;
+    const g = o.vencimiento + o.tipo;
+    grupos.set(g, [...(grupos.get(g) || []), o]);
+  }
+  return [...grupos.values()].flatMap(g => g.sort((a, b) => Math.abs(a.strike - precio) - Math.abs(b.strike - precio)).slice(0, STRIKES_CERCANOS));
+}
+
 export function createUniversoVivo({ integraciones, factory, catalogo, tamano = 500, ahora = Date.now, ritmoIvMs = RITMO_IV_MS, esperar = pausa, esperarLimite = pausa, bases = ['mongodb', 'supabase'] } = {}) {
   const alpaca = () => integraciones.alpaca;
   const reloj = createMercadoReloj({ integraciones, ahora });
@@ -75,6 +96,7 @@ export function createUniversoVivo({ integraciones, factory, catalogo, tamano = 
   const fichas = new Map();   // símbolo → { t, velas }
   const rechazadas = new Set(); // CIK que no son empresas con reportes trimestrales
   let recuperado = false, fase = 'sin_iniciar', error = null, puntuadoEn = null, catalogoEn = null, baseGuardado = null;
+  let errorCatalogo = null, fallosCatalogo = 0, proximoCatalogo = 0;
   let cacheMapa = null, mapaPendiente = null, catalogoPendiente = null, pasadaPendiente = null, temporizador = null, activo = false;
 
   // Con el universo ya perfilado, una recién llegada se oculta hasta confirmar que es una empresa operativa (y no un fideicomiso).
@@ -107,7 +129,19 @@ export function createUniversoVivo({ integraciones, factory, catalogo, tamano = 
   async function asegurarCatalogo() {
     const vencido = catalogoEn == null || ahora() - catalogoEn > DIA;
     if (!vencido) return;
-    if (!catalogoPendiente) catalogoPendiente = construirCatalogo().finally(() => { catalogoPendiente = null; });
+    if (!catalogoPendiente) {
+      if (ahora() < proximoCatalogo) { // en espera tras un fallo: no se insiste con los proveedores
+        if (empresas.size) return;
+        throw boom.serverUnavailable(errorCatalogo);
+      }
+      catalogoPendiente = construirCatalogo().then(() => { errorCatalogo = null; fallosCatalogo = 0; proximoCatalogo = 0; }, e => {
+        errorCatalogo = 'No se pudo obtener el catálogo de empresas: ' + (e?.mensaje || e?.output?.payload?.message || 'error interno') + ' Se reintentará.';
+        proximoCatalogo = ahora() + Math.min(ESPERA_CATALOGO_MAX_MS, ESPERA_CATALOGO_MIN_MS * 2 ** fallosCatalogo);
+        fallosCatalogo += 1;
+        console.error('[universo] catálogo:', e?.mensaje || e?.message);
+        throw e;
+      }).finally(() => { catalogoPendiente = null; });
+    }
     // Si ya hay un catálogo (aunque sea de ayer), se usa mientras llega el nuevo.
     if (empresas.size) { catalogoPendiente.catch(() => {}); return; }
     await catalogoPendiente;
@@ -180,7 +214,8 @@ export function createUniversoVivo({ integraciones, factory, catalogo, tamano = 
   // ---- Puntajes
   function puntuarFila(s, velas) {
     const q = cacheMapa?.porSimbolo.get(s), dato = iv.get(s);
-    const r = puntuarSimbolo({ simbolo: s, velas, opciones: dato && ahora() - dato.t < DIA ? dato.opciones : [], fechaReferencia: new Date(ahora()).toISOString() });
+    const opciones = dato ? opcionesParaIv(dato.opciones, { precio: q?.precio ?? velas.at(-1).cierre, velas, abierto: Boolean(cacheMapa?.abierto), hoy: diaNY(ahora()) }) : [];
+    const r = puntuarSimbolo({ simbolo: s, velas, opciones, fechaReferencia: new Date(ahora()).toISOString() });
     const vols = velas.slice(-20).map(v => v.volumen).filter(Number.isFinite);
     const anio = velas.slice(-252), esteAnio = new Date(ahora()).getUTCFullYear();
     const cierrePrevio = velas.filter(v => new Date(v.fecha).getUTCFullYear() < esteAnio).at(-1)?.cierre;
@@ -198,7 +233,7 @@ export function createUniversoVivo({ integraciones, factory, catalogo, tamano = 
     const dia = n => new Date(ahora() + n * DIA).toISOString().slice(0, 10);
     const filtro = { vencimientoDesde: dia(20), vencimientoHasta: dia(50), strikeMin: redondear(precio * 0.95, 2), strikeMax: redondear(precio * 1.05, 2), limite: 200, paginas: 1 };
     const snaps = await conReintento(() => alpaca().snapshotsOpciones(s, filtro), { esperar: esperarLimite });
-    iv.set(s, { t: ahora(), opciones: snaps.map(x => ({ ...parsearOcc(x.contratoExternoId), volatilidadImplicita: x.volatilidadImplicita, bid: x.bid, ask: x.ask, griegas: x.griegas })).filter(o => o.tipo && o.strike) });
+    iv.set(s, { t: ahora(), opciones: snaps.map(x => ({ ...parsearOcc(x.contratoExternoId), volatilidadImplicita: x.volatilidadImplicita, fechaDato: x.fechaDato })).filter(o => o.tipo && o.strike) });
   }
   async function completarIv(series) {
     const orden = [...series.keys()].filter(s => !(iv.get(s) && ahora() - iv.get(s).t < IV_VIGENTE_MS))
@@ -239,7 +274,7 @@ export function createUniversoVivo({ integraciones, factory, catalogo, tamano = 
   function lanzar() {
     if (!pasadaPendiente) {
       pasadaPendiente = pasada()
-        .catch(e => { error = e?.mensaje || 'No se pudo calcular el ranking; se reintentará.'; fase = puntajes.size ? 'lista' : 'error'; })
+        .catch(e => { error = e?.mensaje || errorCatalogo || 'No se pudo calcular el ranking; se reintentará.'; fase = puntajes.size ? 'lista' : 'error'; })
         .finally(() => { pasadaPendiente = null; });
     }
     return pasadaPendiente;
@@ -258,13 +293,24 @@ export function createUniversoVivo({ integraciones, factory, catalogo, tamano = 
 
   // ---- Persistencia (mejor esfuerzo): mismo recurso `screener`, propietario interno.
   const CAMPOS_EMPRESA = ['cik', 'sic', 'sector', 'industria', 'acciones', 'capitalizacion'];
+  const describir = e => e?.mensaje || e?.output?.payload?.message || e?.code || e?.name || 'error';
+  const candidatas = () => [...puntajes.values()].filter(p => empresas.get(p.simbolo)?.sic != null).map(p => { // solo empresas confirmadas
+    const e = empresas.get(p.simbolo);
+    return { id: idDeterminista(PROPIETARIO_SISTEMA, p.simbolo), datos: { ...p, ...Object.fromEntries(CAMPOS_EMPRESA.filter(c => e[c] != null).map(c => [c, e[c]])) } };
+  });
   async function guardar() {
-    const items = [...puntajes.values()].filter(p => empresas.get(p.simbolo)?.sic != null).map(p => { // solo empresas confirmadas
-      const e = empresas.get(p.simbolo);
-      return { id: idDeterminista(PROPIETARIO_SISTEMA, p.simbolo), datos: { ...p, ...Object.fromEntries(CAMPOS_EMPRESA.filter(c => e[c] != null).map(c => [c, e[c]])) } };
-    });
+    const items = [];
+    let descartadas = 0, motivo;
+    // Cada fila se valida por separado: una defectuosa no impide guardar las demás.
+    for (const item of candidatas()) {
+      try { await validated('screener', { ...item.datos, usuarioId: PROPIETARIO_SISTEMA, _id: item.id }); items.push(item); } catch (e) {
+        descartadas += 1;
+        motivo ||= item.datos.simbolo + ': ' + describir(e);
+      }
+    }
+    if (descartadas) console.error(`[universo] ${descartadas} fila(s) no se guardan. ${motivo}`);
     for (const database of baseGuardado ? [baseGuardado] : bases) {
-      try { await guardarLote('screener', { userId: PROPIETARIO_SISTEMA, database }, items, factory); baseGuardado = database; return; } catch { /* se intenta la otra base */ }
+      try { await guardarLote('screener', { userId: PROPIETARIO_SISTEMA, database }, items, factory); baseGuardado = database; return; } catch (e) { console.error('[universo] no se pudo guardar en', database + ':', describir(e)); }
     }
   }
   async function recuperar() {
@@ -282,9 +328,9 @@ export function createUniversoVivo({ integraciones, factory, catalogo, tamano = 
         }
         baseGuardado = database;
         recuperado = true;
-        if (fase === 'sin_iniciar') fase = 'lista';
+        if (puntuadoEn == null) fase = 'lista'; // hay un ranking que mostrar mientras se calcula el nuevo
         return;
-      } catch { /* base no disponible */ }
+      } catch (e) { console.error('[universo] no se pudo leer de', database + ':', describir(e)); }
     }
   }
 
@@ -301,7 +347,11 @@ export function createUniversoVivo({ integraciones, factory, catalogo, tamano = 
     listo: () => puntajes.size > 0 && (puntuadoEn != null || recuperado),
     filas: () => [...puntajes.values()].filter(p => empresas.has(p.simbolo)),
     async simbolos() { await asegurarCatalogo(); return visibles().map(e => e.simbolo); },
-    estado: () => ({ automatico: activo, fase, conIv: [...puntajes.values()].filter(p => p.ivPromedio != null).length, ...(error ? { aviso: error } : {}) }),
+    estado: () => ({
+      automatico: activo, fase, conIv: [...puntajes.values()].filter(p => p.ivPromedio != null).length,
+      catalogo: { actualizadoEn: catalogoEn == null ? null : new Date(catalogoEn), ...(errorCatalogo ? { error: errorCatalogo, proximoIntento: new Date(proximoCatalogo) } : {}) },
+      ...(error || errorCatalogo ? { aviso: error || errorCatalogo } : {}),
+    }),
     // Una pasada completa (para pruebas y scripts).
     async actualizarAhora() { const previo = activo; activo = true; await lanzar(); activo = previo; },
     recuperar,
@@ -311,10 +361,32 @@ export function createUniversoVivo({ integraciones, factory, catalogo, tamano = 
       const items = m.items.filter(i => empresas.has(i.simbolo)).map(i => {
         const p = puntajes.get(i.simbolo);
         return { simbolo: i.simbolo, nombre: i.nombre, sector: i.sector, industria: i.industria, precio: i.precio, cambioPct: i.cambioPct,
-          volumen: i.volumen, capitalizacion: i.capitalizacion, cambio5d: p?.cambio5d ?? null, cambio21d: p?.cambio21d ?? null, puntajes: p?.puntajes ?? null };
+          volumen: i.volumen, capitalizacion: i.capitalizacion, cambio5d: p?.cambio5d ?? null, cambio21d: p?.cambio21d ?? null,
+          ivPromedio: p?.ivPromedio ?? null, hv20: p?.hv20 ?? null, puntajes: p?.puntajes ?? null };
       });
       return { abierto: m.abierto, actualizadoEn: m.actualizadoEn, desactualizado: Boolean(m.desactualizado), total: items.length, items,
         fuente: { proveedor: 'alpaca', tiempoReal: alpaca().feed || 'iex', consolidado: 'delayed_sip', empresas: 'sec' } };
+    },
+
+    /** Alzas, bajas y volumen inusual del día con lo que ya está en memoria (no consulta a proveedores). */
+    movimientos() {
+      const base = cacheMapa ? cacheMapa.items : [...puntajes.values()];
+      const items = base.filter(i => empresas.has(i.simbolo)).map(i => {
+        const promedio = puntajes.get(i.simbolo)?.volumenPromedio;
+        return { simbolo: i.simbolo, nombre: i.nombre, precio: i.precio ?? null, cambioPct: i.cambioPct ?? null,
+          // Volumen acumulado del día entre el promedio diario de 20 sesiones (1 = un día normal completo).
+          volumenRelativo: cacheMapa && promedio > 0 && i.volumen != null ? redondear(i.volumen / promedio, 2) : null,
+          capitalizacion: i.capitalizacion ?? empresas.get(i.simbolo).capitalizacion ?? null };
+      });
+      const primeros = (filtro, orden) => items.filter(filtro).sort((a, b) => orden(a, b) || a.simbolo.localeCompare(b.simbolo)).slice(0, MAX_MOVIMIENTOS);
+      const fechaGuardada = base.reduce((max, i) => Math.max(max, new Date(i.actualizadoEn ?? 0).getTime()), 0);
+      return {
+        abierto: cacheMapa ? cacheMapa.abierto : null, actualizadoEn: cacheMapa ? cacheMapa.actualizadoEn : fechaGuardada ? new Date(fechaGuardada) : null,
+        desactualizado: !cacheMapa || ahora() >= cacheMapa.expira, total: items.length,
+        alzas: primeros(i => i.cambioPct > 0, (a, b) => b.cambioPct - a.cambioPct),
+        bajas: primeros(i => i.cambioPct < 0, (a, b) => a.cambioPct - b.cambioPct),
+        volumenInusual: primeros(i => i.volumenRelativo > 0, (a, b) => b.volumenRelativo - a.volumenRelativo),
+      };
     },
 
     async ficha(simbolo) {

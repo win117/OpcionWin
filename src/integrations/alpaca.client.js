@@ -8,6 +8,9 @@ export const ALPACA_PAPER_URL = 'https://paper-api.alpaca.markets';
 export const ALPACA_DATA_URL = 'https://data.alpaca.markets';
 const PROVEEDOR = 'alpaca';
 const MAX_PAGINAS = 20;
+// La cuenta permite 200 solicitudes por minuto. Ráfaga de 30 + una cada 400 ms (150/min) ⇒ nunca más de 180 en 60 segundos.
+export const INTERVALO_MS = 400;
+export const RAFAGA = 30;
 
 const ESTADOS_ORDEN = {
   pending_new: 'enviada',
@@ -49,6 +52,27 @@ const simboloValido = s => typeof s === 'string' && /^[A-Za-z0-9.\-/]{1,32}$/.te
 const validacion = mensaje => new IntegrationError({ proveedor: PROVEEDOR, codigo: 'VALIDACION', mensaje });
 
 const normalizarUrl = u => String(u).trim().replace(/\/+$/, '').toLowerCase();
+
+// Cubo de fichas con dos colas: las llamadas de operación (órdenes, posiciones, cuenta) pasan antes que los datos de mercado.
+export const createLimitador = ({ intervaloMs = INTERVALO_MS, rafaga = RAFAGA, esperar = ms => new Promise(r => { setTimeout(r, ms); }), ahora = Date.now } = {}) => {
+  const urgentes = [], normales = [];
+  let fichas = rafaga, ultima = ahora(), activo = false;
+  const atender = async () => {
+    if (activo) return;
+    activo = true;
+    while (urgentes.length || normales.length) {
+      const t = ahora();
+      fichas = Math.min(rafaga, fichas + Math.max(0, t - ultima) / intervaloMs);
+      ultima = t;
+      if (fichas >= 1) { fichas -= 1; (urgentes.shift() || normales.shift())(); } else await esperar(Math.ceil((1 - fichas) * intervaloMs));
+    }
+    activo = false;
+  };
+  return urgente => {
+    if (!intervaloMs) return Promise.resolve(); // sin límite (pruebas)
+    return new Promise(resolve => { (urgente ? urgentes : normales).push(resolve); atender(); });
+  };
+};
 
 // --- Normalizadores (exportados para pruebas e integración) ---
 export const normalizarVela = b => ({
@@ -197,7 +221,8 @@ export const createAlpacaClient = ({
   dataUrl = ALPACA_DATA_URL,
   tradingUrl = ALPACA_PAPER_URL,
   timeoutMs,
-  intervaloMs = 100,
+  intervaloMs = INTERVALO_MS,
+  rafaga = RAFAGA,
   esperar,
   ahora,
   maxPaginas = MAX_PAGINAS,
@@ -213,7 +238,7 @@ export const createAlpacaClient = ({
   const configurado = Boolean(id && secreto);
 
   const http = createHttp({
-    proveedor: PROVEEDOR, fetch: fetchFn, timeoutMs, intervaloMs, esperar, ahora,
+    proveedor: PROVEEDOR, fetch: fetchFn, timeoutMs, esperar, ahora,
     secretos: [id, secreto],
     headers: configurado ? { 'APCA-API-KEY-ID': id, 'APCA-API-SECRET-KEY': secreto } : {},
   });
@@ -225,8 +250,10 @@ export const createAlpacaClient = ({
     if (!simboloValido(s)) throw validacion('Símbolo inválido.');
     return s.trim().toUpperCase();
   };
-  const datos = (ruta, query) => { exigirCredenciales(); return http.request({ url: `${baseDatos}${ruta}`, query }); };
-  const trading = (ruta, opciones = {}) => { exigirCredenciales(); return http.request({ url: `${ALPACA_PAPER_URL}${ruta}`, ...opciones }); };
+  const turno = createLimitador({ intervaloMs, rafaga, esperar, ahora });
+  const esOperacion = ruta => /^\/v2\/(orders|positions|account)\b/.test(ruta);
+  const datos = async (ruta, query) => { exigirCredenciales(); await turno(false); return http.request({ url: `${baseDatos}${ruta}`, query }); };
+  const trading = async (ruta, opciones = {}) => { exigirCredenciales(); await turno(esOperacion(ruta)); return http.request({ url: `${ALPACA_PAPER_URL}${ruta}`, ...opciones }); };
 
   // Recorre páginas con next_page_token hasta agotar, alcanzar `tope` elementos o maxPaginas.
   const paginar = async (llamar, extraer, tope = Infinity, paginasMax = maxPaginas) => {

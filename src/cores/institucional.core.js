@@ -1,6 +1,7 @@
 // Core institucional: cambio de tenencias 13F entre los dos cortes más recientes.
 // 13F se publica hasta 45 días después del trimestre: describe posiciones pasadas, no flujo en tiempo real.
-// Entrada: reportes por corte (SEC EDGAR 13F-HR, information table; filers fijos en src/integrations/institucionales.js),
+// Entrada: reportes por corte (SEC EDGAR 13F-HR, information table; las instituciones se descubren en la SEC: las mayores
+// que reportan el valor, src/integrations/institucionales.js),
 // con tenencias = acciones (sshPrnamt, tipo SH, sin opciones put/call) por institución.
 // Panel balanceado: el cambio y la amplitud se miden solo con las instituciones presentes en AMBOS cortes. Una institución
 // que falta en un corte puede no haber presentado aún su 13F (hasta 45 días) o no coincidir por nombre de emisor; contarla

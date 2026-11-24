@@ -2,11 +2,14 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createAlpacaClient, construirCuerpoOrden, mapearEstadoOrden } = require('../dist/integrations/alpaca.client');
-const { createSecClient, parsearTabla13F, normalizarEmisor } = require('../dist/integrations/sec.client');
+const { createSecClient, parsearTabla13F, leerTablaPorTrozos, normalizarEmisor } = require('../dist/integrations/sec.client');
 const { createWebullClient } = require('../dist/integrations/webull.client');
 const { createIntegrations } = require('../dist/integrations');
 const { IntegrationError } = require('../dist/integrations/errors');
-const { FILERS_13F } = require('../dist/integrations/institucionales');
+const { claveEmisor, fraseEmisor, cortesTrimestrales, rankingDesdeTablas } = require('../dist/integrations/institucionales');
+const { deflateRawSync } = require('node:zlib');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const KEY = 'PKTESTKEYID1234567';
 const SECRET = 'supersecretvalue-abcdef-987654';
@@ -381,6 +384,115 @@ test('SEC: parser 13F y normalización de nombres', () => {
   assert.equal(normalizarEmisor('MICROSOFT CORP'), 'MICROSOFT');
 });
 
+// --- Descubrimiento de instituciones 13F: zip oficial por rangos + búsqueda de EDGAR (formas reales, sin red).
+function zip(archivos) {
+  const locales = [], central = [];
+  let posicion = 0;
+  for (const [nombre, texto] of Object.entries(archivos)) {
+    const n = Buffer.from(nombre), datos = deflateRawSync(Buffer.from(texto));
+    const local = Buffer.alloc(30 + 4); local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(n.length, 26); local.writeUInt16LE(4, 28);
+    const c = Buffer.alloc(46); c.writeUInt32LE(0x02014b50, 0); c.writeUInt16LE(8, 10); c.writeUInt32LE(datos.length, 20); c.writeUInt16LE(n.length, 28); c.writeUInt32LE(posicion, 42);
+    locales.push(local.subarray(0, 30), n, local.subarray(30), datos); central.push(c, n);
+    posicion += 34 + n.length + datos.length;
+  }
+  const dir = Buffer.concat(central), fin = Buffer.alloc(22);
+  fin.writeUInt32LE(0x06054b50, 0); fin.writeUInt16LE(Object.keys(archivos).length, 10); fin.writeUInt32LE(dir.length, 12); fin.writeUInt32LE(posicion, 16);
+  return Buffer.concat([...locales, Buffer.alloc(0), dir, fin]);
+}
+const AHORA_13F = Date.UTC(2026, 10, 23);
+// Cuatro fondos (111 el mayor); cada uno reporta LLY con 10× su número en el corte reciente. 333 falla al leer su tabla.
+function redSec({ ranking = true, recientes = ['111', '222', '333', '444'], rango = 206 } = {}) {
+  const llamadas = [];
+  const datos = zip({
+    'DATA/SUBMISSION.tsv': 'ACCESSION_NUMBER\tFILING_DATE\tSUBMISSIONTYPE\tCIK\tPERIODOFREPORT\n' + ['444', '111', '333', '222'].map(c => `a${c}\t14-AUG-2026\t13F-HR\t${c}\t30-JUN-2026`).join('\n') + '\nviejo\t01-JUL-2026\t13F-HR\t999\t31-MAR-2026\nnt\t14-AUG-2026\t13F-NT\t888\t30-JUN-2026\n',
+    'DATA/INFOTABLE.tsv': 'x'.repeat(1000),
+    'DATA/SUMMARYPAGE.tsv': 'ACCESSION_NUMBER\tTABLEENTRYTOTAL\tTABLEVALUETOTAL\na111\t9\t900\na222\t9\t800\na333\t9\t700\na444\t9\t600\nviejo\t9\t99999\n',
+  });
+  const hit = (cik, corte, fecha, extra = {}) => ({ _id: `000${cik}-26-${corte.slice(5, 7)}:tabla.xml`, _source: { ciks: [cik.padStart(10, '0')], period_ending: corte, display_names: [`FONDO ${cik}, Inc.  (F${cik === '111' ? 'A, FB' : 'A'})  (CIK ${cik.padStart(10, '0')})`], file_date: fecha, form: '13F-HR', file_type: 'INFORMATION TABLE', ...extra } });
+  const fn = async (url, init = {}) => {
+    const u = new URL(url); llamadas.push({ u, rango: init.headers?.Range });
+    const r = (cuerpo, o = {}) => new Response(cuerpo, { status: 200, ...o });
+    if (u.pathname.endsWith('/form-13f-data-sets')) return ranking ? r('<a href="/files/x/01jun2026-31aug2026_form13f.zip">') : r('', { status: 404 });
+    if (u.pathname.endsWith('_form13f.zip')) {
+      if (rango !== 206) return r(datos);
+      const m = /bytes=(\d*)-(\d+)/.exec(init.headers.Range);
+      const [a, b] = m[1] === '' ? [Math.max(0, datos.length - Number(m[2])), datos.length] : [Number(m[1]), Math.min(datos.length, Number(m[2]) + 1)];
+      return r(datos.subarray(a, b), { status: 206, headers: { 'Content-Range': `bytes ${a}-${b - 1}/${datos.length}` } });
+    }
+    if (u.host === 'efts.sec.gov') {
+      const q = u.searchParams.get('q'), ciks = (u.searchParams.get('ciks') || '').split(',').filter(Boolean).map(Number).map(String), desde = u.searchParams.get('startdt');
+      let hits;
+      if (q === '"ELI LILLY"') hits = [hit('555', '2026-09-30', '2026-11-01', { form: '13F-HR/A' }), hit('555', '2026-09-30', '2026-11-01'), hit('666', '2026-09-30', '2026-11-01')];
+      else if (desde === '2026-10-01') hits = [...recientes.map(c => hit(c, '2026-09-30', '2026-11-13')), hit('111', '2024-03-31', '2026-11-10', { form: '13F-HR/A' })];
+      else if (desde === '2026-07-01') hits = ['111', '222', '333', '444'].map(c => hit(c, '2026-06-30', '2026-08-14'));
+      else hits = ['111', '222'].map(c => hit(c, '2026-03-31', '2026-05-14'));
+      if (ciks.length) hits = hits.filter(h => ciks.includes(String(Number(h._source.ciks[0]))));
+      return r(JSON.stringify({ hits: { total: { value: hits.length }, hits } }));
+    }
+    const portada = /\/data\/(\d+)\/\d+\/primary_doc\.xml$/.exec(u.pathname);
+    if (portada) return r(`<edgarSubmission><ns1:tableValueTotal>${1000 - Number(portada[1])}</ns1:tableValueTotal></edgarSubmission>`, portada[1] === '444' ? { status: 404 } : {});
+    const m = /\/data\/(\d+)\/\d+?(\d\d)\/tabla\.xml$/.exec(u.pathname);
+    if (m && m[1] === '333') return r('', { status: 404 });
+    if (m) return r(xml13F([{ n: 'LILLY ELI &amp; CO', c: '532457108', v: 5, s: Number(m[1]) * (m[2] === '09' ? 10 : 9) }, { n: 'LILLY ELI &amp; CO', c: '532457AA1', v: 1, s: 1, t: 'PRN' }, { n: 'OTRA', c: '000000000', v: 1, s: 1 }, ...(m[1] === '666' ? [{ n: 'ELI LILLY AND CO', c: '532457108', v: 1, s: 1 }] : [])]));
+    return r('', { status: 404 });
+  };
+  return { llamadas, sec: createSecClient({ userAgent: UA, fetch: fn, esperar: async () => {}, ahora: () => AHORA_13F }) };
+}
+
+test('13F: instituciones descubiertas en la SEC; un fondo que falla no detiene a los demás', async () => {
+  const { sec, llamadas } = redSec();
+  const [reciente, previo] = await sec.tenencias13F({ nombreEmisor: 'ELI LILLY & Co', cortes: 2 });
+  assert.deepEqual([reciente.fechaCorte, reciente.fechaPublicacion, previo.fechaCorte], ['2026-09-30', '2026-11-13', '2026-06-30']);
+  assert.deepEqual(reciente.tenencias.map(t => [t.institucion, t.identificadorInstitucion, t.acciones]), [['FONDO 111, Inc.', '0000000111', 1110], ['FONDO 222, Inc.', '0000000222', 2220], ['FONDO 444, Inc.', '0000000444', 4440]]);
+  assert.deepEqual(previo.tenencias.map(t => t.acciones), [999, 1998, 3996]);
+  assert.deepEqual(reciente.omitidos.map(o => o.cik), ['0000000333']); assert.deepEqual(reciente.datosFaltantes, ['1 institución(es) sin leer']);
+  const ciks = llamadas.filter(l => l.u.searchParams.get('ciks'));
+  assert.ok(ciks.every(l => l.u.searchParams.get('q') === '"532457108"' && l.u.searchParams.get('ciks') === '0000000111,0000000222,0000000333,0000000444'), 'ordenadas por valor, sin otros trimestres ni avisos 13F-NT');
+  assert.equal(llamadas.filter(l => l.rango).length, 3, 'del zip solo se piden rangos');
+  const n = llamadas.length;
+  await sec.tenencias13F({ nombreEmisor: 'Eli Lilly and Company' });
+  assert.deepEqual(llamadas.slice(n).map(l => l.u.host + l.u.pathname).filter(x => !x.startsWith('efts')), ['www.sec.gov/Archives/edgar/data/333/00033326-09/tabla.xml'.replace('00033326-09', '0003332609'), 'www.sec.gov/Archives/edgar/data/333/0003332606/tabla.xml'], 'ranking, CUSIP y tablas leídas quedan en memoria');
+});
+
+test('13F: sin ranking oficial degrada y lo informa; un trimestre a medio presentar no se compara', async () => {
+  for (const opciones of [{ ranking: false }, { rango: 200 }]) {
+    const [r] = await redSec(opciones).sec.tenencias13F({ nombreEmisor: 'ELI LILLY & Co' });
+    assert.deepEqual(r.tenencias.map(t => t.identificadorInstitucion), ['0000000111', '0000000222'], 'ordenadas por el valor de su portada; sin portada quedan fuera');
+    assert.match(r.datosFaltantes[0], /ranking/);
+  }
+  const reportes = await redSec({ recientes: ['111'] }).sec.tenencias13F({ nombreEmisor: 'ELI LILLY & Co' });
+  assert.deepEqual(reportes.map(r => r.fechaCorte), ['2026-06-30', '2026-03-31']);
+  assert.match(reportes[0].datosFaltantes[0], /2026-09-30 aún incompleto \(1 de 4/);
+  await assert.rejects(redSec().sec.tenencias13F({ cusip: '532457108', nombreEmisor: '' }).then(r => { assert.equal(r.length, 2); throw new Error('ok'); }), /ok/);
+  await assert.rejects(redSec().sec.tenencias13F({}), e => e.codigo === 'VALIDACION');
+});
+
+test('13F: si todas las instituciones fallan se informa el error; sin credenciales no se consulta', async () => {
+  const sec = createSecClient({ userAgent: UA, esperar: async () => {}, fetch: async () => new Response('', { status: 503 }) });
+  await assert.rejects(sec.tenencias13F({ filers: ['111', '222'], nombreEmisor: 'X' }), e => e.codigo === 'PROVEEDOR');
+  await assert.rejects(sec.tenencias13F({ nombreEmisor: 'X' }), e => e.codigo === 'PROVEEDOR');
+  await assert.rejects(createSecClient({ fetch: async () => assert.fail() }).tenencias13F({ nombreEmisor: 'X' }), e => e.codigo === 'SIN_CREDENCIALES');
+});
+
+test('13F: tablas enormes por trozos, con tope de tamaño', async () => {
+  const texto = xml13F(Array.from({ length: 500 }, (_, i) => ({ n: i % 100 ? 'OTRA' : 'ÉSTA CO', c: String(i).padStart(9, '0'), v: 1, s: i })), 'ns1:');
+  const bytes = Buffer.from(texto);
+  const res = () => ({ body: new ReadableStream({ start(c) { for (let i = 0; i < bytes.length; i += 37) c.enqueue(new Uint8Array(bytes.subarray(i, i + 37))); c.close(); } }) });
+  const filas = await leerTablaPorTrozos(res(), f => f.nombreEmisor === 'ÉSTA CO');
+  assert.deepEqual(filas.map(f => f.cantidad), [0, 100, 200, 300, 400]);
+  await assert.rejects(leerTablaPorTrozos(res(), () => true, { maxBytes: 1000 }), e => e.codigo === 'RED' && /tamaño/.test(e.mensaje));
+});
+
+test('13F: nombres de emisor, cortes y ningún CIK escrito en el código', () => {
+  for (const [a, b] of [['ELI LILLY & Co', 'LILLY ELI &amp; CO'], ['BANK OF AMERICA CORP /DE/', 'BANK AMERICA CORP'], ['Walt Disney Co', 'DISNEY WALT CO'], ['PROCTER & GAMBLE Co', 'PROCTER AND GAMBLE CO'], ['Apple Inc. Common Stock', 'APPLE INC']]) assert.equal(claveEmisor(a), claveEmisor(b), a);
+  assert.notEqual(claveEmisor('APPLE INC'), claveEmisor('APPLE HOSPITALITY REIT INC'));
+  assert.deepEqual(['AT&T INC.', 'ELI LILLY & Co', 'Apple Inc.', 'BANK OF AMERICA CORP /DE/'].map(fraseEmisor), ['AT amp T', 'ELI LILLY', 'APPLE', 'BANK OF AMERICA']);
+  assert.deepEqual(cortesTrimestrales(3, Date.UTC(2026, 10, 23)), ['2026-09-30', '2026-06-30', '2026-03-31']);
+  assert.deepEqual(cortesTrimestrales(2, Date.UTC(2026, 0, 2)), ['2025-12-31', '2025-09-30']);
+  assert.throws(() => rankingDesdeTablas('CIK\n', 'X\n'), e => e.codigo === 'PROVEEDOR');
+  assert.doesNotMatch(fs.readFileSync(path.join(__dirname, '../src/integrations/institucionales.js'), 'utf8'), /\b\d{7,10}['"]/);
+});
+
 test('Webull: sin credenciales y datos de mercado no implementados, sin red', async () => {
   const webull = createWebullClient();
   await assert.rejects(webull.enviarOrden({}), e => e.codigo === 'SIN_CREDENCIALES' && e.proveedor === 'webull');
@@ -395,5 +507,4 @@ test('Integraciones: estado sin revelar valores', () => {
   assert.ok(!JSON.stringify(estado).includes(SECRET) && !JSON.stringify(estado).includes(KEY) && !JSON.stringify(estado).includes('example.com'));
   const vacio = createIntegrations({}, fetch).estado();
   assert.deepEqual(vacio, { alpaca: { configurado: false, feed: 'iex', opcionesFeed: 'indicative', entorno: 'paper' }, sec: { configurado: false }, webull: { configurado: false } });
-  assert.ok(FILERS_13F.length >= 8 && FILERS_13F.every(f => /^\d{10}$/.test(f.cik) && f.nombre));
 });
