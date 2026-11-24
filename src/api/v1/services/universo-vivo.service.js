@@ -315,7 +315,9 @@ export function createUniversoVivo({ integraciones, factory, catalogo, tamano = 
       await esperar(Math.max(0, ritmo - (Date.now() - inicio)));
     }
   }
-  const noticiasDe = async e => ({ noticias: await conReintento(() => alpaca().noticias({ simbolos: [e.simbolo], desde: new Date(ahora() - DIAS_NOTICIAS * DIA).toISOString(), hasta: new Date(ahora()).toISOString(), limite: MAX_NOTICIAS }), { esperar: esperarLimite }) });
+  // Dos clases de la misma empresa comparten noticias: el proveedor suele etiquetar solo una.
+  const clasesDe = e => [...empresas.values()].filter(x => x.cik === e.cik).map(x => x.simbolo);
+  const noticiasDe = async e => ({ noticias: await conReintento(() => alpaca().noticias({ simbolos: clasesDe(e), desde: new Date(ahora() - DIAS_NOTICIAS * DIA).toISOString(), hasta: new Date(ahora()).toISOString(), limite: MAX_NOTICIAS }), { esperar: esperarLimite }) });
   const porCik = new Map(); // dos clases de la misma empresa comparten sus reportes
   const fundamentalesDe = async e => {
     if (!porCik.has(e.cik)) { porCik.clear(); porCik.set(e.cik, await integraciones.sec.fundamentales(e.cik)); }
