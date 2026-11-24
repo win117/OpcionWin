@@ -25,6 +25,20 @@ export function spreadPct(item) {
   return cotizacionValida(item) ? (item.ask - item.bid) / mid(item) : null;
 }
 
+// Centavos válidos para una opción (0.05 desde 3.00), hacia el lado que facilita la ejecución: más al pagar, menos al cobrar.
+const alTick = (x, paga) => { const t = Math.abs(x) >= 3 ? 0.05 : 0.01; return Math.max(0.01, Math.round((paga ? Math.ceil(x / t - 1e-9) : Math.floor(x / t + 1e-9)) * t * 100) / 100); };
+/**
+ * Precio neto por acción con el que la orden se ejecutaría de inmediato: se compra al ask y se vende al bid.
+ * null si falta una cotización válida o si a ese precio la orden cambiaría de signo (un crédito que pasaría a costar).
+ */
+export function precioInmediato(patas, credito) {
+  if (!patas.length || patas.some(p => !cotizacionValida(p.item))) return null;
+  const neto = patas.reduce((n, p) => n + (p.accion === 'sell' ? p.item.bid : -p.item.ask) * (p.proporcion || 1), 0);
+  return (neto > 0) === Boolean(credito) && Math.abs(neto) >= 0.01 ? alTick(Math.abs(neto), !credito) : null;
+}
+/** Precio cediendo una fracción para facilitar el cierre: paga más o cobra menos. */
+export const cederPrecio = (precio, fraccion, cobra) => alTick(precio * (cobra ? 1 - fraccion : 1 + fraccion), !cobra);
+
 /** Costo en dólares de cruzar el spread (del punto medio al bid/ask) en todas las patas; null si alguna no tiene cotización válida. */
 export function costoSpread(patas, cantidad = 1) {
   if (!patas.length || !patas.every(p => cotizacionValida(p.item))) return null;
@@ -82,8 +96,16 @@ export function vencimientosVigentes(vencimientos = [], hoy = new Date()) {
   return [...new Set(vencimientos)].filter(v => diasHasta(v, hoy) >= 0).sort();
 }
 
+// Liquidez esperable por tipo de vencimiento, en días de «distancia» que se le suman: el mensual (tercer viernes) es el más negociado,
+// luego los demás viernes; los de entre semana tienen spreads mucho mayores.
+const recargoLiquidez = v => {
+  const d = new Date(v + 'T00:00:00Z');
+  if (d.getUTCDay() !== 5) return 6;
+  return d.getUTCDate() >= 15 && d.getUTCDate() <= 21 ? 0 : 2;
+};
+
 /**
- * Vencimiento sugerido para una estrategia: el más cercano a su objetivo de días dentro de [minDias, maxDias];
+ * Vencimiento sugerido para una estrategia: el más cercano a su objetivo de días dentro de [minDias, maxDias], prefiriendo los líquidos;
  * si ninguno cae en el rango, el futuro más cercano al objetivo. Nunca uno vencido: null si no queda ninguno.
  */
 export function elegirVencimiento(vencimientos = [], hoy = new Date(), minDias = 7, maxDias = null, codigo = null) {
@@ -93,7 +115,7 @@ export function elegirVencimiento(vencimientos = [], hoy = new Date(), minDias =
   // El que vence hoy solo se propone si no hay otro.
   const futuros = vigentes.filter(v => diasHasta(v, hoy) > 0);
   const lista = enRango.length ? enRango : futuros.length ? futuros : vigentes;
-  return cercano(lista, objetivo, (v, o) => Math.abs(diasHasta(v, hoy) - o));
+  return cercano(lista, objetivo, (v, o) => Math.abs(diasHasta(v, hoy) - o) + recargoLiquidez(v));
 }
 
 const delta = it => it?.griegas?.delta;

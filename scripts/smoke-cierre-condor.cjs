@@ -30,7 +30,10 @@ const FIN = new Set(['ejecutada', 'cancelada', 'rechazada', 'expirada']);
     token = (await call('POST', '/sesiones', { email, password: pw, baseDatos: DB })).token;
     await call('POST', '/broker/paper/conexion', { broker: BROKER });
     for (const recurso of ['empresas', 'cotizaciones', 'contratos']) { const r = await sync({ recurso, simbolos: [S] }); if (r.estado !== 'completada') throw new Error('sync ' + recurso + ': ' + r.error); }
-    const empresa = (await call('GET', '/empresas?simbolo=' + S)).items[0], op = await call('GET', '/mercado/opciones/resumen/' + S), px = op.precioSubyacente;
+    const empresa = (await call('GET', '/empresas?simbolo=' + S)).items[0], op0 = await call('GET', '/mercado/opciones/resumen/' + S), dia = '20' + (previas[0]?.simbolo.match(/(\d{6})[CP]\d{8}$/)?.[1] || '').replace(/(..)(..)(..)/, '$1-$2-$3');
+    // Viernes a más de dos semanas (los vencimientos de entre semana son poco líquidos); en --solo-cierre, el de la estructura abierta.
+    const venc = SOLO_CIERRE ? dia : op0.vencimientos.find(v => (Date.parse(v) - Date.now()) / 864e5 > 14 && new Date(v).getUTCDay() === 5) || op0.vencimiento;
+    const op = await call('GET', '/mercado/opciones/resumen/' + S + '?vencimiento=' + venc), px = op.precioSubyacente;
     const ok = i => i.bid > 0 && i.ask >= i.bid, mid = i => (i.bid + i.ask) / 2;
     let sp, lp, sc, lc;
     if (SOLO_CIERRE) {

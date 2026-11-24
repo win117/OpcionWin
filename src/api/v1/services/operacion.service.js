@@ -120,11 +120,26 @@ export function createOperacion({ integraciones, factory = repository, cola, aho
     return { orden, configuracion, repetida: true, brokerNombre: await nombreBrokerDe(ctx, orden.conexionId) };
   }
 
+  // Órdenes vivas en el broker sin registro de este usuario (otra sesión o la plataforma del broker). Si el broker no responde: [].
+  async function ordenesAjenas(adaptador, locales) {
+    if (!adaptador.ordenesAbiertas) return [];
+    const propias = new Set(locales.map(o => o.ordenExternaId).filter(Boolean));
+    const abiertas = await adaptador.ordenesAbiertas().catch(() => []);
+    return abiertas.filter(o => !propias.has(o.ordenExternaId) && !ESTADOS_TERMINALES.includes(o.estado));
+  }
+
   // 409 si ya hay una orden de cierre viva para alguno de los contratos. Antes refresca las candidatas: la copia local puede estar atrasada.
-  async function exigirSinCierreEnCurso(ctx, conexionId, contratoIds) {
+  async function exigirSinCierreEnCurso(ctx, conexion, componentes, contratoIds) {
+    const locales = await todos('ordenes', ctx, { conexionId: conexion._id }, factory);
     const cierra = o => !ESTADOS_TERMINALES.includes(o.estado) && o.componentes.some(c => c.intencion.endsWith('_to_close') && contratoIds.includes(c.contratoId));
-    for (const o of (await todos('ordenes', ctx, { conexionId }, factory)).filter(cierra)) {
+    for (const o of locales.filter(cierra)) {
       if (cierra(await broker.actualizar(ctx, o._id).catch(() => o))) throw boom.conflict('Ya hay una orden de cierre en curso para uno de estos contratos. Espera a que termine o cancélala.');
+    }
+    const { codigo } = await obtener('brokers', ctx, conexion.brokerId, factory);
+    // Misma pata y mismo lado, salvo que el broker diga que es para abrir.
+    const choca = c => !c.intencion?.endsWith('_to_open') && componentes.some(x => x.simbolo === c.simbolo && x.accion === c.accion);
+    if ((await ordenesAjenas(adaptadorDe(integraciones, codigo), locales)).some(o => o.componentes.some(choca))) {
+      throw boom.conflict('El broker ya tiene abierta una orden sobre uno de estos contratos, enviada desde otra sesión o desde su plataforma. Cancélala ahí o espera a que termine.');
     }
   }
 
@@ -156,7 +171,7 @@ export function createOperacion({ integraciones, factory = repository, cola, aho
       if (proporcion > PROPORCION_MAX) throw boom.badRequest('Las cantidades de las patas no forman una estructura (proporción mayor que ' + PROPORCION_MAX + '). Ciérralas por separado.');
       return { contratoId: contratoIds[i], simbolo: contratos[i].simbolo, accion, intencion: `${accion}_to_close`, proporcion };
     });
-    await exigirSinCierreEnCurso(ctx, conexionId, contratoIds);
+    await exigirSinCierreEnCurso(ctx, conexion, componentes, contratoIds);
     const r = await crearYEnviar(ctx, key, huella, { conexion, empresaId, componentes, orden: { ...base, cantidad },
       estrategia: ids.length === 4 ? 'IRON_CONDOR' : contratos[0].tipo === 'call' ? 'LONG_CALL' : 'LONG_PUT',
       nombre: grupo ? `Cierre ${ids.length} patas ${parsearOcc(contratos[0].simbolo)?.subyacente || contratos[0].simbolo}` : 'Cierre ' + contratos[0].simbolo });
@@ -223,12 +238,14 @@ export function createOperacion({ integraciones, factory = repository, cola, aho
           lado: p.lado, cantidad: p.cantidad, precioPromedio: p.precioPromedio, precioActual: p.precioActual, valorMercado: p.valorMercado, pl, plPct,
           grupoId: p.grupoId ?? null, cerrable: Boolean(g) && g.cerrable !== false && p.cerrable !== false };
       });
-      const ordenes = (await todos('ordenes', ctx, { conexionId: conexion._id }, factory))
+      const locales = await todos('ordenes', ctx, { conexionId: conexion._id }, factory);
+      const ordenesExternas = (await ordenesAjenas(adaptador, locales)).map(o => ({ ordenExternaId: o.ordenExternaId, estado: o.estado, componentes: o.componentes.map(c => ({ simbolo: c.simbolo, accion: c.accion })) }));
+      const ordenes = [...locales]
         .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 15)
         .map(o => ({ _id: o._id, estado: o.estado, tipo: o.tipo, cantidad: o.cantidad, precioLimite: o.precioLimite ?? null, credito: Boolean(o.credito), componentes: o.componentes,
           cantidadEjecutada: o.cantidadEjecutada ?? null, precioPromedioEjecucion: o.precioPromedioEjecucion ?? null,
           createdAt: o.createdAt, ordenExternaId: o.ordenExternaId ?? null, eventos: (o.eventos || []).slice(-3) }));
-      return { conexionId: conexion._id, broker: codigo, cuenta, ...(error ? { error } : {}), ...(avisoSincronizacion ? { avisoSincronizacion } : {}), posicionesDisponibles, posiciones, ordenes };
+      return { conexionId: conexion._id, broker: codigo, cuenta, ...(error ? { error } : {}), ...(avisoSincronizacion ? { avisoSincronizacion } : {}), posicionesDisponibles, posiciones, ordenes, ordenesExternas };
     },
 
     // 3) POST /ordenes/ticket

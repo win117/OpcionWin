@@ -7,7 +7,7 @@ import Movimientos from '../components/Movimientos';
 import MapaMercado from './mercado/MapaMercado';
 import { useSondeo } from '../hooks/useSondeo';
 import { screener } from '../api/resources';
-import { CORE_LABELS, ESTRATEGIAS, ESTRATEGIA_LABELS, DISCLAIMER } from '../utils/constants';
+import { NOTA_PUNTAJE, CORE_LABELS, ESTRATEGIAS, ESTRATEGIA_LABELS, DISCLAIMER } from '../utils/constants';
 import { fmtDateTime, fmtInt, fmtMoney, fmtNum, fmtPct, isNum } from '../utils/format';
 
 const DESCRIPCION = {
@@ -125,7 +125,7 @@ function Screener() {
         </div>
       )}
       {listo && <div className="screener-grid">{ESTRATEGIAS.map(c => <Tarjeta key={c} codigo={c} items={d.estrategias?.[c] || []} />)}</div>}
-      <p className="muted small">Ranking informativo y educativo, calculado con datos del proveedor; no es una recomendación de inversión.</p>
+      <p className="muted small"><strong>El puntaje</strong> {NOTA_PUNTAJE[0].toLowerCase() + NOTA_PUNTAJE.slice(1)} Ranking educativo con datos del proveedor; no es una recomendación de inversión.</p>
     </section>
   );
 }

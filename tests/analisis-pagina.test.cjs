@@ -36,6 +36,14 @@ test('razones: dos a favor, una en contra y la contradicción', async () => {
   assert.equal(put.contra.titulo, 'Técnico 81.4 alcista');
 });
 
+test('razones: un factor en rango no va a favor ni en contra', async () => {
+  const { razones } = await mod();
+  const r = razones('LONG_CALL', { cores: ['tecnico', 'institucional', 'noticias'], evaluaciones: { tecnico: ev(84), institucional: ev(49.1), noticias: ev(56) } });
+  assert.deepEqual(r.favor.map(x => x.titulo), ['Técnico 84.0 alcista']); assert.equal(r.contra, null);
+  // Para el Iron Condor ese mismo factor en rango sí es una razón a favor.
+  assert.ok(razones('IRON_CONDOR', { cores: ['institucional'], evaluaciones: { institucional: ev(49.1) } }).favor.length);
+});
+
 test('razones: sin oposición no hay contradicción y los factores sin puntaje no cuentan', async () => {
   const { razones } = await mod();
   const r = razones('LONG_CALL', { cores: ['tecnico', 'institucional'], evaluaciones: { tecnico: EVS.tecnico } });

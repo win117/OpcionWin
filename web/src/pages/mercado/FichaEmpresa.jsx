@@ -7,7 +7,7 @@ import { CandleChart } from '../../components/CandleChart';
 import { ScoreBar } from '../../components/Gauge';
 import { Termino } from '../../components/Termino';
 import { ErrorMessage } from '../../components/States';
-import { CORE_LABELS, ESTRATEGIAS, ESTRATEGIA_LABELS } from '../../utils/constants';
+import { NOTA_PUNTAJE, CORE_LABELS, ESTRATEGIAS, ESTRATEGIA_LABELS } from '../../utils/constants';
 import { giroEs } from '../../utils/sic';
 import { fmtCompact, fmtFixed, fmtMoney, fmtPct, isNum } from '../../utils/format';
 
@@ -71,6 +71,7 @@ export default function FichaEmpresa({ simbolo, vivo, onCerrar }) {
       <Rango titulo="Rango de 52 semanas" minimo={isNum(d.minimo52) ? Math.min(d.minimo52, d.precio) : null} maximo={isNum(d.maximo52) ? Math.max(d.maximo52, d.precio) : null} precio={d.precio} />
       <div className="ficha__puntajes">
         <h4>Compatibilidad rápida</h4>
+        <p className="muted small">{NOTA_PUNTAJE}</p>
         {d.puntajes ? ESTRATEGIAS.map(e => (
           <Link key={e} className="ficha__estrategia" to={`/analisis/${encodeURIComponent(simbolo)}?estrategia=${e}`}>
             <span className="ficha__estrategia-nombre">{ESTRATEGIA_LABELS[e]}</span>

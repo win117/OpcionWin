@@ -8,6 +8,7 @@ import { useAsync } from '../../hooks/useAsync';
 import { acciones, operacion } from '../../api/resources';
 import { fmtDate, fmtDateTime, fmtFixed, fmtMoney, fmtPct, isNum } from '../../utils/format';
 import { uuid } from '../../utils/objects';
+import { cederPrecio } from '../../utils/estrategiasOrden';
 import { ejecutado } from '../broker/ejecutado';
 
 const CANCELABLES = ['pendiente', 'enviada', 'aceptada', 'parcial'];
@@ -21,6 +22,11 @@ function resumenPatas(o) {
 }
 
 const mcd = (a, b) => (b ? mcd(b, a % b) : a);
+const FINALES = ['ejecutada', 'cancelada', 'rechazada', 'expirada'];
+const SONDEO_MS = 3000, SONDEO_MAX_MS = 60000;
+const MENSAJE_CIERRE = { ejecutada: 'Posición cerrada.', cancelada: 'Orden de cierre cancelada: la posición sigue abierta.', rechazada: 'El broker rechazó el cierre: la posición sigue abierta.',
+  expirada: 'La orden venció sin ejecutarse: la posición sigue abierta.', parcial: 'Cierre parcial: falta el resto.' };
+const LADO = { long: 'comprada', short: 'vendida' };
 const netoSigno = p => (p.lado === 'short' ? -1 : 1); // cerrar un largo cobra; cerrar un corto paga
 
 /** Agrupa las patas de una misma estructura: grupo del broker o mismo subyacente y vencimiento. */
@@ -68,6 +74,34 @@ function CerrarModal({ cierre, broker, onClose, onDone }) {
   const listo = limiteOk && (!esGrupo || sentido);
   const descubre = !esGrupo && dejaCortaDescubierta(posiciones[0], grupo);
 
+  // Seguimiento del cierre hasta estado final o 60 s: enviar no es lo mismo que haber cerrado.
+  const [agotado, setAgotado] = useState(false);
+  const [cancelando, setCancelando] = useState(false);
+  const okId = ok?._id, terminado = FINALES.includes(ok?.estado);
+  const doneRef = useRef(onDone);
+  doneRef.current = onDone;
+  useEffect(() => {
+    if (!okId || terminado || agotado) return undefined;
+    let vivo = true, timer;
+    const t0 = Date.now();
+    const tick = async () => {
+      try { const r = await operacion.actualizarOrden(okId); if (vivo) setOk(r?.orden || r); } catch { /* se reintenta */ }
+      if (!vivo) return;
+      if (Date.now() - t0 >= SONDEO_MAX_MS) setAgotado(true); else timer = setTimeout(tick, SONDEO_MS);
+    };
+    timer = setTimeout(tick, SONDEO_MS);
+    return () => { vivo = false; clearTimeout(timer); };
+  }, [okId, terminado, agotado]);
+  useEffect(() => { if (okId && terminado) doneRef.current?.(); }, [okId, terminado]);
+
+  const cancelarCierre = async () => {
+    setCancelando(true); setError(null);
+    try { const r = await acciones.cancelarOrden(okId); setOk(r?.orden || r); } catch (e) { setError(e); } finally { setCancelando(false); }
+  };
+  const otroPrecio = () => { clave.current = null; setOk(null); setAgotado(false); setError(null); };
+  const ejecutadas = ok?.cantidadEjecutada || 0;
+  const puedeReintentar = terminado && ok.estado !== 'ejecutada' && !ejecutadas; // con un cierre parcial, las cantidades de esta ventana ya no valen
+
   const confirmar = async () => {
     if (!clave.current) clave.current = uuid(); // se reutiliza en reintentos
     setBusy(true); setError(null);
@@ -83,7 +117,13 @@ function CerrarModal({ cierre, broker, onClose, onDone }) {
 
   return (
     <Modal open title={esGrupo ? 'Cerrar estructura' : 'Cerrar posición'} onClose={onClose} size="sm"
-      footer={ok ? <button type="button" className="btn btn--primary" onClick={onClose}>Cerrar ventana</button> : (
+      footer={ok ? (
+        <>
+          {!terminado && <button type="button" className="btn btn--danger" onClick={cancelarCierre} disabled={cancelando}>{cancelando ? 'Cancelando…' : 'Cancelar orden'}</button>}
+          {puedeReintentar && <button type="button" className="btn" onClick={otroPrecio}>Intentar con otro precio</button>}
+          <button type="button" className="btn btn--primary" onClick={onClose}>Cerrar ventana</button>
+        </>
+      ) : (
         <>
           <button type="button" className="btn" onClick={onClose} disabled={busy}>Cancelar</button>
           <button type="button" className="btn btn--danger" onClick={confirmar} disabled={busy || !listo}>{busy ? 'Enviando…' : 'Confirmar cierre simulado'}</button>
@@ -92,14 +132,24 @@ function CerrarModal({ cierre, broker, onClose, onDone }) {
       <div className="stack">
         <div className="banner-paper" role="note"><strong>Orden simulada.</strong> No se usa dinero real.</div>
         {ok ? (
-          <div className={'alert ' + (ok.estado === 'rechazada' ? 'alert--danger' : 'alert--success')} role="status">
-            {ok.estado === 'rechazada' ? 'El broker rechazó la orden de cierre.' : 'Orden de cierre enviada.'} Estado: <Badge value={ok.estado || 'enviada'} />.
-          </div>
+          <>
+            <div className={'alert ' + (ok.estado === 'ejecutada' ? 'alert--success' : terminado ? 'alert--warning' : 'alert--info')} role="status">
+              <div>
+                <strong>{MENSAJE_CIERRE[ok.estado] || 'Orden de cierre enviada. Aún no se ejecuta.'}</strong> <Badge value={ok.estado || 'enviada'} />
+                {ok.estado === 'ejecutada' && isNum(ok.precioPromedioEjecucion) && <p className="small">{cobra ? 'Cobraste' : 'Pagaste'} {fmtMoney(ok.precioPromedioEjecucion * 100 * unidades)} (precio {fmtFixed(ok.precioPromedioEjecucion)} × 100 × {unidades}).</p>}
+                {terminado && ok.estado !== 'ejecutada' && ejecutadas > 0 && <p className="small">Se cerraron {ejecutadas} antes de terminar; revisa en Posiciones lo que queda.</p>}
+                {ok.estado === 'rechazada' && ok.eventos?.length > 0 && <p className="small">{ok.eventos[ok.eventos.length - 1].mensaje}</p>}
+                {!terminado && !agotado && <p className="small muted"><Spinner small /> Consultando al broker cada 3 segundos…</p>}
+              </div>
+            </div>
+            {agotado && !terminado && <div className="alert alert--warning" role="alert">Sigue abierta: nadie ha aceptado tu precio y la posición todavía no está cerrada. Puedes esperar (la verás en Órdenes) o cancelarla aquí y ceder un poco.</div>}
+            {error && <div className="alert alert--danger" role="alert">{error.message}</div>}
+          </>
         ) : (
           <>
             {esGrupo && <p>Una sola orden cierra las {posiciones.length} patas:</p>}
             <ul className="list">
-              {posiciones.map(p => <li key={p.posicionId}>{p.lado === 'short' ? 'Comprar' : 'Vender'} {p.cantidad} × <strong>{p.simbolo}</strong> para cerrar la posición {p.lado}.</li>)}
+              {posiciones.map(p => <li key={p.posicionId}>{p.lado === 'short' ? 'Comprar' : 'Vender'} {p.cantidad} × <strong>{p.simbolo}</strong> para cerrar la posición {LADO[p.lado] || ''}.</li>)}
             </ul>
             {descubre && <div className="alert alert--warning" role="alert">Esta pata cubre una opción vendida del mismo vencimiento: si la cierras sola, la pata corta queda descubierta. Considera «Cerrar estructura».</div>}
             <Field label="Tipo de orden">
@@ -117,6 +167,12 @@ function CerrarModal({ cierre, broker, onClose, onDone }) {
               <Field label={esGrupo ? 'Precio límite neto por unidad' : 'Precio límite por contrato'} error={limiteOk ? null : 'Mayor que cero'}>
                 <input type="number" min="0.01" step="0.01" value={limite} onChange={e => editar(setLimite)(e.target.value)} inputMode="decimal" />
               </Field>
+            )}
+            {tipo === 'limit' && isNum(neto) && Math.abs(neto) >= 0.01 && (
+              <div className="ticket__precios small" role="group" aria-label="Atajos de precio">
+                {[0, 0.05, 0.1, 0.2].map(x => <button key={x} type="button" className="btn btn--sm" onClick={() => editar(setLimite)(x ? cederPrecio(Math.abs(neto), x, cobra).toFixed(2) : Math.abs(neto).toFixed(2))}>{x ? `Ceder ${x * 100} %` : 'Último precio'}</button>)}
+                <span className="muted">Si no se ejecuta, cancela y cede un poco: {cobra ? 'cobras menos' : 'pagas más'}, pero cierras antes.</span>
+              </div>
             )}
             <p className="small">{cobra ? 'Producto estimado' : 'Costo estimado'}: <strong>{isNum(monto) ? fmtMoney(monto) : '—'}</strong> <span className="muted">(precio {isNum(unit) ? fmtFixed(unit) : '—'} × 100 × {unidades})</span></p>
             {error && <div className="alert alert--danger" role="alert">{error.message} Puedes reintentar con seguridad (misma clave de idempotencia).</div>}
@@ -163,6 +219,9 @@ export default function CarteraPaper({ nombre = 'el broker', broker, vista = 'to
         {st.loading && !d && <p className="muted" role="status"><Spinner small /> Cargando cartera…</p>}
         {st.error && d && <p className="small down" role="alert">No se pudo actualizar: {st.error.message}</p>}
         {d?.avisoSincronizacion && <div className="alert alert--warning" role="alert">{d.avisoSincronizacion}</div>}
+        {d?.ordenesExternas?.length > 0 && (
+          <div className="alert alert--info" role="note"><div><strong>{d.ordenesExternas.length === 1 ? 'Hay 1 orden abierta' : `Hay ${d.ordenesExternas.length} órdenes abiertas`} en {nombre} que no se enviaron desde tu sesión.</strong> Se administran donde se crearon: {d.ordenesExternas.map(resumenPatas).join(' | ')}</div></div>
+        )}
         {errAccion && <ErrorMessage error={errAccion} title="No se pudo cancelar" />}
         {d && (
           <>
@@ -198,7 +257,7 @@ export default function CarteraPaper({ nombre = 'el broker', broker, vista = 'to
                         <td>{p.tipo === 'put' ? 'Put' : p.tipo === 'call' ? 'Call' : '—'}</td>
                         <td className="num">{fmtFixed(p.strike)}</td>
                         <td>{fmtDate(p.vencimiento)}</td>
-                        <td>{p.lado ? <Badge value={p.lado} tone={p.lado === 'short' ? 'warning' : 'info'} /> : '—'}</td>
+                        <td>{p.lado ? <Badge tone={p.lado === 'short' ? 'warning' : 'info'}>{LADO[p.lado]}</Badge> : '—'}</td>
                         <td className="num">{p.cantidad ?? '—'}</td>
                         <td className="num">{fmtMoney(p.precioPromedio)}</td>
                         <td className="num">{fmtMoney(p.precioActual)}</td>

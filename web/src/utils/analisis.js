@@ -46,7 +46,9 @@ export function razones(codigo, { cores = [], evaluaciones = {}, pesos = [], pun
   const lista = cores.map(core => {
     const ev = evaluaciones[core];
     const calif = calificacionPara(codigo, ev?.puntaje);
-    if (!isNum(calif)) return null;
+    // Un factor en la zona media (40 a 60) ni apoya ni se opone: no se presenta como razón.
+    const c1 = puntaje1(calif);
+    if (!isNum(calif) || (c1 > 40 && c1 < 60)) return null;
     const peso = pesos.find(p => p.core === core)?.peso;
     return { titulo: nombrar(core, ev), detalle: motivoClaro(ev), aporte: (calif - 50) * (isNum(peso) ? peso : 1) };
   }).filter(Boolean);

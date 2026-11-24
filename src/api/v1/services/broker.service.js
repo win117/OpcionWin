@@ -30,7 +30,6 @@ const ejecucionDe = remoto => ({
   ...(remoto.cantidadEjecutada != null ? { cantidadEjecutada: remoto.cantidadEjecutada } : {}),
   ...(remoto.precioPromedioEjecucion != null ? { precioPromedioEjecucion: remoto.precioPromedioEjecucion } : {}),
 });
-const estadoDe = remoto => remoto.estadoProveedor || remoto.estado;
 
 export function createBroker({ integraciones, factory = repository }) {
   // Devuelve la conexión y el adaptador del broker al que pertenece.
@@ -57,7 +56,7 @@ export function createBroker({ integraciones, factory = repository }) {
     let remoto;
     try { remoto = await adaptador.consultarPorClientOrderId(orden.idempotencyKey); }
     catch (error) { if (error?.codigo === 'NO_ENCONTRADO') return null; throw error; }
-    return registrar(ctx, orden._id, remoto, 'recuperada', meta.nombre + ' paper ya tenía la orden: ' + estadoDe(remoto));
+    return registrar(ctx, orden._id, remoto, 'recuperada', meta.nombre + ' paper ya tenía la orden: ' + remoto.estado);
   }
 
   return {
@@ -111,7 +110,7 @@ export function createBroker({ integraciones, factory = repository }) {
           eventos: [...(d.eventos || []), { tipo, mensaje }] }), factory).catch(() => {});
         throw error;
       }
-      return registrar(ctx, orden._id, remoto, 'enviada', meta.nombre + ' paper: ' + estadoDe(remoto));
+      return registrar(ctx, orden._id, remoto, 'enviada', meta.nombre + ' paper: ' + remoto.estado);
     },
 
     // Refresca una sola orden. Una terminal no se consulta (salvo ejecutada sin precio); una pendiente ya intentada se busca por su clave.
@@ -152,7 +151,7 @@ export function createBroker({ integraciones, factory = repository }) {
       const { adaptador } = await conexionOperable(ctx, orden.conexionId);
       await adaptador.cancelarOrden(orden.ordenExternaId);
       const remoto = await adaptador.consultarOrden(orden.ordenExternaId);
-      return registrar(ctx, orden._id, { ...remoto, ordenExternaId: orden.ordenExternaId }, 'cancelacion_solicitada', 'Estado del broker: ' + estadoDe(remoto));
+      return registrar(ctx, orden._id, { ...remoto, ordenExternaId: orden.ordenExternaId }, 'cancelacion_solicitada', 'Estado del broker: ' + remoto.estado);
     },
   };
 }

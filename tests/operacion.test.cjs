@@ -426,6 +426,24 @@ test('cierre-grupo: una orden multi-pata con intenciones de cierre, cantidades v
   } finally{e.cerrar();}
 });
 
+test('una orden viva en el broker enviada desde otro sitio se avisa e impide duplicar el cierre',async()=>{
+  const e=await entorno();
+  try{
+    const f=e.integraciones, c=e.contratos; f.vivas=[viva(c.c100,'long',1)];
+    const abierta=(accion,intencion,estado='aceptada',ordenExternaId='ajena')=>({ordenExternaId,estado,componentes:[{simbolo:c.c100.simbolo,accion,intencion}]});
+    let lista=[abierta('sell',null)]; f.alpaca.ordenesAbiertas=async()=>lista;
+    const r=await e.call('GET','/broker/paper/resumen'), id=r.posiciones[0].posicionId;
+    assert.deepEqual(r.ordenesExternas,[{ordenExternaId:'ajena',estado:'aceptada',componentes:[{simbolo:c.c100.simbolo,accion:'sell'}]}]);
+    const cerrar=status=>e.call('POST','/posiciones/'+id+'/cierre',{tipo:'market'},status,{'Idempotency-Key':e.k()});
+    await cerrar(409); lista=[abierta('sell','sell_to_close')]; await cerrar(409); assert.equal(f.enviadas.length,0);
+    lista=[abierta('buy','buy_to_open'),abierta('sell','sell_to_open'),abierta('sell',null,'cancelada')]; // ninguna cierra esta posición
+    const o=(await cerrar(201)).orden; assert.equal(f.enviadas.length,1);
+    f.remota={estado:'cancelada'}; lista=[abierta('sell',null,'aceptada',o.ordenExternaId)]; // la propia no es ajena aunque el broker tarde en retirarla
+    await cerrar(201); assert.equal((await e.call('GET','/broker/paper/resumen')).ordenesExternas.length,0);
+    f.alpaca.ordenesAbiertas=async()=>{throw new Error('caído');}; assert.deepEqual((await e.call('GET','/broker/paper/resumen')).ordenesExternas,[]);
+  } finally{e.cerrar();}
+});
+
 test('posición sin lado determinable: se muestra y se guarda como no cerrable',async()=>{
   const e=await entorno();
   try{

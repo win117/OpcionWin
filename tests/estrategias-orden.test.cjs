@@ -296,6 +296,18 @@ test('eventos: RSI nunca es compra ni venta', async () => {
 });
 
 // ---------- 9) vencimiento ----------
+test('precioInmediato y cederPrecio: compran al ask, venden al bid y respetan los centavos válidos', async () => {
+  const { precioInmediato, cederPrecio } = await eo();
+  const pt = (accion, bid, ask) => ({ accion, item: { bid, ask } });
+  assert.equal(precioInmediato([pt('buy', 12.8, 13.29)], false), 13.3); // 0.05 desde 3.00, hacia arriba al pagar
+  assert.equal(precioInmediato([pt('buy', 1, 1.23)], false), 1.23);
+  const ic = [pt('buy', 1.4, 1.5), pt('sell', 1.8, 1.9), pt('sell', 0.9, 1), pt('buy', 0.5, 0.6)];
+  assert.equal(precioInmediato(ic, true), 0.6); // 1.8 + 0.9 − 1.5 − 0.6
+  assert.equal(precioInmediato(ic, false), null, 'no cambia de signo en silencio');
+  assert.equal(precioInmediato([pt('buy', 0, 2)], false), null); assert.equal(precioInmediato([], false), null);
+  assert.equal(precioInmediato([pt('sell', 4.48, 4.6)], true), 4.45); // al cobrar, hacia abajo
+  assert.equal(cederPrecio(2, 0.1, true), 1.8); assert.equal(cederPrecio(2, 0.1, false), 2.2); assert.equal(cederPrecio(0.01, 0.1, true), 0.01);
+});
 test('elegirVencimiento: cercano al objetivo de la estrategia, dentro del rango y nunca vencido', async () => {
   const { elegirVencimiento, vencimientosVigentes } = await eo();
   const hoy = new Date(2026, 10, 23, 10);
@@ -308,6 +320,9 @@ test('elegirVencimiento: cercano al objetivo de la estrategia, dentro del rango 
   assert.equal(elegirVencimiento(['2026-10-16', '2026-11-20'], hoy, 7, 60, 'LONG_CALL'), null);
   assert.equal(elegirVencimiento([], hoy), null);
   assert.equal(elegirVencimiento(['2026-11-23', '2026-11-27'], hoy, 7, 60), '2026-11-27');
+  // A distancia parecida gana el viernes (y el mensual) sobre un vencimiento de entre semana, menos líquido.
+  assert.equal(elegirVencimiento(['2026-12-29', '2026-12-24', '2027-01-01', '2026-12-30'], hoy, 7, 60, 'IRON_CONDOR'), '2027-01-01');
+  assert.equal(elegirVencimiento(['2027-01-11', '2027-01-15'], hoy, 7, 60, 'LONG_CALL'), '2027-01-15');
   assert.deepEqual(vencimientosVigentes(lista, hoy).slice(0, 2), ['2026-11-27', '2026-12-04']);
 });
 test('reconstruirPatas: conserva los strikes más cercanos, avisa y rearma si dejan de ser válidos', async () => {

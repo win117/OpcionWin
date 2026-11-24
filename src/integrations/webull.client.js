@@ -210,7 +210,8 @@ export function deducirLados(p, patas) {
 export const normalizarPosiciones = p => {
   const total = num(p.quantity), patas = Array.isArray(p.legs) ? p.legs : [];
   const esOpcion = p.instrument_type === 'OPTION';
-  const valor = (precio, cantidad, l) => (precio != null && cantidad != null ? precio * cantidad * (esOpcion ? num(l?.option_contract_multiplier) || 100 : 1) : null);
+  // Como en Alpaca: una posición vendida vale en negativo (es lo que costaría recomprarla).
+  const valor = (precio, cantidad, l, lado) => (precio != null && cantidad != null ? precio * cantidad * (esOpcion ? num(l?.option_contract_multiplier) || 100 : 1) * (lado === 'short' ? -1 : 1) : null);
   const idDe = (l, occ, i) => `${p.position_id}:${occ || l.leg_id || i}`; // leg_id se repite en todas las patas: manda el contrato
 
   if (esOpcion && patas.length > 1) {
@@ -225,7 +226,7 @@ export const normalizarPosiciones = p => {
       const occ = pataWebullAOcc(p.symbol, l), q = num(l.quantity), cantidad = deducido ? deducido.unidades : q ? Math.abs(q) : null, precioActual = num(l.last_price);
       const lado = deducido ? deducido.lados[i] : ladoDe([ladoExplicito(l), negativo(q)], hayNegativas ? 'long' : null);
       return { posicionExternaId: idDe(l, occ, i), grupoId: p.position_id ?? null, simbolo: occ || String(p.symbol || ''), lado, cantidad,
-        precioPromedio: num(l.cost ?? l.cost_price), precioActual, valorMercado: valor(precioActual, cantidad, l), claseActivo: 'us_option',
+        precioPromedio: num(l.cost ?? l.cost_price), precioActual, valorMercado: valor(precioActual, cantidad, l, lado), claseActivo: 'us_option',
         plNoRealizado: num(l.unrealized_profit_loss), plPctNoRealizado: null, cerrable: Boolean(occ && lado && (deducido || cantidadesFiables)) };
     });
   }
@@ -233,7 +234,7 @@ export const normalizarPosiciones = p => {
   const q = total ?? num(l?.quantity), cantidad = q == null ? null : Math.abs(q), precioActual = num(p.last_price);
   const lado = ladoDe([ladoExplicito(l), ladoExplicito(p), negativo(q)], 'long');
   return [{ posicionExternaId: esOpcion && l ? idDe(l, occ, 0) : p.position_id, grupoId: null, simbolo: occ || String(p.symbol || ''), lado, cantidad,
-    precioPromedio: num(p.cost_price), precioActual, valorMercado: valor(precioActual, cantidad, l), claseActivo: esOpcion ? 'us_option' : 'us_equity',
+    precioPromedio: num(p.cost_price), precioActual, valorMercado: valor(precioActual, cantidad, l, lado), claseActivo: esOpcion ? 'us_option' : 'us_equity',
     plNoRealizado: num(p.unrealized_profit_loss), plPctNoRealizado: null, cerrable: Boolean(lado && cantidad) }];
 };
 
@@ -366,6 +367,18 @@ export const createWebullClient = ({
     for (let i = 0; i < 4 && !['cancelada', 'ejecutada', 'rechazada', 'expirada'].includes(o.estado); i += 1) { await dormir(700); o = await consultarOrden(cid); }
     return o;
   };
+  // Órdenes vivas en el broker, se hayan enviado desde aquí o no. Forma verificada en paper: { data: [{ client_order_id, orders: [...] }] }.
+  const ordenesAbiertas = async () => {
+    exigir();
+    const r = await trading('/trading/orders/open-orders/list', { query: { account_id: await idCuenta() } });
+    if (!Array.isArray(r?.data)) throw new IntegrationError({ proveedor: PROVEEDOR, codigo: 'PROVEEDOR', mensaje: 'Webull devolvió las órdenes abiertas en un formato no reconocido.' });
+    return r.data.flatMap(x => (Array.isArray(x?.orders) ? x.orders : [])).map(o => ({
+      ...normalizarOrden({ orders: [o] }, o.client_order_id),
+      // En esta lista las patas no repiten el subyacente y la intención solo viene en la orden.
+      componentes: (Array.isArray(o.legs) ? o.legs : []).map(l => ({ simbolo: pataWebullAOcc(l.symbol || o.symbol, l), accion: String(l.side || o.side || '').toLowerCase(),
+        intencion: o.legs.length === 1 && o.position_intent ? String(o.position_intent).toLowerCase() : null })).filter(c => c.simbolo),
+    }));
+  };
   const posiciones = async () => {
     exigir();
     const r = await trading('/trading/assets/positions/list', { query: { account_id: await idCuenta() } });
@@ -375,7 +388,7 @@ export const createWebullClient = ({
     return lista.flatMap(normalizarPosiciones);
   };
 
-  const cliente = { proveedor: PROVEEDOR, configurado, entorno: 'paper', cuenta, enviarOrden, consultarOrden, consultarPorClientOrderId, cancelarOrden, posiciones };
+  const cliente = { proveedor: PROVEEDOR, configurado, entorno: 'paper', cuenta, enviarOrden, consultarOrden, consultarPorClientOrderId, cancelarOrden, ordenesAbiertas, posiciones };
   for (const m of ['buscarActivo', 'listarActivos', 'velas', 'cotizacion', 'contratos', 'snapshotsOpciones', 'noticias']) cliente[m] = async () => { throw noImplementado(m); };
   return cliente;
 };

@@ -142,7 +142,7 @@ const condorReal = () => ({ currency: 'USD', quantity: '-1', cost: '-41.00', pos
 test('posiciones: los lados de un Iron Condor real se deducen con evidencia y, si falta, no se suponen', () => {
   const r = normalizarPosiciones(condorReal());
   assert.deepEqual(r.map(x => [x.simbolo, x.lado, x.cantidad, x.cerrable]), [['AAPL261202P00340000', 'long', 1, true], ['AAPL261202P00342500', 'short', 1, true], ['AAPL261202C00365000', 'short', 1, true], ['AAPL261202C00367500', 'long', 1, true]]);
-  assert.deepEqual(r.map(x => x.precioPromedio), [1.45, 1.67, 0.81, 0.62]); assert.equal(new Set(r.map(x => x.posicionExternaId)).size, 4); assert.ok(r.every(x => x.grupoId === 'PX'));
+  assert.deepEqual(r.map(x => x.precioPromedio), [1.45, 1.67, 0.81, 0.62]); assert.deepEqual(r.map(x => Math.sign(x.valorMercado)), [1, -1, -1, 1]); assert.equal(new Set(r.map(x => x.posicionExternaId)).size, 4); assert.ok(r.every(x => x.grupoId === 'PX'));
   // Condor comprado (todo al revés).
   const inv = condorReal(); inv.quantity = '1'; inv.cost = '41.00'; inv.legs.forEach(l => { l.unrealized_profit_loss = String(-Number(l.unrealized_profit_loss)); });
   assert.deepEqual(normalizarPosiciones(inv).map(x => x.lado), ['short', 'long', 'long', 'short']);
@@ -222,4 +222,17 @@ test('búsqueda por Idempotency-Key y formato de posiciones no reconocido', asyn
   await assert.rejects(w.consultarPorClientOrderId('key-123456789'), e => e.codigo === 'PROVEEDOR');
   for (const raro of [{}, { data: [] }, null]) { posiciones = raro; await assert.rejects(w.posiciones(), e => e.codigo === 'PROVEEDOR'); }
   posiciones = { positions: [] }; assert.deepEqual(await w.posiciones(), []);
+});
+
+test('órdenes abiertas: patas a OCC aunque no repitan el subyacente; formato irreconocible no es "ninguna"', async () => {
+  let cuerpo = { data: [{ client_order_id: 'cid1234567', orders: [{ client_order_id: 'cid1234567', symbol: 'MDB', side: 'BUY', status: 'SUBMITTED', option_strategy: 'VERTICAL',
+    legs: [{ side: 'BUY', quantity: '1', option_type: 'CALL', option_expire_date: '2026-12-11', strike_price: '300' }, { side: 'SELL', quantity: '1', option_type: 'CALL', option_expire_date: '2026-12-11', strike_price: '310' }] }] },
+  { client_order_id: 'cid7654321', orders: [{ client_order_id: 'cid7654321', symbol: 'MDB', side: 'SELL', status: 'SUBMITTED', option_strategy: 'SINGLE', position_intent: 'SELL_TO_CLOSE',
+    legs: [{ side: 'SELL', quantity: '1', option_type: 'PUT', option_expire_date: '2026-12-11', strike_price: '250.5' }] }] }] };
+  const w = createWebullClient({ appKey: 'K', appSecret: 'S', accountId: 'ID', fetch: async u => new Response(JSON.stringify(String(u).includes('/accounts/list') ? [{ account_id: 'ID' }] : cuerpo), { status: 200, headers: { 'content-type': 'application/json' } }) });
+  const [a, b] = await w.ordenesAbiertas();
+  assert.deepEqual(a.componentes, [{ simbolo: 'MDB261211C00300000', accion: 'buy', intencion: null }, { simbolo: 'MDB261211C00310000', accion: 'sell', intencion: null }]);
+  assert.equal(a.estado, 'aceptada'); assert.deepEqual(b.componentes, [{ simbolo: 'MDB261211P00250500', accion: 'sell', intencion: 'sell_to_close' }]);
+  cuerpo = { data: [] }; assert.deepEqual(await w.ordenesAbiertas(), []);
+  cuerpo = {}; await assert.rejects(w.ordenesAbiertas(), e => e.codigo === 'PROVEEDOR');
 });

@@ -8,7 +8,7 @@ import { Select } from '../../components/Field';
 import { Termino } from '../../components/Termino';
 import BotonOperar from '../../components/BotonOperar';
 import { participacion, encaje, razones, titular } from '../../utils/analisis';
-import { CORE_LABELS, ESTRATEGIA_LABELS } from '../../utils/constants';
+import { NOTA_PUNTAJE, CORE_LABELS, ESTRATEGIA_LABELS } from '../../utils/constants';
 import { candidatosStrike, diasHasta, mid, SPREAD_AVISO, spreadPct, textoPuntaje, vencimientosVigentes } from '../../utils/estrategiasOrden';
 import { fmtDate, fmtDateTime, fmtFixed, fmtMoney, fmtPct, isNum } from '../../utils/format';
 
@@ -56,6 +56,7 @@ function Veredicto({ empresa, datos, pos, onContratos }) {
       <div className={'veredicto__cab is-' + e.tono}>
         <h2 id="veredicto-titulo" tabIndex={-1}>{titular(activa.codigo, activa.puntaje)}</h2>
         <ScoreBar value={activa.puntaje} label={'Compatibilidad de ' + nombre(activa.codigo)} />
+        <p className="small nota-puntaje"><Termino id="compatibilidad">Puntaje</Termino>: {NOTA_PUNTAJE[0].toLowerCase() + NOTA_PUNTAJE.slice(1)}</p>
         <p>{e.detalle}</p>
         {voto.completo
           ? <p className="small muted">Decisión de los {voto.total} factores.</p>
@@ -65,8 +66,8 @@ function Veredicto({ empresa, datos, pos, onContratos }) {
       </div>
       <ul className="veredicto__razones">
         {r.favor.map(x => <Razon key={x.titulo} tipo="favor"><Frase r={x} /></Razon>)}
-        {!r.favor.length && <Razon tipo="favor">Ningún factor la apoya.</Razon>}
-        {r.contra ? <Razon tipo="contra"><Frase r={r.contra} /></Razon> : <Razon tipo="contra">Ningún factor va en contra.</Razon>}
+        {!r.favor.length && <Razon tipo="favor">Ningún factor la apoya con claridad.</Razon>}
+        {r.contra ? <Razon tipo="contra"><Frase r={r.contra} /></Razon> : <Razon tipo="contra">Ningún factor va claramente en contra.</Razon>}
       </ul>
       {r.contradiccion && <p className="veredicto__choque"><strong>Los factores se contradicen:</strong> {r.contradiccion}. Por eso la <Termino id="confianza">confianza</Termino> baja.</p>}
       <dl className="veredicto__cifras">

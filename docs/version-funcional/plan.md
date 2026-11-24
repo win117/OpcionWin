@@ -200,3 +200,12 @@ La propuesta no mejora la predicción frente a la fórmula vigente y no se aplic
 - Webull: envio y cancelacion correctos. Iron Condor AAPL de 1 contrato abierto a 0.41 y cerrado desde la app a 1.28 (perdida simulada ~87 USD); 0 posiciones.
 - Hallazgos corregidos: Webull no informa lado ni cantidad por pata (se deducen con evidencia numerica, `deducirLados`), repite `leg_id` en todas,
   no admite estructuras a mercado y confirma la cancelacion con retraso. `scripts/smoke-cierre-condor.cjs` reproduce la prueba.
+
+### 2026-11-24 · Webull de punta a punta y con sentido (paper)
+- Por clics en la app: Iron Condor AAPL abierto a 2.36 y cerrado a 3.34; efectivo −98.48 USD (98 de resultado y 0.48 de comisiones); 0 posiciones y 0 órdenes.
+- Ciclos completos verificados antes: long call, long put y short put en Webull; long call e Iron Condor en Alpaca.
+- El cierre se sigue hasta su estado final (ejecutada, abierta, cancelada, rechazada), se puede cancelar y reintentar con otro precio; el ticket también.
+- `ordenesAbiertas` en ambos adaptadores: avisa de órdenes ajenas y evita duplicar un cierre. Si el broker no las informa, no bloquea.
+- Vencimientos: se prefiere la liquidez (mensual, luego viernes). Precios «medio» e «inmediato» (no garantiza ejecución) y ceder 5/10/20 % al cerrar.
+- Nota fija junto al puntaje: no es la probabilidad de ganar.
+- Sin probar en Webull: verticales, straddles, calendarios y mariposas (la app genera Long Call, Long Put e Iron Condor).

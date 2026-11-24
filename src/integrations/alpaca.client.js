@@ -124,7 +124,8 @@ export const normalizarOrden = o => {
     claseOrden: o.order_class || 'simple',
     cantidad: num(o.qty),
     cantidadEjecutada,
-    precioPromedioEjecucion: num(o.filled_avg_price),
+    // Alpaca da en negativo el precio neto de un crédito; aquí siempre es un monto positivo (la orden ya dice si es crédito).
+    precioPromedioEjecucion: num(o.filled_avg_price) == null ? null : Math.abs(num(o.filled_avg_price)),
     creadaEn: o.created_at || null,
     actualizadaEn: o.updated_at || null,
     componentes: Array.isArray(o.legs)
@@ -462,6 +463,13 @@ export const createAlpacaClient = ({
     return normalizarOrden(await trading('/v2/orders:by_client_order_id', { query: { client_order_id: clave } }));
   };
 
+  // Órdenes vivas en el broker, se hayan enviado desde aquí o no. Las de una pata no traen `legs`.
+  const ordenesAbiertas = async () => {
+    const l = await trading('/v2/orders', { query: { status: 'open', nested: true, limit: 200 } });
+    if (!Array.isArray(l)) throw new IntegrationError({ proveedor: PROVEEDOR, codigo: 'PROVEEDOR', mensaje: 'Alpaca devolvió las órdenes abiertas en un formato no reconocido.' });
+    return l.map(o => { const n = normalizarOrden(o); return n.componentes.length ? n : { ...n, componentes: [{ simbolo: o.symbol, accion: o.side, intencion: o.position_intent ?? null }] }; });
+  };
+
   // DELETE responde 204 sin cuerpo; luego se consulta el estado vigente.
   const cancelarOrden = async idOrden => {
     await trading(`/v2/orders/${exigirId(idOrden)}`, { method: 'DELETE' });
@@ -482,6 +490,6 @@ export const createAlpacaClient = ({
     opcionesFeed,
     configurado,
     buscarActivo, listarActivos, velas, velasLote, cotizacionesLote, reloj, cotizacion, contratos, snapshotsOpciones, noticias,
-    cuenta, enviarOrden, consultarOrden, consultarPorClientOrderId, cancelarOrden, posiciones,
+    cuenta, enviarOrden, consultarOrden, consultarPorClientOrderId, cancelarOrden, ordenesAbiertas, posiciones,
   };
 };

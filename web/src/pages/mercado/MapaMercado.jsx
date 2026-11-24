@@ -5,7 +5,7 @@ import { mercado } from '../../api/resources';
 import { useSondeo } from '../../hooks/useSondeo';
 import { disponerMapa } from '../../utils/treemap';
 import { giroEs } from '../../utils/sic';
-import { ESTRATEGIA_LABELS } from '../../utils/constants';
+import { NOTA_PUNTAJE, ESTRATEGIA_LABELS } from '../../utils/constants';
 import { ErrorMessage } from '../../components/States';
 import { Termino } from '../../components/Termino';
 import { fmtCompact, fmtFixed, fmtMoney, fmtNum, isNum } from '../../utils/format';
@@ -317,6 +317,7 @@ export default function MapaMercado() {
               )}
             </div>
             <div className="mapa__pie">
+              {modo.puntaje && <span className="small">{NOTA_PUNTAJE}</span>}
               <Leyenda modo={modo} tope={tope} />
               {modo.termino && <Termino id={modo.termino}>¿Qué es {modo.label}?</Termino>}
               <span className="muted small">{data ? `${data.total} empresas con opciones, por capitalización aproximada. Los cuadros +N agrupan a las demás y no están a escala. Precio en vivo de IEX; cierre y volumen consolidados.` : ''}</span>

@@ -10,10 +10,10 @@ import { Termino } from './Termino';
 import { useBroker } from '../context/BrokerContext';
 import { api, esNoDisponible } from '../api/client';
 import { acciones, mercado, operacion } from '../api/resources';
-import { CORE_LABELS, ESTRATEGIA_LABELS } from '../utils/constants';
+import { NOTA_PUNTAJE, CORE_LABELS, ESTRATEGIA_LABELS } from '../utils/constants';
 import { fmtDateTime, fmtFixed, fmtMoney, fmtPct, isNum } from '../utils/format';
 import {
-  antiguedadCotizacion, camposPrecio, costoSpread, cotizacionValida, CREDITO_ANCHO_MINIMO, diasHasta, intencionPara, liquidez, metricasOrden, mid, netoMid, nombreConContexto,
+  antiguedadCotizacion, precioInmediato, camposPrecio, costoSpread, cotizacionValida, CREDITO_ANCHO_MINIMO, diasHasta, intencionPara, liquidez, metricasOrden, mid, netoMid, nombreConContexto,
   nombreOrden, notasVencimiento, reconstruirPatas, redondearPrecio, signoNeto, SPREAD_AVISO, spreadPct, textoPuntaje, validarPatas, vencimientosVigentes,
 } from '../utils/estrategiasOrden';
 import { uuid } from '../utils/objects';
@@ -113,6 +113,7 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
   const perfil = metricas.riesgo;
   const ilimitada = Boolean(perfil) && perfil.maxPerdida == null;
   const liq = liquidez(patas);
+  const inmediato = tipo === 'limit' ? precioInmediato(patas, credito) : null;
   const costo = costoSpread(patas, unidades);
   const edad = antiguedadCotizacion(patas);
   const dias = chain?.vencimiento ? diasHasta(chain.vencimiento) : null;
@@ -165,7 +166,7 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
   };
   const quitar = id => { setLegs(ls => ls.filter(l => l.id !== id)); setLimiteTocado(false); };
 
-  const volver = () => { clave.current = null; setConfirmado(false); setError(null); setPaso('editar'); };
+  const volver = () => { clave.current = null; setConfirmado(false); setError(null); setOrden(null); setSondeo('idle'); setPaso('editar'); };
 
   const enviar = async () => {
     if (!empresa?._id) return;
@@ -254,6 +255,7 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
   ) : (
     <>
       {!terminal && <button type="button" className="btn btn--danger" onClick={cancelar} disabled={cancelando}>{cancelando ? 'Cancelando…' : 'Cancelar orden'}</button>}
+      {terminal && orden?.estado !== 'ejecutada' && !orden?.cantidadEjecutada && <button type="button" className="btn" onClick={volver}>Ajustar e intentar de nuevo</button>}
       <button type="button" className="btn" onClick={verCartera}>Ver cartera</button>
       <button type="button" className="btn btn--primary" onClick={onClose}>Cerrar</button>
     </>
@@ -279,6 +281,7 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
         {analisis && !analisis.sinAnalisis && (
           <div className="ticket__analisis small" role="note">
             <strong>Análisis de origen:</strong> {ESTRATEGIA_LABELS[analisis.codigo] || analisis.codigo} {textoPuntaje(analisis.puntaje)} de 100, <Termino id="confianza">confianza</Termino> {analisis.est ? fmtPct(analisis.est.confianza) : '—'}, <Termino id="dispersion">dispersión</Termino> {analisis.est ? analisis.est.dispersion.toFixed(2) : '—'}, <Termino id="cobertura">cobertura</Termino> {isNum(analisis.cobertura) ? fmtPct(analisis.cobertura) : '—'}. {fmtDateTime(analisis.fecha)}, <Termino id="core">factores</Termino>: {analisis.cores.map(c => CORE_LABELS[c] || c).join(', ') || '—'}
+            <span className="small"> {NOTA_PUNTAJE}</span>
           </div>
         )}
 
@@ -350,6 +353,13 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
                 <select value={vigencia} onChange={e => setVigencia(e.target.value)}><option value="day">Día</option><option value="gtc">GTC (hasta cancelar)</option></select>
               </Field>
             </div>
+            {tipo === 'limit' && isNum(limiteDefecto) && (
+              <div className="ticket__precios small" role="group" aria-label="Atajos de precio">
+                <button type="button" className="btn btn--sm" onClick={() => setLimiteTocado(false)}>Medio {limiteDefecto.toFixed(2)}</button>
+                {isNum(inmediato) && Math.abs(inmediato - limiteDefecto) >= 0.005 && <button type="button" className="btn btn--sm" onClick={() => { setLimite(inmediato.toFixed(2)); setLimiteTocado(true); }}>Inmediato {inmediato.toFixed(2)}</button>}
+                <span className="muted">El medio es mejor precio, pero puede no ejecutarse. El inmediato {credito ? 'vende al bid' : 'compra al ask'} según la última cotización: es más fácil que se ejecute, pero no está garantizado.</span>
+              </div>
+            )}
             <Resumen credito={credito} total={total} perfil={perfil} />
             {ilimitada && <PerdidaIlimitada />}
             {advertencias.map(a => <div key={a} className="alert alert--warning" role="note">{a}</div>)}
@@ -393,11 +403,11 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
           <div className="stack" aria-live="polite">
             <div className="ticket__estado">
               <Badge value={orden.estado} />
-              <span>{orden.estado === 'ejecutada' ? 'Orden ejecutada' : terminal ? 'Orden finalizada' : `Orden enviada a la cuenta simulada de ${brokerNombre}`}</span>
+              <span>{orden.estado === 'ejecutada' ? 'Orden ejecutada' : terminal ? 'La orden terminó sin ejecutarse por completo' : `Orden enviada a la cuenta simulada de ${brokerNombre}`}</span>
               {sondeo === 'activo' && !terminal && <span className="muted small"><Spinner small /> Actualizando estado…</span>}
             </div>
             {ultimoEvento && <p>{ultimoEvento.mensaje} <span className="muted small">{fmtDateTime(ultimoEvento.fecha)}</span></p>}
-            {sondeo === 'timeout' && !terminal && <div className="alert alert--info" role="note">La orden sigue abierta. Revisa su estado en la cartera.</div>}
+            {sondeo === 'timeout' && !terminal && <div className="alert alert--info" role="note">La orden sigue abierta: nadie ha aceptado tu precio. Puedes esperar (la verás en Órdenes) o cancelarla y {credito ? 'pedir un poco menos' : 'ofrecer un poco más'}.</div>}
             {error && <div className="alert alert--danger" role="alert">{error.message}</div>}
             <p className="muted small">ID orden: <code>{orden._id}</code></p>
           </div>
