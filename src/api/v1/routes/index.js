@@ -55,7 +55,7 @@ export default function routeAPI(app, { factory = repository, auth = createSessi
   secured.use('/sincronizaciones',sincronizaciones({factory}));
   secured.use('/auditoria',auditoria({factory}));
   secured.use('/mercado',mercado({factory,integraciones,universo}));
-  secured.use('/screener',screener({factory,integraciones,cola,ahora,universo}));
+  secured.use('/screener',screener({factory,universo}));
   secured.use('/cores',cores({factory}));
   router.use(secured);
   app.use(config.API_URL,router);

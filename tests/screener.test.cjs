@@ -8,7 +8,10 @@ const { createSessionService } = require('../dist/api/v1/services/sesiones.servi
 const { createApp } = require('../dist/app');
 const { createCola } = require('../dist/jobs/cola');
 const { puntuarSimbolo, parsearOcc, createScreener } = require('../dist/api/v1/services/screener.service');
-const { createAlpacaClient } = require('../dist/integrations/alpaca.client');
+const { createMercadoEstado, indicesReferencia } = require('../dist/api/v1/services/mercado-estado.service');
+const { diaNY } = require('../dist/api/v1/services/mercado-reloj.service');
+const { crear } = require('../dist/api/v1/services/registros');
+const { createAlpacaClient, createLimitador } = require('../dist/integrations/alpaca.client');
 const prefix = require('../dist/config/config').default.API_URL;
 
 const DIA = 86400000, BASE = Date.UTC(2025, 0, 2);
@@ -22,19 +25,16 @@ function velas(forma, n = 260) {
 const FORMAS = { UPAA: 'sube', UPBB: 'sube', DOWN: 'baja', FLAT: 'lateral' };
 
 function fakeIntegraciones() {
-  const llamadas = { velasLote: [], cotizacionesLote: [], snapshotsOpciones: [], reloj: 0 };
+  const llamadas = { velasLote: [], cotizacionesLote: [], filtros: [], reloj: 0 };
   return {
     llamadas,
     alpaca: {
       feed: 'iex',
-      listarActivos: async () => [{ simbolo: 'UPAA', nombre: 'Up A Corp' }],
+      buscarActivo: async simbolo => ({ simbolo, nombre: 'Fondo ' + simbolo }),
       velasLote: async simbolos => { llamadas.velasLote.push(simbolos); return Object.fromEntries(simbolos.filter(s => FORMAS[s]).map(s => [s, velas(FORMAS[s])])); },
-      cotizacionesLote: async simbolos => { llamadas.cotizacionesLote.push(simbolos); return Object.fromEntries(simbolos.map(s => [s, { ultimo: 150, cierre: 150, cierreAnterior: 145, volumen: 1e6, fechaDato: new Date().toISOString() }])); },
-      snapshotsOpciones: async simbolo => {
-        llamadas.snapshotsOpciones.push(simbolo);
-        const v = new Date(Date.now() + 30 * DIA).toISOString().slice(2, 10).replace(/-/g, '');
-        return [{ contratoExternoId: simbolo + v + 'C00150000', bid: 3, ask: 3.2, volatilidadImplicita: 0.3, griegas: {} }, { contratoExternoId: simbolo + v + 'P00150000', bid: 3, ask: 3.2, volatilidadImplicita: 0.32, griegas: {} }];
-      },
+      cotizacionesLote: async (simbolos, { feed } = {}) => { llamadas.cotizacionesLote.push(simbolos); return Object.fromEntries(simbolos.map(s => [s, { ultimo: feed ? 150 : 153, cierre: 150, cierreAnterior: 145, volumen: 1e6, fechaSesion: new Date(Date.now() - DIA).toISOString(), fechaDato: new Date().toISOString() }])); },
+      contratos: async o => [{ contratoExternoId: 'c1', tipo: 'call', strike: 100, vencimiento: o.vencimientoDesde }],
+      snapshotsOpciones: async (_simbolo, filtro) => { llamadas.filtros.push(filtro); return []; },
       reloj: async () => { llamadas.reloj++; return { abierto: true, proximaApertura: '2026-11-20T14:30:00.000Z', proximoCierre: '2026-11-19T21:00:00.000Z' }; },
     },
   };
@@ -53,7 +53,7 @@ async function arrancar(integraciones) {
     const j = await r.json(); assert.equal(r.status, status, method + ' ' + path + ' → ' + JSON.stringify(j)); return j.data;
   };
   token = (await call('POST', '/sesiones', { email: user.email, password, baseDatos: 'mongodb' })).token;
-  return { call, cola, server, factory };
+  return { call, server, factory, userId };
 }
 
 test('puntuarSimbolo: la tendencia alcista favorece LONG_CALL y la bajista LONG_PUT', () => {
@@ -71,7 +71,7 @@ test('puntuarSimbolo: la tendencia alcista favorece LONG_CALL y la bajista LONG_
   assert.equal(sin.puntajes.LONG_CALL, null);
 });
 
-test('parsearOcc y universo por defecto', () => {
+test('parsearOcc: símbolo OCC válido o null', () => {
   assert.deepEqual(parsearOcc('AAPL251219C00200000'), { tipo: 'call', strike: 200, vencimiento: '2025-12-19' });
   assert.equal(parsearOcc('basura'), null);
 });
@@ -81,88 +81,103 @@ test('Screener: los empates de puntaje se resuelven por el factor principal y no
   const filas = [fila('AAA', 86), fila('ZZZ', 98), fila('MMM', 90), fila('BBB', 86)];
   const ctx = { userId: 'u', database: 'mongodb' }, factory = memoryFactory();
   for (const f of filas) await factory('screener', ctx).create(f);
-  const { items } = await createScreener({ integraciones: {}, factory }).ranking(ctx, { estrategia: 'IRON_CONDOR' });
+  const { items } = await createScreener({ factory }).ranking(ctx, { estrategia: 'IRON_CONDOR' });
   assert.deepEqual(items.map(i => i.simbolo), ['ZZZ', 'MMM', 'AAA', 'BBB']);
 });
 
-test('Screener: sincroniza por lotes, guarda y ranquea sin llamar al proveedor', async () => {
+test('Screener: el ranking lee lo guardado sin llamar al proveedor y la sincronización manual ya no existe', async () => {
   const integ = fakeIntegraciones();
-  const { call, cola, server } = await arrancar(integ);
+  const { call, server, factory, userId } = await arrancar(integ);
   try {
-    // Ranking vacío antes de sincronizar
     const vacio = await call('GET', '/screener/ranking?estrategia=LONG_CALL');
     assert.deepEqual(vacio.items, []); assert.equal(vacio.universo.total, 0); assert.equal(vacio.universo.actualizadoEn, null);
-
-    await call('POST', '/screener/universo/sincronizaciones', { limite: 0 }, 400);
-    await call('POST', '/screener/universo/sincronizaciones', { limite: 1001 }, 400);
-    await call('POST', '/screener/universo/sincronizaciones', { simbolos: ['mal simbolo!'] }, 400);
-
-    const t = await call('POST', '/screener/universo/sincronizaciones', { simbolos: ['upaa', 'UPBB', 'DOWN', 'FLAT', 'NODATA'] }, 202);
-    assert.equal(t.estado, 'pendiente'); assert.equal(t.total, 5); assert.equal(t.procesados, 0);
-    await cola.vaciar();
-    const fin = await call('GET', '/screener/universo/sincronizaciones/' + t._id);
-    assert.equal(fin.estado, 'completada', fin.error);
-    assert.equal(fin.procesados, 5); assert.equal(fin.total, 5); assert.equal(fin.fallidos, 1);
-    await call('GET', '/screener/universo/sincronizaciones/inexistente', undefined, 404);
-
-    // Eficiencia: 5 símbolos → 1 solicitud de barras, 1 de snapshots, 4 de opciones (una por símbolo con datos)
-    assert.equal(integ.llamadas.velasLote.length, 1);
-    assert.equal(integ.llamadas.cotizacionesLote.length, 1);
-    assert.equal(integ.llamadas.snapshotsOpciones.length, 4);
-
+    const repo = factory('screener', { userId, database: 'mongodb' });
+    for (const [simbolo, forma] of Object.entries(FORMAS)) {
+      const p = puntuarSimbolo({ simbolo, velas: velas(forma), fechaReferencia: new Date(BASE + 300 * DIA).toISOString() });
+      await repo.create({ _id: simbolo, simbolo, nombre: simbolo + ' Corp', precio: 150, cambioPct: 0.03, puntajes: p.puntajes, factores: p.factores, resumenes: p.resumenes, actualizadoEn: new Date() });
+    }
     const antes = JSON.stringify(integ.llamadas);
     const calls = await call('GET', '/screener/ranking?estrategia=LONG_CALL&limite=3');
     assert.equal(calls.items.length, 3);
-    assert.ok(['UPAA', 'UPBB'].includes(calls.items[0].simbolo), calls.items.map(i => i.simbolo).join());
+    assert.ok(['UPAA', 'UPBB'].includes(calls.items[0].simbolo));
     assert.equal(calls.items[0].precio, 150);
-    assert.ok(Math.abs(calls.items[0].cambioPct - (150 / 145 - 1)) < 1e-4);
     assert.ok(calls.items[0].puntaje >= calls.items[1].puntaje && calls.items[1].puntaje >= calls.items[2].puntaje);
     assert.ok(calls.items[0].factores.length >= 3 && calls.items[0].resumen && calls.items[0].actualizadoEn);
     assert.equal(calls.universo.total, 4); assert.ok(calls.universo.actualizadoEn);
-    assert.equal(calls.items.find(i => i.simbolo === 'UPAA')?.nombre, 'Up A Corp');
-
-    const puts = await call('GET', '/screener/ranking?estrategia=LONG_PUT&limite=1');
-    assert.equal(puts.items[0].simbolo, 'DOWN');
+    assert.equal((await call('GET', '/screener/ranking?estrategia=LONG_PUT&limite=1')).items[0].simbolo, 'DOWN');
     const todas = await call('GET', '/screener/ranking?limite=2');
     assert.deepEqual(Object.keys(todas.estrategias).sort(), ['IRON_CONDOR', 'LONG_CALL', 'LONG_PUT']);
-    assert.ok(Object.values(todas.estrategias).every(l => l.length === 2));
     assert.equal(todas.estrategias.IRON_CONDOR[0].simbolo, 'FLAT');
     assert.equal(JSON.stringify(integ.llamadas), antes, 'el ranking no llama al proveedor');
-
     await call('GET', '/screener/ranking?estrategia=OTRA', undefined, 400);
     await call('GET', '/screener/ranking?limite=0', undefined, 400);
-
-    // Refrescar reemplaza (no duplica) los registros
-    await call('POST', '/screener/universo/sincronizaciones', { simbolos: ['UPAA', 'DOWN'], opciones: false }, 202); await cola.vaciar();
-    assert.equal((await call('GET', '/screener/ranking?limite=1')).universo.total, 4);
-    assert.equal(integ.llamadas.snapshotsOpciones.length, 4, 'opciones:false no consulta opciones');
+    await call('POST', '/screener/universo/sincronizaciones', {}, 404);
+    await call('POST', '/sincronizaciones/ejecuciones', { recurso: 'universo', simbolos: ['UPAA'] }, 400);
   } finally { server.close(); }
 });
 
-test('Screener: error del proveedor deja el trabajo en fallida con mensaje seguro', async () => {
-  const integ = fakeIntegraciones();
-  integ.alpaca.velasLote = async () => { const e = new Error('x'); e.name = 'IntegrationError'; e.mensaje = 'Faltan credenciales de Alpaca.'; throw e; };
-  const { call, cola, server } = await arrancar(integ);
-  try {
-    const t = await call('POST', '/screener/universo/sincronizaciones', { simbolos: ['UPAA'] }, 202); await cola.vaciar();
-    const fin = await call('GET', '/screener/universo/sincronizaciones/' + t._id);
-    assert.equal(fin.estado, 'fallida'); assert.match(fin.error, /credenciales/);
-  } finally { server.close(); }
-});
-
-test('Mercado: /mercado/estado combina reloj e índices y usa caché', async () => {
+test('Mercado: /mercado/estado da nombre, precio y variación con la misma combinación que el mapa, y usa caché', async () => {
   const integ = fakeIntegraciones();
   const { call, server } = await arrancar(integ);
   try {
     const e = await call('GET', '/mercado/estado');
-    assert.equal(e.abierto, true); assert.ok(e.proximaApertura && e.proximoCierre);
-    assert.deepEqual(e.indices.map(i => i.simbolo), ['SPY', 'QQQ', 'IWM', 'DIA']);
-    assert.equal(e.indices[0].precio, 150);
-    assert.ok(Math.abs(e.indices[0].cambioPct - (150 / 145 - 1)) < 1e-9);
-    assert.ok(e.fuente);
+    assert.equal(e.abierto, true); assert.ok(e.proximaApertura && e.proximoCierre && e.fuente);
+    assert.deepEqual(e.indices.map(i => i.simbolo), indicesReferencia());
+    assert.equal(e.indices[0].nombre, 'Fondo ' + e.indices[0].simbolo, 'el nombre viene de Alpaca');
+    // Primeros minutos: el consolidado muestra la sesión de ayer, así que la variación se mide contra SU cierre (150), no contra 145.
+    assert.deepEqual([e.indices[0].precio, e.indices[0].cambioPct], [153, 0.02]);
     await call('GET', '/mercado/estado');
     assert.equal(integ.llamadas.reloj, 1, 'segunda lectura desde caché');
   } finally { server.close(); }
+});
+
+test('Índices de referencia: se configuran con INDICES_REFERENCIA; sin nombre de Alpaca se usa el símbolo', async () => {
+  assert.equal(indicesReferencia({}).length, 4);
+  assert.deepEqual(indicesReferencia({ INDICES_REFERENCIA: ' aaa, BBB,aaa,m@l ' }), ['AAA', 'BBB']);
+  const integ = fakeIntegraciones();
+  integ.alpaca.buscarActivo = async () => { throw new Error('sin red'); };
+  const e = await createMercadoEstado({ integraciones: integ, env: { INDICES_REFERENCIA: 'AAA' } })();
+  assert.deepEqual(e.indices.map(i => [i.simbolo, i.nombre]), [['AAA', 'AAA']]);
+});
+
+test('Opciones: el resumen excluye vencidos, elige el más cercano vigente e informa la fecha del dato; la cadena filtra el vencimiento', async () => {
+  const integ = fakeIntegraciones();
+  const { call, server, factory, userId } = await arrancar(integ);
+  try {
+    const ctx = { userId, database: 'mongodb' }, dia = n => diaNY(Date.now() + n * DIA);
+    const empresa = await crear('empresas', ctx, { simbolo: 'UPAA', nombre: 'Up', mercado: 'NYSE', activo: true }, factory);
+    const contrato = venc => crear('contratos', ctx, { proveedor: 'alpaca', contratoExternoId: 'c' + venc, empresaId: empresa._id, simbolo: 'c' + venc, tipo: 'call', strike: 100, vencimiento: new Date(venc), multiplicador: 100, activo: true }, factory);
+    await contrato(dia(-3));
+    const hoy = await contrato(dia(0));
+    await contrato(dia(20));
+    const fechaDato = new Date(Date.now() - 60000).toISOString();
+    await crear('datos-mercado', ctx, { empresaId: empresa._id, contratoId: hoy._id, tipo: 'snapshot_opcion', bid: 1, fuente: { proveedor: 'alpaca', fechaDato } }, factory);
+    const r = await call('GET', '/mercado/opciones/resumen/UPAA');
+    assert.deepEqual(r.vencimientos, [dia(0), dia(20)]);
+    assert.equal(r.vencimiento, dia(0)); assert.equal(r.total, 1); assert.equal(r.fechaDato, fechaDato);
+    const otro = await call('GET', '/mercado/opciones/resumen/UPAA?vencimiento=' + dia(20));
+    assert.equal(otro.total, 1); assert.equal(otro.fechaDato, null);
+    assert.equal((await call('GET', '/mercado/opciones/resumen/UPAA?vencimiento=' + dia(-3))).total, 0);
+
+    await call('GET', '/mercado/opciones/cadena/UPAA?vencimiento=' + dia(20) + '&tipo=call');
+    assert.deepEqual(integ.llamadas.filtros.at(-1), { vencimientoDesde: dia(20), vencimientoHasta: dia(20), tipo: 'call' });
+    await call('GET', '/mercado/opciones/cadena/UPAA');
+    assert.deepEqual(integ.llamadas.filtros.at(-1), { vencimientoDesde: dia(0), vencimientoHasta: dia(60) });
+  } finally { server.close(); }
+});
+
+test('Límite de Alpaca: ráfaga inicial, nunca más de 180 por minuto y las operaciones pasan primero', async () => {
+  let t = 0;
+  const turno = createLimitador({ ahora: () => t, esperar: async ms => { t += ms; } });
+  const horas = [];
+  await Promise.all(Array.from({ length: 400 }, () => turno(false).then(() => horas.push(t))));
+  assert.equal(horas[29], 0, 'las primeras 30 salen sin espera');
+  const maximo = Math.max(...horas.map(h => horas.filter(x => x >= h && x < h + 60000).length));
+  assert.ok(maximo <= 180, 'en un minuto: ' + maximo);
+
+  const orden = [], lento = createLimitador({ rafaga: 1, ahora: () => t, esperar: async ms => { t += ms; } });
+  await Promise.all([...['a', 'b', 'c'].map(n => lento(false).then(() => orden.push(n))), lento(true).then(() => orden.push('orden'))]);
+  assert.deepEqual(orden, ['a', 'orden', 'b', 'c']);
 });
 
 test('Cliente Alpaca: velasLote, cotizacionesLote y reloj usan endpoints multi-símbolo', async () => {

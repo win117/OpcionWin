@@ -3,7 +3,8 @@ import { createCrudService } from '../services/crud.service';
 import { todos } from '../services/registros';
 import { empresaPorSimbolo } from '../services/sincronizacion.service';
 import { handle, respond } from './crud.controller';
-import { createMercadoEstado } from '../services/mercado-estado.service';
+import { createMercadoEstado, createNombres, indicesReferencia } from '../services/mercado-estado.service';
+import { diaNY } from '../services/mercado-reloj.service';
 
 const fecha = d => new Date(d).getTime();
 const limite = (valor, porDefecto, maximo) => {
@@ -13,10 +14,8 @@ const limite = (valor, porDefecto, maximo) => {
 };
 
 // Panorama de mercado (consulta directa al proveedor, sin guardar). Caché por proceso de 5 min.
-const PANORAMA_DEFECTO = ['SPY', 'QQQ', 'DIA', 'IWM'];
-const PANORAMA_NOMBRES = { SPY: 'S&P 500', QQQ: 'Nasdaq 100', DIA: 'Dow Jones', IWM: 'Russell 2000' };
 const cachePanorama = new Map();
-async function panoramaSimbolo(alpaca, simbolo, ahora = Date.now()) {
+async function panoramaSimbolo(alpaca, simbolo, nombreDe, ahora = Date.now()) {
   const previo = cachePanorama.get(simbolo);
   if (previo && ahora - previo.t < 5 * 60000) return previo.dato;
   const velas = await alpaca.velas(simbolo, { intervalo: '1Day', desde: new Date(ahora - 70 * 86400000).toISOString(), hasta: new Date(ahora).toISOString(), limite: 100 });
@@ -27,7 +26,7 @@ async function panoramaSimbolo(alpaca, simbolo, ahora = Date.now()) {
   // Cierre previo: si la última vela es de hoy, la anterior; si no, la última.
   const previa = ultimaVela?.fecha.slice(0, 10) === hoy ? cierres.at(-2) : ultimaVela;
   const ultimo = q?.ultimo ?? ultimaVela?.cierre ?? null;
-  const dato = { simbolo, nombre: PANORAMA_NOMBRES[simbolo] || simbolo, ultimo,
+  const dato = { simbolo, nombre: await nombreDe(simbolo), ultimo,
     cambioPct: ultimo != null && previa?.cierre ? (ultimo - previa.cierre) / previa.cierre : null,
     cierres, fechaDato: q?.fechaDato || ultimaVela?.fecha || null };
   cachePanorama.set(simbolo, { t: ahora, dato });
@@ -36,7 +35,8 @@ async function panoramaSimbolo(alpaca, simbolo, ahora = Date.now()) {
 
 export default (factory, integraciones, universo) => {
   const crud = name => createCrudService(name, factory);
-  const estadoMercado = createMercadoEstado({ integraciones });
+  const nombreDe = createNombres({ integraciones });
+  const estadoMercado = createMercadoEstado({ integraciones, nombreDe });
   const forCompany = (name, extra = {}) => handle(async(req,res) => {
     const empresa = await empresaPorSimbolo(req.context, req.params.simbolo, factory).catch(() => { throw boom.notFound('Empresa no registrada.'); });
     respond(res,await crud(name).list(req.context,{...req.query,...extra,empresaId:empresa._id}));
@@ -53,6 +53,7 @@ export default (factory, integraciones, universo) => {
   });
   return {
     estado: handle(async (_req, res) => respond(res, await estadoMercado())),
+    movimientos: handle(async (_req, res) => respond(res, universo.movimientos())),
     mapa: handle(async (_req, res) => respond(res, await universo.mapa())),
     ficha: handle(async (req, res) => respond(res, await universo.ficha(String(req.params.simbolo).toUpperCase()))),
     quotes: serie('cotizacion'),
@@ -60,13 +61,13 @@ export default (factory, integraciones, universo) => {
     fundamentals: forCompany('fundamentales'),
     institutional: forCompany('institucional'),
     snapshot: handle(async(req,res)=>respond(res,await crud('datos-mercado').list(req.context,{...req.query,tipo:'snapshot_opcion',contratoId:req.params.contratoId}))),
-    // Contratos guardados + snapshot almacenado (IV y griegas) de un vencimiento; no llama al proveedor.
+    // Contratos guardados + snapshot almacenado (IV y griegas) de un vencimiento vigente (fecha de Nueva York); no llama al proveedor.
     resumenOpciones: handle(async (req, res) => {
       const { vencimiento } = req.query;
       if (vencimiento !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(vencimiento)) throw boom.badRequest('vencimiento: AAAA-MM-DD.');
       const empresa = await empresaPorSimbolo(req.context, req.params.simbolo, factory).catch(() => { throw boom.notFound('Empresa no registrada.'); });
-      const contratos = (await todos('contratos', req.context, { empresaId: empresa._id }, factory)).filter(c => c.activo !== false && c.vencimiento);
-      const dia = c => new Date(c.vencimiento).toISOString().slice(0, 10);
+      const dia = c => new Date(c.vencimiento).toISOString().slice(0, 10), hoy = diaNY(Date.now());
+      const contratos = (await todos('contratos', req.context, { empresaId: empresa._id }, factory)).filter(c => c.activo !== false && c.vencimiento && dia(c) >= hoy);
       const vencimientos = [...new Set(contratos.map(dia))].sort();
       const elegido = vencimiento || vencimientos[0] || null;
       const snaps = new Map();
@@ -85,13 +86,14 @@ export default (factory, integraciones, universo) => {
       const cot = ultima((await todos('datos-mercado', req.context, { empresaId: empresa._id, tipo: 'cotizacion' }, factory)).filter(q => q.ultimo != null && q.fuente?.fechaDato));
       const vela = cot ? null : ultima((await todos('datos-mercado', req.context, { empresaId: empresa._id, tipo: 'vela' }, factory)).filter(v => v.cierre != null && v.fuente?.fechaDato));
       respond(res, { empresa: { _id: empresa._id, simbolo: empresa.simbolo, nombre: empresa.nombre }, precioSubyacente: cot?.ultimo ?? vela?.cierre ?? null,
-        vencimientos, vencimiento: elegido, items, total: items.length });
+        vencimientos, vencimiento: elegido, items, total: items.length,
+        fechaDato: items.reduce((max, i) => (i.fechaDato && (!max || fecha(i.fechaDato) > fecha(max)) ? i.fechaDato : max), null) });
     }),
     // Consultas directas al proveedor (no se guardan; para guardar usar /sincronizaciones/ejecuciones).
     panorama: handle(async (req, res) => {
-      const lista = req.query.simbolos ? String(req.query.simbolos).split(',').map(x => x.trim().toUpperCase()).filter(Boolean) : PANORAMA_DEFECTO;
+      const lista = req.query.simbolos ? String(req.query.simbolos).split(',').map(x => x.trim().toUpperCase()).filter(Boolean) : indicesReferencia();
       if (lista.length > 8 || lista.some(x => !/^[A-Z][A-Z0-9.]{0,9}$/.test(x))) throw boom.badRequest('simbolos: hasta 8 símbolos separados por coma.');
-      const items = await Promise.all(lista.map(x => panoramaSimbolo(integraciones.alpaca, x).catch(e => ({ simbolo: x, nombre: PANORAMA_NOMBRES[x] || x, error: e?.mensaje || 'Sin datos' }))));
+      const items = await Promise.all(lista.map(x => panoramaSimbolo(integraciones.alpaca, x, nombreDe).catch(e => ({ simbolo: x, nombre: x, error: e?.mensaje || 'Sin datos' }))));
       respond(res, { items, total: items.length, fuente: { proveedor: 'alpaca', feed: integraciones.alpaca.feed || 'iex' } });
     }),
     liveQuote: handle(async (req, res) => respond(res, await integraciones.alpaca.cotizacion(req.params.simbolo.toUpperCase()))),
@@ -100,10 +102,9 @@ export default (factory, integraciones, universo) => {
       const { vencimiento, tipo } = req.query;
       if (tipo && !['call', 'put'].includes(tipo)) throw boom.badRequest('tipo: call o put.');
       if (vencimiento && !/^\d{4}-\d{2}-\d{2}$/.test(vencimiento)) throw boom.badRequest('vencimiento: AAAA-MM-DD.');
-      const hoy = new Date().toISOString().slice(0, 10);
-      const en60 = new Date(Date.now() + 60 * 86400000).toISOString().slice(0, 10);
-      const contratos = await integraciones.alpaca.contratos({ subyacente: simbolo, vencimientoDesde: vencimiento || hoy, vencimientoHasta: vencimiento || en60, ...(tipo ? { tipo } : {}) });
-      const snaps = new Map((contratos.length ? await integraciones.alpaca.snapshotsOpciones(simbolo) : []).map(s => [s.contratoExternoId, s]));
+      const filtro = { vencimientoDesde: vencimiento || diaNY(Date.now()), vencimientoHasta: vencimiento || diaNY(Date.now() + 60 * 86400000), ...(tipo ? { tipo } : {}) };
+      const contratos = await integraciones.alpaca.contratos({ subyacente: simbolo, ...filtro });
+      const snaps = new Map((contratos.length ? await integraciones.alpaca.snapshotsOpciones(simbolo, filtro) : []).map(s => [s.contratoExternoId, s]));
       const items = contratos.map(c => ({ ...c, ...(snaps.get(c.contratoExternoId) || {}) })).sort((a, b) => a.vencimiento.localeCompare(b.vencimiento) || a.strike - b.strike);
       respond(res, { items, total: items.length, vencimientos: [...new Set(contratos.map(c => c.vencimiento))].sort(), fuente: { proveedor: 'alpaca', feed: 'indicative' } });
     }),

@@ -11,11 +11,15 @@ eliminar datos locales no cancela órdenes.
 | `http.js` | fetch con tiempo límite (15 s), reintentos 429/5xx (máx. 2, exponencial o `Retry-After`), intervalo mínimo entre solicitudes |
 | `alpaca.client.js` | Market Data + Trading **paper** (URL fija; live se rechaza con `NO_PERMITIDO`) |
 | `sec.client.js` | `company_tickers`, `companyfacts`, `submissions` y tablas 13F |
-| `institucionales.js` | `FILERS_13F`: lista por defecto de filers 13F (CIK verificados) |
+| `institucionales.js` | Descubre en la SEC qué instituciones reportan un valor en 13F (ninguna está escrita en el código) |
 | `webull.client.js` | Pendiente: todos los métodos lanzan `NO_IMPLEMENTADO` |
-| `index.js` | `createIntegrations(env, fetch)` → `{ alpaca, sec, webull, filers13F, estado() }` |
+| `index.js` | `createIntegrations(env, fetch)` → `{ alpaca, sec, webull, estado() }` |
 
-Variables: `ALPACA_KEY_ID`, `ALPACA_SECRET_KEY`, `ALPACA_DATA_FEED` (`iex` por defecto), `SEC_USER_AGENT`.
+Variables: `ALPACA_KEY_ID`, `ALPACA_SECRET_KEY`, `ALPACA_DATA_FEED` (`iex` por defecto), `SEC_USER_AGENT`,
+`INDICES_REFERENCIA` (opcional: ETF de la franja de índices, por defecto `SPY,QQQ,IWM,DIA`; es configuración, sus nombres y precios vienen de Alpaca).
+
+Ritmo de Alpaca: la cuenta permite 200 solicitudes/min. El cliente usa un cubo de fichas (ráfaga de 30, una cada 400 ms: ≤180 por
+minuto) y atiende primero órdenes, posiciones y cuenta.
 
 ## Códigos de error
 `SIN_CREDENCIALES` (faltan claves o 401), `LIMITE` (429 tras reintentos), `NO_ENCONTRADO` (404),
@@ -45,14 +49,21 @@ SEC EDGAR (User-Agent declarado obligatorio; ≤10 req/s, aquí ≥120 ms entre 
 - `https://www.sec.gov/Archives/edgar/data/{cik}/{accession sin guiones}/index.json` → XML de la tabla de información
   (`infoTable`: `nameOfIssuer`, `cusip`, `value` en USD, `sshPrnamt`, `sshPrnamtType`, `putCall`).
 
+Descubrimiento 13F (verificado 2026-11-23; `www.sec.gov` rechaza con 403 un User-Agent sin contacto):
+- `https://efts.sec.gov/LATEST/search-index?q="CUSIP"&forms=13F-HR&ciks=…&dateRange=custom&startdt=…&enddt=…&from=…`: 100 por página,
+  `_id` = `acceso:archivo` de la tabla, `period_ending`, `file_date`, `display_names`. Orden por relevancia; «&» se indexa como «amp»;
+  admite `"A" OR "B"`; `from + 100 ≤ 10000`.
+- `https://www.sec.gov/data-research/sec-markets-data/form-13f-data-sets`: enlaces `…form13f.zip` (~95 MB, el primero es el más reciente).
+  Por rangos HTTP solo se leen `SUBMISSION.tsv` y `SUMMARYPAGE.tsv` (`TABLEVALUETOTAL`). Guía: https://www.sec.gov/files/form_13f_readme.pdf
+
 ## Limitaciones
 - Feed IEX gratuito: volumen y precios parciales (no consolidados). Griegas/IV de opciones `indicative`.
 - Fundamentales: se usan los `frame` de SEC (CY####Q#, CY####) para deduplicar; los acumulados YTD sin frame
   (p. ej. flujo operativo de Q2/Q3) no aparecen. `fechaDato` es la fecha de presentación del hecho elegido por SEC,
   que puede ser un comparativo posterior.
-- 13F: solo `13F-HR` de `filings.recent` (sin enmiendas `13F-HR/A`); se excluyen filas `PRN` y opciones (`putCall`).
-  Sin CUSIP, la coincidencia es por nombre normalizado (puede fallar con abreviaturas de EDGAR, p. ej. "ALPHABET INC" vs
-  "Alphabet Inc." funciona, "MICROSOFT CORP" vs "Microsoft Corporation" funciona, pero nombres abreviados distintos no).
-  Retraso de hasta 45 días tras el trimestre. Tablas grandes (BlackRock ~23 MB) se descargan completas.
-- Vanguard Group (CIK 102909) presenta 13F-NT desde 2026; sus tenencias están en Vanguard Capital Management y
-  Vanguard Portfolio Management. BlackRock presenta como CIK 2012383.
+- 13F: solo `13F-HR` (sin enmiendas); se excluyen filas `PRN` y opciones (`putCall`). Retraso de hasta 45 días tras el trimestre:
+  un corte con menos de la mitad de las presentaciones del anterior no se usa todavía.
+- El panel institucional son hasta 12 de las 40 mayores instituciones que reportan el valor; no es el total de tenedores.
+  Si la SEC no entrega el ranking, se eligen las de tablas más extensas y se anota en `datosFaltantes`.
+- El CUSIP se deduce por nombre de emisor en tablas 13F pequeñas (palabras sin orden ni sufijos); un nombre muy abreviado puede no
+  encontrarse. Las tablas (hasta ~23 MB) se leen por trozos y solo se guardan las filas del emisor.

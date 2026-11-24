@@ -7,6 +7,7 @@ export default ({factory, integraciones, universo}={})=>{
   const router=Router(), c=controller(factory, integraciones, universo);
   router.get('/empresas',empresas(factory).list);
   router.get('/estado',c.estado);
+  router.get('/movimientos',c.movimientos);
   router.get('/mapa',c.mapa);
   router.get('/mapa/:simbolo',c.ficha);
   router.get('/panorama',c.panorama);

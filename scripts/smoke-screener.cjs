@@ -1,6 +1,6 @@
-// Prueba real opt-in del screener y del estado de mercado: Alpaca real + base real. No envía órdenes.
+// Prueba real opt-in del universo vivo (mapa, ficha, movimientos, ranking) y del estado de mercado: Alpaca, SEC y base reales. No envía órdenes.
 // Usa un usuario temporal UUID y elimina todos sus registros al terminar.
-// Uso: npm run build && node scripts/smoke-screener.cjs mongodb|supabase [limite=10]
+// Uso: npm run build && node scripts/smoke-screener.cjs mongodb|supabase
 require('dotenv').config({ quiet: true });
 const { once } = require('node:events');
 const { randomUUID, scryptSync } = require('node:crypto');
@@ -11,7 +11,7 @@ const { createSessionService } = require('../dist/api/v1/services/sesiones.servi
 const { createApp } = require('../dist/app');
 const prefix = require('../dist/config/config').default.API_URL;
 
-const [database = 'mongodb', limite = '10'] = process.argv.slice(2);
+const [database = 'mongodb'] = process.argv.slice(2);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 (async () => {
@@ -19,6 +19,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   const userId = randomUUID(), password = 'Tmp-' + randomUUID(), salt = randomUUID();
   const user = { id: userId, email: 'smoke-' + userId + '@example.com', salt, passwordHash: scryptSync(password, salt, 64).toString('hex') };
   const app = createApp({ factory: repository, auth: createSessionService(repository, async () => [user]), quiet: true, webDir: null });
+  const { universo } = app.locals;
   const server = app.listen(0, '127.0.0.1'); await once(server, 'listening');
   const base = 'http://127.0.0.1:' + server.address().port + prefix;
   let token;
@@ -29,20 +30,30 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   try {
     token = (await call('POST', '/sesiones', { email: user.email, password, baseDatos: database })).token;
     const estado = await call('GET', '/mercado/estado');
-    console.log('mercado', estado.abierto ? 'abierto' : 'cerrado', estado.indices.map(i => i.simbolo + '=' + i.precio).join(' '));
+    console.log('mercado', estado.abierto ? 'abierto' : 'cerrado', estado.indices.map(i => i.simbolo + ' (' + i.nombre + ')=' + i.precio).join(' '));
     console.log('brokers', (await call('GET', '/brokers/disponibles')).items.map(b => b.codigo + ':' + (b.operativo ? 'operativo' : 'sin credenciales')).join(' '));
     const t0 = Date.now();
-    let s = await call('POST', '/screener/universo/sincronizaciones', { limite: Number(limite) });
-    while (!['completada', 'fallida'].includes(s.estado)) {
-      if (Date.now() - t0 > 540000) throw new Error('Tiempo agotado.');
-      await sleep(1500); s = await call('GET', '/screener/universo/sincronizaciones/' + s._id);
+    universo.iniciar();
+    while (!universo.listo()) {
+      if (Date.now() - t0 > 540000) throw new Error('Tiempo agotado. ' + JSON.stringify(universo.estado()));
+      await sleep(1500);
     }
-    console.log('universo', s.estado, s.procesados + '/' + s.total, 'fallidos=' + s.fallidos, ((Date.now() - t0) / 1000).toFixed(1) + 's', s.error || '');
-    if (s.estado !== 'completada') throw new Error('La sincronización del universo no se completó.');
+    console.log('universo listo en', ((Date.now() - t0) / 1000).toFixed(1) + 's', JSON.stringify(universo.estado()));
+    const mapa = await call('GET', '/mercado/mapa');
+    const completas = mapa.items.filter(i => i.precio > 0 && i.nombre && i.capitalizacion > 0);
+    console.log('mapa', mapa.total, 'empresas;', completas.length, 'con precio, nombre y capitalización; desactualizado:', mapa.desactualizado);
+    if (!completas.length) throw new Error('El mapa quedó vacío.');
+    const { simbolo } = mapa.items.reduce((a, b) => ((b.capitalizacion ?? 0) > (a.capitalizacion ?? 0) ? b : a));
+    const ficha = await call('GET', '/mercado/mapa/' + simbolo);
+    console.log('ficha', simbolo, ficha.precio, ficha.velas.length, 'velas');
+    if (ficha.simbolo !== simbolo || !ficha.velas.length) throw new Error('La ficha está incompleta.');
+    const mov = await call('GET', '/mercado/movimientos');
+    console.log('movimientos', 'alzas=' + mov.alzas.length, 'bajas=' + mov.bajas.length, 'volumen=' + mov.volumenInusual.map(i => i.simbolo + '×' + i.volumenRelativo).slice(0, 3).join(' '));
     const r = await call('GET', '/screener/ranking?limite=3');
     for (const [e, items] of Object.entries(r.estrategias)) console.log('ranking', e.padEnd(12), items.map(i => i.simbolo + ' ' + i.puntaje).join(' | '));
     if (!r.universo.total) throw new Error('El ranking quedó vacío.');
   } finally {
+    universo.detener();
     server.close();
     let n = 0;
     for (const name of Object.keys(resources)) {

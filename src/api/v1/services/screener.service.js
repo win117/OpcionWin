@@ -1,20 +1,13 @@
-// Screener: puntaje por estrategia para un universo de símbolos, guardado de forma compacta (recurso `screener`).
-// El ranking se lee de lo guardado (sin llamar a proveedores); un trabajo de fondo refresca el universo por lotes.
+// Screener: puntaje por estrategia de un símbolo y ranking del universo. El universo vivo (universo-vivo.service.js) obtiene los
+// datos y calcula los puntajes; leer el ranking no llama a proveedores.
 import boom from '@hapi/boom';
 import { repository } from '../../../repositories';
 import { cores, confluencia } from '../../../cores';
 import { ESTRATEGIAS } from '../models/shared';
-import { todos, idDeterminista, guardarLote, parchar, obtener } from './registros';
-import { iniciarTrabajo } from './trabajos.service';
-import { reconciliarTrabajo } from './trabajos-huerfanos.service';
+import { todos } from './registros';
 
 export const VERSION = 'screener@1.0.0';
-const DIA = 86400000;
-const SIMBOLO = /^[A-Z][A-Z0-9.\-]{0,9}$/;
 const CORES_SCREENER = ['tecnico', 'indicadores'];
-const LOTE_BARRAS = 40; // 40 símbolos × ~275 velas ≈ una página de 10 000 barras
-const LOTE_SNAPSHOTS = 100;
-const MIN_VELAS = 30;
 
 const redondear = (x, d = 4) => (Number.isFinite(x) ? Math.round(x * 10 ** d) / 10 ** d : null);
 const acotar = (x, min = 0, max = 100) => Math.min(max, Math.max(min, x));
@@ -83,95 +76,8 @@ export async function conReintento(fn, { intentos = 4, esperaMs = 15000, esperar
   }
 }
 
-export function createScreener({ integraciones, factory = repository, cola, ahora = () => new Date(), concurrenciaOpciones = 4, pausaMs = 0, universo, esperarLimite } = {}) {
-  const reloj = () => { const v = ahora(); return v instanceof Date ? v : new Date(v); };
-  const dormir = ms => (ms ? new Promise(r => { setTimeout(r, ms); }) : Promise.resolve());
-
-  // Mapa con concurrencia limitada (cada tarea que falla devuelve null).
-  async function mapear(items, concurrencia, fn) {
-    const salida = new Array(items.length).fill(null);
-    let i = 0;
-    await Promise.all(Array.from({ length: Math.min(concurrencia, items.length) }, async () => {
-      while (i < items.length) { const k = i++; salida[k] = await fn(items[k]).catch(() => null); }
-    }));
-    return salida;
-  }
-
-  // IV de contratos cerca del dinero (±5 %) a 20-50 días; una sola página, para acotar solicitudes.
-  async function ivOpciones(alpaca, simbolo, precio, hoy) {
-    if (!(precio > 0)) return [];
-    const dia = n => new Date(hoy.getTime() + n * DIA).toISOString().slice(0, 10);
-    const snaps = await conReintento(() => alpaca.snapshotsOpciones(simbolo, { vencimientoDesde: dia(20), vencimientoHasta: dia(50), strikeMin: redondear(precio * 0.95, 2), strikeMax: redondear(precio * 1.05, 2), limite: 200, paginas: 1 }), { esperar: esperarLimite });
-    return snaps.map(s => ({ ...parsearOcc(s.contratoExternoId), bid: s.bid, ask: s.ask, volatilidadImplicita: s.volatilidadImplicita, griegas: s.griegas })).filter(o => o.tipo && o.strike);
-  }
-
-  async function ejecutar(ctx, registro) {
-    const alpaca = integraciones.alpaca;
-    const simbolos = registro.simbolos || [];
-    const conOpciones = registro.proveedor !== 'alpaca-sin-opciones';
-    const hoy = reloj();
-    const nombres = new Map((await alpaca.listarActivos().catch(() => [])).map(a => [String(a.simbolo).toUpperCase(), a.nombre]));
-    let procesados = 0, fallidos = 0;
-    for (let i = 0; i < simbolos.length; i += LOTE_BARRAS) {
-      const lote = simbolos.slice(i, i + LOTE_BARRAS);
-      const velas = await alpaca.velasLote(lote, { desde: new Date(hoy.getTime() - 400 * DIA).toISOString(), hasta: hoy.toISOString() });
-      const snaps = {};
-      for (let k = 0; k < lote.length; k += LOTE_SNAPSHOTS) Object.assign(snaps, await alpaca.cotizacionesLote(lote.slice(k, k + LOTE_SNAPSHOTS)).catch(() => ({})));
-      const validos = lote.filter(s => (velas[s]?.length || 0) >= MIN_VELAS);
-      fallidos += lote.length - validos.length;
-      const precios = new Map(validos.map(s => [s, snaps[s]?.ultimo ?? velas[s].at(-1).cierre]));
-      const opciones = conOpciones ? await mapear(validos, concurrenciaOpciones, s => ivOpciones(alpaca, s, precios.get(s), hoy)) : [];
-      const items = [];
-      validos.forEach((s, k) => {
-        try {
-          const v = velas[s], precio = precios.get(s);
-          const previo = snaps[s]?.cierreAnterior ?? v.at(-2)?.cierre;
-          const p = puntuarSimbolo({ simbolo: s, velas: v, opciones: opciones[k] || [], fechaReferencia: hoy.toISOString() });
-          const vols = v.slice(-20).map(x => x.volumen).filter(Number.isFinite);
-          items.push({ id: idDeterminista('screener', s), datos: {
-            simbolo: s, nombre: nombres.get(s) || s, precio: redondear(precio, 4), cambioPct: previo > 0 ? redondear(precio / previo - 1, 6) : null,
-            volumenPromedio: vols.length ? Math.round(vols.reduce((a, b) => a + b, 0) / vols.length) : null, ivPromedio: redondear(p.ivActual, 4),
-            puntajes: p.puntajes, factores: p.factores, resumenes: p.resumenes, versionAlgoritmo: VERSION, actualizadoEn: hoy,
-          } });
-        } catch { fallidos += 1; }
-      });
-      await guardarLote('screener', ctx, items, factory);
-      procesados += lote.length;
-      await parchar('sincronizaciones', ctx, registro._id, { procesados, fallidos }, factory);
-      await dormir(pausaMs);
-    }
-    return { procesados, fallidos };
-  }
-
-  const vista = r => ({ _id: r._id, estado: r.estado, procesados: r.procesados ?? 0, total: r.total ?? 0, fallidos: r.fallidos ?? 0, ...(r.error ? { error: r.error } : {}), ...(r.finalizadaEn ? { finalizadaEn: r.finalizadaEn } : {}), createdAt: r.createdAt });
-
+export function createScreener({ factory = repository, universo } = {}) {
   return {
-    ejecutar,
-    async iniciarSincronizacion(ctx, body = {}) {
-      let simbolos;
-      if (body.simbolos !== undefined) {
-        if (!Array.isArray(body.simbolos) || !body.simbolos.length) throw boom.badRequest('simbolos: arreglo no vacío de símbolos.');
-        simbolos = [...new Set(body.simbolos.map(s => String(s).trim().toUpperCase()))];
-        if (simbolos.length > 1000 || simbolos.some(s => !SIMBOLO.test(s))) throw boom.badRequest('simbolos: hasta 1000 símbolos válidos.');
-      } else {
-        const limite = body.limite === undefined ? 500 : Number(body.limite);
-        if (!Number.isSafeInteger(limite) || limite < 1 || limite > 1000) throw boom.badRequest('limite debe ser un entero entre 1 y 1000.');
-        if (!universo) throw boom.badRequest('simbolos requerido.');
-        simbolos = (await universo.simbolos()).slice(0, limite);
-      }
-      // Una sola sincronización de universo a la vez por usuario: se devuelve la activa.
-      for (const previo of await todos('sincronizaciones', ctx, { recurso: 'universo' }, factory)) {
-        if (['pendiente', 'procesando'].includes(previo.estado) && cola?.activo?.(previo._id)) return vista(previo);
-      }
-      const datos = { recurso: 'universo', proveedor: body.opciones === false ? 'alpaca-sin-opciones' : 'alpaca', simbolos, total: simbolos.length };
-      return vista(await iniciarTrabajo({ name: 'sincronizaciones', ctx, datos, cola, factory, ejecutar: r => ejecutar(ctx, r) }));
-    },
-    async obtenerSincronizacion(ctx, id) {
-      let r;
-      try { r = await obtener('sincronizaciones', ctx, id, factory); } catch { throw boom.notFound('Sincronización no encontrada.'); }
-      if (r.recurso !== 'universo') throw boom.notFound('Sincronización no encontrada.');
-      return vista(await reconciliarTrabajo('sincronizaciones', ctx, r, { factory, cola }));
-    },
     async ranking(ctx, { estrategia, limite = 5 } = {}) {
       if (estrategia !== undefined && !ESTRATEGIAS.includes(estrategia)) throw boom.badRequest('estrategia: ' + ESTRATEGIAS.join(', ') + '.');
       const n = Number(limite);
