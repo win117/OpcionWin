@@ -72,7 +72,7 @@ export function Pagination({ page, limit, total, onPage }) {
   return (
     <nav className="pagination" aria-label="Paginación">
       <button type="button" className="btn btn--sm" onClick={() => onPage(page - 1)} disabled={page <= 1}>Anterior</button>
-      <span className="muted">Página {page} de {pages} · {total} registros</span>
+      <span className="muted">Página {page} de {pages}, {total} {total === 1 ? 'registro' : 'registros'}</span>
       <button type="button" className="btn btn--sm" onClick={() => onPage(page + 1)} disabled={page >= pages}>Siguiente</button>
     </nav>
   );

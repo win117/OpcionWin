@@ -34,7 +34,7 @@ function BidAsk({ cotizacion, abierto }) {
 function Estado({ corriendo, pasos, fecha }) {
   const hechos = (pasos || []).filter(p => ['completada', 'fallida', 'omitida'].includes(p.estado)).length;
   const fallidos = (pasos || []).filter(p => p.estado === 'fallida');
-  if (corriendo && pasos) {
+  if (corriendo && pasos && hechos < pasos.length) {
     const actual = pasos.find(p => p.estado === 'procesando');
     return (
       <>
@@ -71,16 +71,14 @@ export function DetalleEmpresa({ empresa, simbolo, velas, version, corriendo, pa
           </div>
           <div className="price">
             <span className="price__value">{fmtMoney(precio)}</span>
-            {isNum(cambio) && <span className={'price__chg ' + (cambio >= 0 ? 'up' : 'down')}>{cambio >= 0 ? '▲' : '▼'} {fmtPct(Math.abs(cambio), 2)}</span>}
+            <span className={'price__chg ' + (cambio >= 0 ? 'up' : 'down')}>{isNum(cambio) ? `${cambio >= 0 ? '▲' : '▼'} ${fmtPct(Math.abs(cambio), 2)}` : ' '}</span>
           </div>
         </div>
-        {velas.length > 0 && (
-          <dl className="stats stats--row">
-            <div><dt>Rango 52 semanas</dt><dd>{fmtMoney(Math.min(...ult52.map(v => v.low)))} – {fmtMoney(Math.max(...ult52.map(v => v.high)))}</dd></div>
-            <div><dt>{BOLSAS[last.row?.fuente?.feed] || 'Volumen'}</dt><dd>{fmtCompact(last.volume)}</dd></div>
-            <div><dt><Termino id="spread">Bid / Ask</Termino></dt><dd><BidAsk cotizacion={cotizacion} abierto={sesion?.data?.abierto} /></dd></div>
-          </dl>
-        )}
+        <dl className="stats stats--row">
+          <div><dt>Rango 52 semanas</dt><dd>{last ? `${fmtMoney(Math.min(...ult52.map(v => v.low)))} a ${fmtMoney(Math.max(...ult52.map(v => v.high)))}` : '—'}</dd></div>
+          <div><dt>{BOLSAS[last?.row?.fuente?.feed] || 'Volumen'}</dt><dd>{fmtCompact(last?.volume)}</dd></div>
+          <div><dt><Termino id="spread">Bid / Ask</Termino></dt><dd><BidAsk cotizacion={cotizacion} abierto={sesion?.data?.abierto} /></dd></div>
+        </dl>
       </section>
     </>
   );

@@ -8,7 +8,6 @@ export default function Configuracion() {
   const { pathname } = useLocation();
   const actual = pathname.split('/')[2];
   const grupo = CONFIG_GRUPOS.find(g => g.secciones.some(s => s.to === actual)) || CONFIG_GRUPOS[0];
-  const seccion = grupo.secciones.find(s => s.to === actual);
   const nav = useRef(null);
 
   useEffect(() => {
@@ -37,10 +36,7 @@ export default function Configuracion() {
         ))}
         <Link className="cfg__glosario" to="/glosario">Glosario de términos</Link>
       </nav>
-      <div className="cfg__cuerpo stack">
-        {seccion && <p className="cfg__ayuda muted small">{seccion.descripcion}</p>}
-        <Outlet />
-      </div>
+      <div className="cfg__cuerpo stack"><Outlet /></div>
     </div>
   );
 }
