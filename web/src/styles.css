@@ -939,6 +939,16 @@ a.mov__fila:hover { background: var(--surface-2); }
 .desglose-ajuste td { white-space: normal; }
 .desglose-total th, .desglose-total td { border-top: 2px solid var(--border); }
 
+/* ===== Los cinco factores ===== */
+.factores { display: flex; align-items: center; gap: 8px; }
+.factores__puntos { display: inline-flex; gap: 3px; }
+.factores__puntos i { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--accent); }
+.factores__puntos .is-ok { background: var(--accent); }
+.factores__puntos .is-pendiente { border-style: dotted; border-color: var(--control-border); }
+.ficha__factores { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.ficha__factores li { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 10px; align-items: center; font-size: var(--t-14); }
+.veredicto__parcial { color: var(--warning-fg); }
+
 /* Pantallas táctiles: nada que se pulse mide menos de 44 px */
 @media (pointer: coarse) {
   .btn, .btn--sm, .tab, .subnav__link, .seg__btn, .mapa__op, .chip, .check, .mapa__th, .mapa__campo select, .mapa__buscar input,

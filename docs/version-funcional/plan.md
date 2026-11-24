@@ -185,3 +185,6 @@ Tres auditorías (funcionalidad/seguridad, cores/finanzas, diseño) y mejoras en
   de enviar, vencimiento objetivo de 35-45 días, etiquetas que coinciden con el número.
 - **Diseño:** cabecera de 56 px, barra inferior en móvil, tema elegible, mapa accesible y en español, glosario, configuración agrupada.
 - Propuesta de calibración de puntajes: ADR-014 (sin aplicar).
+
+### 2026-11-24 · Decisión con los cinco cores (ADR-015)
+`screener@2.0.0` (`combinarCores`), universo vivo con cores lentos en segundo plano, `sec.cargarTenencias13F` (lectura masiva) y `tests/cinco-cores.test.cjs`.

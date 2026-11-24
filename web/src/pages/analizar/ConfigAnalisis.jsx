@@ -87,7 +87,7 @@ export default function ConfigAnalisis({ config, onChange, catalogo, corriendo, 
       </ul>
       <div className="cfg-opciones">
         <label className="check"><input type="checkbox" checked={config.sincronizar} onChange={e => onChange({ ...config, sincronizar: e.target.checked })} disabled={corriendo} /><span>Sincronizar datos antes de analizar</span></label>
-        <label className="check"><input type="checkbox" checked={config.institucional} onChange={e => onChange({ ...config, institucional: e.target.checked })} disabled={corriendo || !config.sincronizar || !config.cores.institucional.on} /><span>Descargar 13F institucional <small className="muted">(lento: 1–3 min; requiere el factor Institucional)</small></span></label>
+        <label className="check"><input type="checkbox" checked={config.institucional} onChange={e => onChange({ ...config, institucional: e.target.checked })} disabled={corriendo || !config.sincronizar || !config.cores.institucional.on} /><span>Traer reportes 13F de instituciones <small className="muted">(los necesita el factor Institucional)</small></span></label>
         <label className="check"><input type="checkbox" checked={config.contratos} onChange={e => onChange({ ...config, contratos: e.target.checked })} disabled={corriendo || !config.sincronizar} /><span>Traer contratos de opciones <small className="muted">(strikes, vencimientos y griegas de las estrategias sugeridas)</small></span></label>
         {config.sincronizar && <p className="muted small" aria-live="polite">Se sincronizará: empresa{recursos.length ? ', ' + recursos.map(r => RECURSO_LABELS[r].toLowerCase()).join(', ') : ''}.</p>}
       </div>

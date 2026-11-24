@@ -1,6 +1,6 @@
 // Lógica de la canalización: sincronización → cores → selección. Sin dependencias de React.
 import { api } from '../../api/client';
-import { acciones, empresas, jobPaths, mercado, sincronizaciones } from '../../api/resources';
+import { acciones, empresas, jobPaths, sincronizaciones } from '../../api/resources';
 import { CORES, CORE_LABELS, RECURSO_LABELS } from '../../utils/constants';
 import { recursosAlDia } from '../../utils/analisis';
 import { fmtNum, isNum } from '../../utils/format';
@@ -42,13 +42,13 @@ export function recursosNecesarios(coresActivos, catalogo, { institucional = fal
   return [...RECURSOS, 'institucional'].filter(r => set.has(r));
 }
 const ESPERA_MS = [400, 700, 1000, 1500]; // las primeras consultas son más seguidas: muchos trabajos terminan en menos de un segundo
-const CLAVE = 'opciones.analizar.config.v1';
+const CLAVE = 'opciones.analizar.config.v1', VERSION_CONFIG = 2;
 const pausa = ms => new Promise(r => setTimeout(r, ms));
 
 export const configPorDefecto = () => ({
   cores: Object.fromEntries(CORES.map(c => [c, { on: true, peso: 1 }])),
   excluidas: {}, // core → nombres de señales desmarcadas (lo nuevo queda marcado por defecto)
-  institucional: false,
+  institucional: true, // 13F: forma parte de los cinco factores que deciden
   contratos: true, // traer contratos de opciones (strikes, vencimientos y griegas de las estrategias sugeridas)
   sincronizar: true,
   diasMin: 7,
@@ -72,7 +72,8 @@ export function leerConfig() {
       if (g.cores?.[c]) base.cores[c] = { on: g.cores[c].on !== false, peso: isNum(g.cores[c].peso) ? Math.min(5, Math.max(0, g.cores[c].peso)) : 1 };
     }
     base.excluidas = g.excluidas && typeof g.excluidas === 'object' ? g.excluidas : {};
-    base.institucional = Boolean(g.institucional);
+    // Antes venía apagado por lento; las preferencias guardadas entonces no expresan una decisión.
+    base.institucional = g.v === VERSION_CONFIG ? Boolean(g.institucional) : true;
     base.contratos = g.contratos !== false;
     base.sincronizar = g.sincronizar !== false;
     if (!errorRangoDias(g)) { base.diasMin = g.diasMin; base.diasMax = g.diasMax; }
@@ -81,7 +82,7 @@ export function leerConfig() {
 }
 
 export function guardarConfig(config) {
-  try { localStorage.setItem(CLAVE, JSON.stringify(config)); } catch { /* sin almacenamiento */ }
+  try { localStorage.setItem(CLAVE, JSON.stringify({ ...config, v: VERSION_CONFIG })); } catch { /* sin almacenamiento */ }
 }
 
 /** Resuelve la configuración contra el catálogo: cores activos, señales elegidas (null = todas), recursos a sincronizar y ponderaciones. */
@@ -172,19 +173,13 @@ export async function sincronizarDatos(simbolo, { recursos = [], diasMin, diasMa
 /** Canalización completa según la configuración resuelta. Devuelve el trabajo de la selección (null si falló). */
 export async function ejecutarFlujo(simbolo, { sincronizar, recursos, cores, indicadores, ponderaciones, diasMin, diasMax }, setPasos, cancelado) {
   const { set, paso } = crearPaso(setPasos, cancelado);
-  let syncs = {};
-  if (sincronizar) syncs = await sincronizarDatos(simbolo, { recursos, diasMin, diasMax, saltarRecientes: true }, setPasos, cancelado);
+  if (sincronizar) await sincronizarDatos(simbolo, { recursos, diasMin, diasMax, saltarRecientes: true }, setPasos, cancelado);
 
   const empresa = (await empresas.list({ simbolo, limit: 1 })).items[0];
   if (!empresa) throw new Error('Empresa no encontrada. Trae sus datos primero.');
-  let hay13F = true;
-  if (cores.includes('institucional')) {
-    hay13F = (recursos.includes('institucional') && syncs.institucional?.procesados > 0)
-      || (await mercado.institucional(simbolo, { limit: 1 }).catch(() => null))?.total > 0;
-  }
-  const activos = cores.filter(c => c !== 'institucional' || hay13F);
-  if (activos.length < cores.length) set('core:institucional', { estado: 'omitida', detalle: 'sin datos 13F' });
-  if (!activos.length) throw new Error('Ningún factor tiene datos para evaluar.');
+  // Un factor activo sin datos también se envía: así la cobertura dice la verdad (4 de 5) en vez de ocultar que falta.
+  const activos = cores;
+  if (!activos.length) throw new Error('Activa al menos un factor para analizar.');
 
   // El rango de días del usuario limita los contratos que entran en iv_promedio (evaluaciones y selección).
   const parametros = { ...(indicadores ? { indicadores } : {}), ...(isNum(diasMin) && isNum(diasMax) ? { diasVencimientoMin: diasMin, diasVencimientoMax: diasMax } : {}) };

@@ -7,8 +7,8 @@ import { Empty, ErrorMessage, Notice } from '../../components/States';
 import { Select } from '../../components/Field';
 import { Termino } from '../../components/Termino';
 import BotonOperar from '../../components/BotonOperar';
-import { encaje, razones, titular } from '../../utils/analisis';
-import { ESTRATEGIA_LABELS } from '../../utils/constants';
+import { participacion, encaje, razones, titular } from '../../utils/analisis';
+import { CORE_LABELS, ESTRATEGIA_LABELS } from '../../utils/constants';
 import { candidatosStrike, diasHasta, mid, SPREAD_AVISO, spreadPct, textoPuntaje, vencimientosVigentes } from '../../utils/estrategiasOrden';
 import { fmtDate, fmtDateTime, fmtFixed, fmtMoney, fmtPct, isNum } from '../../utils/format';
 
@@ -41,6 +41,7 @@ function Veredicto({ empresa, datos, pos, onContratos }) {
   const cores = datos.seleccion?.coresSeleccionados || [];
   const r = razones(activa.codigo, { cores, evaluaciones: detalle?.evaluaciones || datos.evaluaciones, pesos: detalle?.conf.ponderaciones, puntaje: activa.puntaje, motivos: activa.motivos });
   const creado = datos.seleccion?.createdAt;
+  const voto = participacion(cores, detalle?.evaluaciones || datos.evaluaciones);
   const riesgo = op?.riesgo;
   const nulo = !op && pos.cargando ? <span className="skel veredicto__skel" /> : '—';
   return (
@@ -56,6 +57,9 @@ function Veredicto({ empresa, datos, pos, onContratos }) {
         <h2 id="veredicto-titulo" tabIndex={-1}>{titular(activa.codigo, activa.puntaje)}</h2>
         <ScoreBar value={activa.puntaje} label={'Compatibilidad de ' + nombre(activa.codigo)} />
         <p>{e.detalle}</p>
+        {voto.completo
+          ? <p className="small muted">Decisión de los {voto.total} factores.</p>
+          : <p className="small veredicto__parcial"><strong>Parcial: opinan {voto.opinan} de {voto.total} factores.</strong> Falta {voto.faltan.map(f => `${CORE_LABELS[f.core]} (${f.motivo})`).join(', ')}.</p>}
         {activa !== mejor && <p className="small">La mejor clasificada es {nombre(mejor.codigo)}. <button type="button" className="enlace" onClick={pos.irAMejor}>Ver {nombre(mejor.codigo)}</button></p>}
         {activa === mejor && e.tono !== 'success' && <p className="small">Ninguna estrategia encaja bien por ahora. No operar también es una opción.</p>}
       </div>

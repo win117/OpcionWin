@@ -40,6 +40,7 @@ export const normalizarEmisor = nombre => String(nombre ?? '')
   .filter(p => p && !SUFIJOS.has(p))
   .join(' ');
 const limpiarNombre = nombre => String(nombre ?? '')
+  .replace(/\([^)]*\)/g, ' ') // estado o aclaración: "(Delaware)"
   .replace(/\/[A-Z]{2,3}\/?(?=\s|$)/gi, ' ') // estado de constitución: "/DE/"
   .replace(/\b(common stock|ordinary shares?|capital stock)\b.*$/i, ' ');
 export const claveEmisor = nombre => normalizarEmisor(limpiarNombre(nombre)).split(' ').filter(p => p && !['&', 'OF', 'AND'].includes(p)).sort().join(' ');

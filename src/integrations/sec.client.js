@@ -3,7 +3,7 @@
 // Documentación verificada: ver src/integrations/README.md.
 import { IntegrationError } from './errors';
 import { createHttp } from './http';
-import { claveEmisor, createDescubrimiento13F } from './institucionales';
+import { claveEmisor, createDescubrimiento13F, MAX_PANEL } from './institucionales';
 
 export { normalizarEmisor } from './institucionales';
 
@@ -57,6 +57,9 @@ const filaTabla = contenido => {
 export const parsearTabla13F = (xml, coincide = () => true) => [...String(xml ?? '').matchAll(BLOQUE)].map(m => filaTabla(m[1])).filter(coincide);
 
 // Tablas enormes (decenas de MB): se leen por trozos y solo se conservan las filas que coinciden.
+// Lectura masiva 13F: instituciones que se leen completas (más que MAX_PANEL: no todas tienen cada empresa) y su vigencia.
+const INSTITUCIONES_MASIVO = 16, MASIVO_VIGENTE_MS = 7 * 86400000;
+const NO_ACCION = /\b(PFD|PREF|WTS?\b|WARRANT|RIGHT|UNIT|NOTE|DEB)/i;
 const MAX_BYTES_TABLA = 120e6, MAX_PENDIENTE = 1e6, MAX_MS_TABLA = 120000;
 export const leerTablaPorTrozos = async (res, coincide, { maxBytes = MAX_BYTES_TABLA, maxMs = MAX_MS_TABLA } = {}) => {
   if (!res.body?.getReader) return parsearTabla13F(await res.text(), coincide);
@@ -242,7 +245,7 @@ export const createSecClient = ({
     for (let i = 0; i < (r.form || []).length && salida.length < cortes; i += 1) {
       if (r.form[i] !== '13F-HR' || !r.reportDate?.[i] || vistos.has(r.reportDate[i])) continue;
       vistos.add(r.reportDate[i]);
-      salida.push({ accn: r.accessionNumber[i], fechaPublicacion: r.filingDate[i], fechaCorte: r.reportDate[i] });
+      salida.push({ accn: r.accessionNumber[i], fechaPublicacion: r.filingDate[i], fechaCorte: r.reportDate[i], institucion: cuerpo?.name });
     }
     return salida;
   };
@@ -269,16 +272,99 @@ export const createSecClient = ({
     return leidas.get(id);
   };
 
+  // ---- Lectura masiva: las tablas de las mayores instituciones se leen UNA vez y sirven para todas las empresas (500 empresas
+  // por separado significarían descargar las mismas tablas miles de veces).
+  let masivo = null, masivoPendiente = null; // { t, ciks, cortes: [{ fechaCorte, porCik }], porClave, omitidos }
+  async function leerMasivo() {
+    const mayores = await descubrimiento.mayores();
+    if (!mayores) throw new IntegrationError({ proveedor: PROVEEDOR, codigo: 'PROVEEDOR', mensaje: 'La SEC no entregó el ranking de instituciones 13F.' });
+    const ciks = mayores.slice(0, INSTITUCIONES_MASIVO), informes = new Map(), omitidos = [];
+    for (const cik of ciks) {
+      try { informes.set(cik, await presentaciones13F(cik, 3)); } catch (e) {
+        if (e?.codigo === 'SIN_CREDENCIALES') throw e;
+        omitidos.push({ cik, motivo: e?.mensaje || 'Error al leer el 13F.' });
+      }
+    }
+    // Los dos cortes más recientes que ya presentó al menos la mitad (plazo legal: 45 días).
+    const conteo = new Map();
+    for (const lista of informes.values()) for (const p of lista) conteo.set(p.fechaCorte, (conteo.get(p.fechaCorte) || 0) + 1);
+    const elegidos = [...conteo].filter(([, n]) => n >= informes.size / 2).map(([c]) => c).sort().reverse().slice(0, 2);
+    const cortes = elegidos.map(fechaCorte => ({ fechaCorte, porCik: new Map() })), porClave = new Map();
+    for (const c of cortes) {
+      for (const [cik, lista] of informes) {
+        const p = lista.find(x => x.fechaCorte === c.fechaCorte);
+        if (!p) continue;
+        try {
+          const sumas = new Map(), nombres = new Map();
+          await leerTabla(await urlTabla(cik, p.accn), f => {
+            if (f.tipoCantidad === 'PRN' || f.putCall || !/^[0-9A-Z]{9}$/.test(f.cusip) || NO_ACCION.test(f.clase || '')) return false;
+            const x = sumas.get(f.cusip) || { acciones: 0, valorReportado: 0 };
+            x.acciones += f.cantidad; x.valorReportado += f.valor;
+            sumas.set(f.cusip, x);
+            if (!nombres.has(f.cusip)) nombres.set(f.cusip, claveEmisor(f.nombreEmisor));
+            return false; // solo se acumula: no se guardan filas
+          });
+          // Se incorpora al terminar: una tabla interrumpida no deja sumas a medias.
+          c.porCik.set(cik, { institucion: p.institucion || cik, accn: p.accn, fechaPublicacion: p.fechaPublicacion, sumas });
+          for (const [cusip, clave] of nombres) { if (!porClave.has(clave)) porClave.set(clave, new Set()); porClave.get(clave).add(cusip); }
+        } catch (e) { omitidos.push({ cik, motivo: e?.mensaje || 'Error al leer el 13F.' }); }
+      }
+    }
+    if (!cortes.some(c => c.porCik.size)) throw new IntegrationError({ proveedor: PROVEEDOR, codigo: 'PROVEEDOR', mensaje: 'No se pudo leer ninguna tabla 13F.' });
+    masivo = { t: (ahora || Date.now)(), ciks, cortes, porClave, omitidos };
+  }
+  /** Carga (o reutiliza) la lectura masiva. Tarda minutos la primera vez; vale una semana. */
+  const cargarTenencias13F = async () => {
+    if (masivo && (ahora || Date.now)() - masivo.t < MASIVO_VIGENTE_MS) return;
+    masivoPendiente ||= leerMasivo().finally(() => { masivoPendiente = null; });
+    await masivoPendiente;
+  };
+  function desdeMasivo(cusips) {
+    // Un emisor son todos los CUSIP con sus mismos 6 primeros caracteres; si el nombre coincide con varios, gana el de más valor.
+    const valor = new Map();
+    for (const c of masivo.cortes) for (const t of c.porCik.values()) for (const k of cusips) { const b = k.slice(0, 6); valor.set(b, (valor.get(b) || 0) + (t.sumas.get(k)?.valorReportado || 0)); }
+    const [base] = [...valor].sort((a, b) => b[1] - a[1])[0] || [];
+    const lista = cusips.filter(k => k.startsWith(base));
+    const tiene = t => lista.some(k => t?.sumas.has(k));
+    const panel = masivo.ciks.filter(cik => masivo.cortes.some(c => tiene(c.porCik.get(cik)))).slice(0, MAX_PANEL);
+    if (!base || !panel.length) return null;
+    const cortes = [];
+    for (const c of masivo.cortes) {
+      const tenencias = [], referencias = [];
+      let fechaPublicacion = '';
+      for (const cik of panel) {
+        const t = c.porCik.get(cik);
+        if (!t) continue;
+        referencias.push(t.accn);
+        if (t.fechaPublicacion > fechaPublicacion) fechaPublicacion = t.fechaPublicacion;
+        if (!tiene(t)) continue;
+        const suma = lista.reduce((a, k) => { const x = t.sumas.get(k); return x ? { acciones: a.acciones + x.acciones, valorReportado: a.valorReportado + x.valorReportado } : a; }, { acciones: 0, valorReportado: 0 });
+        tenencias.push({ institucion: t.institucion, identificadorInstitucion: cik, ...suma, unidad: 'USD' });
+      }
+      if (referencias.length) cortes.push({ fechaCorte: c.fechaCorte, fechaPublicacion, fuente: { proveedor: PROVEEDOR, fechaDato: fechaPublicacion, referencia: referencias.join(',').slice(0, 2000) }, tenencias });
+    }
+    return cortes;
+  }
+
   /**
    * Tenencias de un emisor por corte trimestral, del más reciente al más antiguo. Sin `filers`, las instituciones se descubren
    * en la SEC (institucionales.js). Un error en una institución la omite (`omitidos`); lo que faltó se resume en `datosFaltantes`.
    */
-  const tenencias13F = async ({ filers, nombreEmisor, cusip, cortes = 2 } = {}) => {
+  const tenencias13F = async ({ filers, nombreEmisor, cusip, cortes = 2, soloMasivo = false } = {}) => {
     if (filers != null && (!Array.isArray(filers) || !filers.length)) throw new IntegrationError({ proveedor: PROVEEDOR, codigo: 'VALIDACION', mensaje: 'Se requiere al menos un filer.' });
     const emisorBuscado = claveEmisor(nombreEmisor);
     if (!cusip && !emisorBuscado) throw new IntegrationError({ proveedor: PROVEEDOR, codigo: 'VALIDACION', mensaje: 'Se requiere nombreEmisor o cusip.' });
     const n = Math.max(1, Math.min(Number(cortes) || 2, 8));
     let cusips = cusip ? [String(cusip).trim().toUpperCase()] : null;
+    // Con la lectura masiva cargada no hace falta descargar nada (misma fuente para el ranking y para Análisis).
+    if (!filers && n <= 2 && masivo && (ahora || Date.now)() - masivo.t < MASIVO_VIGENTE_MS) {
+      const porNombre = masivo.porClave.get(emisorBuscado);
+      let r = desdeMasivo(cusips || [...(porNombre || [])]);
+      // Nombre abreviado en las tablas: el CUSIP se deduce con la búsqueda de EDGAR.
+      if (!r && !cusips) r = desdeMasivo(await descubrimiento.cusipsDe(nombreEmisor));
+      if (r) return r.slice(0, n);
+    }
+    if (soloMasivo) throw new IntegrationError({ proveedor: PROVEEDOR, codigo: 'NO_ENCONTRADO', mensaje: `Ninguna de las mayores instituciones reporta ${nombreEmisor || cusip} en su 13F.` });
 
     const porCorte = new Map(), omitidos = new Map(), datosFaltantes = [];
     let primerError = null;
@@ -334,5 +420,5 @@ export const createSecClient = ({
       }));
   };
 
-  return { proveedor: PROVEEDOR, configurado, cikDeSimbolo, fundamentales, tenencias13F, tickers: listaTickers, marco, perfil };
+  return { proveedor: PROVEEDOR, configurado, cikDeSimbolo, fundamentales, tenencias13F, cargarTenencias13F, tickers: listaTickers, marco, perfil };
 };

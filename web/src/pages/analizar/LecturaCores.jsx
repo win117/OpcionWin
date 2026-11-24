@@ -19,7 +19,6 @@ const QUE_SIGNIFICA = {
 /** Por qué un factor activo no tiene lectura. */
 function sinLectura(core, analizados) {
   if (!analizados) return 'Pulsa «Analizar» para evaluar este factor.';
-  if (core === 'institucional') return 'Sin datos 13F de esta empresa: no cuenta en el puntaje. Puedes descargarlos con «Configurar», opción «Descargar 13F institucional».';
   return 'No entró en el último análisis. Vuelve a analizar para incluirlo.';
 }
 
@@ -31,7 +30,7 @@ function TarjetaCore({ core, ev, destacado, analizados }) {
     <li className={'lectura lectura--' + dir.tono + (destacado ? ' lectura--destacado' : '')}>
       <div className="lectura__head">
         <span className="lectura__core">{CORE_LABELS[core] || core}</span>
-        <span className={'lectura__dir dir dir--' + dir.tono}><span aria-hidden="true">{ICONO[dir.tono]}</span> {ev ? dir.texto : core === 'institucional' && analizados ? 'Sin datos 13F' : 'Sin evaluar'}</span>
+        <span className={'lectura__dir dir dir--' + dir.tono}><span aria-hidden="true">{ICONO[dir.tono]}</span> {ev ? (isNum(ev.puntaje) ? dir.texto : 'Sin datos, no opina') : 'Sin evaluar'}</span>
       </div>
       {ev ? (
         <>

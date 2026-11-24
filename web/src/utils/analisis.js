@@ -1,6 +1,6 @@
 // Lógica pura de la página de análisis: veredicto en lenguaje llano, movimiento esperado, ejes y vigencia de los datos.
 import { calificacionPara, desglosePuntaje, direccion, puntaje1, textoPuntaje } from './estrategiasOrden.js';
-import { CORE_LABELS, ESTRATEGIA_LABELS } from './constants.js';
+import { CORES, CORE_LABELS, ESTRATEGIA_LABELS } from './constants.js';
 const isNum = v => typeof v === 'number' && Number.isFinite(v);
 
 /** Qué significa la compatibilidad (0–100). Mismo redondeo (un decimal) que el resto de la aplicación. */
@@ -113,4 +113,14 @@ export function recursosAlDia(sincronizaciones = [], simbolo, { diasMin, diasMax
     out.set(s.recurso, Math.min(out.get(s.recurso) ?? Infinity, Math.floor(min)));
   }
   return out;
+}
+
+/**
+ * Qué factores opinaron en un análisis: { total, opinan, faltan: [{ core, motivo }], completo }.
+ * `cores` = los que se pidieron; uno pedido sin puntaje no tuvo datos, y uno no pedido lo quitó el usuario.
+ */
+export function participacion(cores = [], evaluaciones = {}) {
+  const faltan = CORES.filter(c => !(cores.includes(c) && isNum(evaluaciones[c]?.puntaje)))
+    .map(core => ({ core, motivo: cores.includes(core) ? 'sin datos' : 'desactivado' }));
+  return { total: CORES.length, opinan: CORES.length - faltan.length, faltan, completo: !faltan.length };
 }

@@ -7,7 +7,7 @@ import Movimientos from '../components/Movimientos';
 import MapaMercado from './mercado/MapaMercado';
 import { useSondeo } from '../hooks/useSondeo';
 import { screener } from '../api/resources';
-import { ESTRATEGIAS, ESTRATEGIA_LABELS, DISCLAIMER } from '../utils/constants';
+import { CORE_LABELS, ESTRATEGIAS, ESTRATEGIA_LABELS, DISCLAIMER } from '../utils/constants';
 import { fmtDateTime, fmtInt, fmtMoney, fmtNum, fmtPct, isNum } from '../utils/format';
 
 const DESCRIPCION = {
@@ -47,6 +47,18 @@ function Indices({ mercado }) {
 }
 
 /* ---------- Mejores por estrategia ---------- */
+const ESTADO_CORE = { ok: 'opinó', sin_datos: 'sin datos', pendiente: 'pendiente' };
+/** Los cinco factores de una empresa: lleno = opinó, hueco = sin datos, punteado = aún no se evalúa. */
+function Factores({ cores }) {
+  const opinan = cores.filter(c => c.estado === 'ok').length, pendientes = cores.filter(c => c.estado === 'pendiente').length;
+  return (
+    <span className="factores small" title={cores.map(c => `${CORE_LABELS[c.core]}: ${c.estado === 'ok' ? fmtNum(c.puntaje, 0) + ' de 100' : ESTADO_CORE[c.estado]}`).join('\n')}>
+      <span className="factores__puntos" aria-hidden="true">{cores.map(c => <i key={c.core} className={'is-' + c.estado} />)}</span>
+      <span className="muted">Opinan {opinan} de {cores.length} factores{pendientes ? ', preliminar' : ''}</span>
+    </span>
+  );
+}
+
 function Tarjeta({ codigo, items }) {
   return (
     <article className="card screener-card" aria-label={'Las 5 mejores para ' + ESTRATEGIA_LABELS[codigo]}>
@@ -67,6 +79,7 @@ function Tarjeta({ codigo, items }) {
                   </span>
                   <ScoreBar value={it.puntaje} label={'Puntaje de ' + it.simbolo} />
                   {it.resumen && <span className="muted small screener-item__sum">{it.resumen}</span>}
+                  {it.cores && <Factores cores={it.cores} />}
                 </span>
               </Link>
             </li>
@@ -79,9 +92,9 @@ function Tarjeta({ codigo, items }) {
 
 const FASES = {
   sin_iniciar: 'Preparando el universo…', catalogo: 'Buscando las empresas del mercado…', puntuando: 'Calculando el ranking…',
-  volatilidad: 'Afinando con la volatilidad implícita', error: 'Reintentando con el proveedor…',
+  error: 'Reintentando con el proveedor…',
 };
-const esperaRanking = d => (!d || !d.universo?.total ? 3000 : d.universo.fase === 'volatilidad' ? 15000 : 60000);
+const esperaRanking = d => (!d || !d.universo?.total ? 3000 : d.universo.fase === 'completando' ? 15000 : 60000);
 
 function Screener() {
   const { data: d, error, loading } = useSondeo(() => screener.ranking({ limite: 5 }), esperaRanking);
@@ -92,11 +105,14 @@ function Screener() {
       <div className="inicio-sec__head">
         <h2>Las 5 mejores por estrategia</h2>
         <span className="muted small" aria-live="polite">
-          {listo ? `De ${fmtInt(u.total)} empresas, ${fmtDateTime(u.actualizadoEn)}${u.fase === 'volatilidad' ? `. ${FASES.volatilidad}: ${fmtInt(u.conIv)} de ${fmtInt(u.total)}` : ''}` : d ? FASES[u.fase] || '' : ''}
+          {listo ? `De ${fmtInt(u.total)} empresas, ${fmtDateTime(u.actualizadoEn)}` : d ? FASES[u.fase] || '' : ''}
         </span>
       </div>
       {error && !d && <ErrorMessage error={error} title="No se pudo cargar el ranking; se reintenta solo" />}
       {u.aviso && <Notice tone="warning">{u.aviso}</Notice>}
+      {listo && u.porCore && (u.completas < u.total
+        ? <Notice><strong>Ranking preliminar.</strong> {fmtInt(u.completas)} de {fmtInt(u.total)} empresas ya tienen los cinco factores. Se completa solo: {Object.entries(u.porCore).filter(([, n]) => n < u.total).map(([c, n]) => `${CORE_LABELS[c]} ${fmtInt(n)}`).join(', ')}.</Notice>
+        : <p className="muted small">Ranking con los cinco factores: {Object.keys(u.porCore).map(c => CORE_LABELS[c]).join(', ')}.</p>)}
       {(loading || (d && !listo)) && (
         <div className="screener-grid" aria-hidden="true">
           {ESTRATEGIAS.map(c => (

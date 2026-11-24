@@ -3,16 +3,17 @@
 //
 // 0) Catálogo: qué empresas hay (catalogo-universo.service.js; todo obtenido de Alpaca y la SEC). Se rehace cada 24 h.
 // 1) Cotizaciones (mapa): por lotes de 100. Se piden solo si alguien mira y vence la caché.
-// 2) Puntajes: velas por lotes → ranking completo en segundos, aún sin volatilidad implícita.
-// 3) En segundo plano: volatilidad implícita (1 solicitud por empresa a ritmo limitado, primero las candidatas a Iron Condor,
-//    que es la estrategia que usa IV/HV) y perfil SEC de cada empresa (giro). Cada dato reemplaza al provisional.
+// 2) Puntajes: velas por lotes → técnico e indicadores de todas en segundos. El ranking es «preliminar» hasta que opinan los cinco.
+// 3) En segundo plano, sin filtrar empresas y cada dato a su ritmo (por orden de capitalización; lo avanzado se guarda):
+//    - Alpaca: volatilidad implícita (2 h) y noticias (1 h con el mercado abierto, 6 h cerrado).
+//    - SEC: perfil (giro), fundamentales (3 días) e institucional 13F (7 días; una sola lectura masiva para todas).
 // El resultado se guarda con un propietario interno para que un reinicio muestre algo al instante.
 import boom from '@hapi/boom';
-import { conReintento, parsearOcc, puntuarSimbolo, VERSION } from './screener.service';
+import { combinarCores, conReintento, coresDeFila, evaluarCore, evaluarPrecio, parsearOcc, VERSION } from './screener.service';
 import { createCatalogo } from './catalogo-universo.service';
 import { createMercadoReloj, diaNY } from './mercado-reloj.service';
 import { validated } from './crud.service';
-import { ESTRATEGIAS } from '../models/shared';
+import { CORES, ESTRATEGIAS } from '../models/shared';
 import { guardarLote, idDeterminista, todos } from './registros';
 
 const DIA = 86400000, MIN = 60000;
@@ -32,6 +33,13 @@ export const REPUNTUAR_CERRADO_MS = 6 * 60 * MIN;
 // 800 ms entre solicitudes = 75/min: deja más de la mitad del cupo de Alpaca (200/min) para el mapa y lo que hagan los usuarios.
 export const RITMO_IV_MS = 800;
 const IV_VIGENTE_MS = 2 * 60 * MIN;
+// Cada cuánto se vuelve a evaluar cada core lento (los reportes financieros y 13F son trimestrales).
+export const VIGENCIA_CORE_MS = { noticias: 60 * MIN, noticiasCerrado: 6 * 60 * MIN, fundamental: 3 * DIA, institucional: 7 * DIA };
+const DIAS_NOTICIAS = 14, MAX_NOTICIAS = 50; // lo mismo que sincroniza Análisis
+export const RITMO_SEC_MS = 700;
+const GUARDAR_CADA = 100; // empresas
+// Tras un fallo del proveedor en un core lento se espera antes de insistir.
+const ESPERA_LENTAS_MS = 15 * MIN;
 // Si el catálogo falla se reintenta a 1, 2, 4… hasta 30 minutos.
 export const ESPERA_CATALOGO_MIN_MS = MIN;
 export const ESPERA_CATALOGO_MAX_MS = 30 * MIN;
@@ -86,13 +94,16 @@ export function opcionesParaIv(opciones, { precio, velas, abierto, hoy }) {
   return [...grupos.values()].flatMap(g => g.sort((a, b) => Math.abs(a.strike - precio) - Math.abs(b.strike - precio)).slice(0, STRIKES_CERCANOS));
 }
 
-export function createUniversoVivo({ integraciones, factory, catalogo, tamano = 500, ahora = Date.now, ritmoIvMs = RITMO_IV_MS, esperar = pausa, esperarLimite = pausa, bases = ['mongodb', 'supabase'] } = {}) {
+export function createUniversoVivo({ integraciones, factory, catalogo, tamano = 500, ahora = Date.now, ritmoIvMs = RITMO_IV_MS, ritmoSecMs = RITMO_SEC_MS, esperar = pausa, esperarLimite = pausa, bases = ['mongodb', 'supabase'] } = {}) {
   const alpaca = () => integraciones.alpaca;
   const reloj = createMercadoReloj({ integraciones, ahora });
   const fuente = catalogo || createCatalogo({ integraciones, ahora, tamano });
   const empresas = new Map(); // símbolo → { nombre, cik, acciones, capitalizacion, sector, industria, sic, porConfirmar }
   const puntajes = new Map(); // símbolo → fila del ranking
   const iv = new Map();       // símbolo → { t, opciones }
+  const evals = new Map();    // símbolo → { core: resumen de su evaluación }
+  let series = new Map();     // símbolo → velas de la última pasada
+  let lentasPendiente = null, proximasLentas = 0, guardando = null, guardarOtraVez = false;
   const fichas = new Map();   // símbolo → { t, velas }
   const rechazadas = new Set(); // CIK que no son empresas con reportes trimestrales
   let recuperado = false, fase = 'sin_iniciar', error = null, puntuadoEn = null, catalogoEn = null, baseGuardado = null;
@@ -215,7 +226,9 @@ export function createUniversoVivo({ integraciones, factory, catalogo, tamano = 
   function puntuarFila(s, velas) {
     const q = cacheMapa?.porSimbolo.get(s), dato = iv.get(s);
     const opciones = dato ? opcionesParaIv(dato.opciones, { precio: q?.precio ?? velas.at(-1).cierre, velas, abierto: Boolean(cacheMapa?.abierto), hoy: diaNY(ahora()) }) : [];
-    const r = puntuarSimbolo({ simbolo: s, velas, opciones, fechaReferencia: new Date(ahora()).toISOString() });
+    const p = evaluarPrecio({ simbolo: s, velas, opciones, fechaReferencia: new Date(ahora()).toISOString() });
+    evals.set(s, { ...evals.get(s), ...p.evaluaciones });
+    const r = { ...p, ...combinarCores(evals.get(s), p) };
     const vols = velas.slice(-20).map(v => v.volumen).filter(Number.isFinite);
     const anio = velas.slice(-252), esteAnio = new Date(ahora()).getUTCFullYear();
     const cierrePrevio = velas.filter(v => new Date(v.fecha).getUTCFullYear() < esteAnio).at(-1)?.cierre;
@@ -224,9 +237,15 @@ export function createUniversoVivo({ integraciones, factory, catalogo, tamano = 
       cambio5d: variacion(velas, 5), cambio21d: variacion(velas, 21), cambioAnio: cierrePrevio > 0 ? redondear(velas.at(-1).cierre / cierrePrevio - 1, 6) : null,
       maximo52: Math.max(...anio.map(v => v.maximo)), minimo52: Math.min(...anio.map(v => v.minimo)),
       volumenPromedio: vols.length ? Math.round(vols.reduce((a, b) => a + b, 0) / vols.length) : null,
-      ivPromedio: redondear(r.ivActual), hv20: redondear(r.hv20), puntajes: r.puntajes, factores: r.factores, resumenes: r.resumenes,
+      ivPromedio: redondear(r.ivActual), hv20: redondear(r.hv20), puntajes: r.puntajes, factores: r.factores, resumenes: r.resumenes, cores: evals.get(s),
       versionAlgoritmo: VERSION, actualizadoEn: new Date(ahora()),
     });
+  }
+  // Incorpora la evaluación de un core lento y recalcula la combinación de la empresa.
+  function anotarCore(s, core, evaluacion) {
+    evals.set(s, { ...evals.get(s), [core]: evaluacion });
+    const fila = puntajes.get(s);
+    if (fila) Object.assign(fila, combinarCores(evals.get(s), { ivActual: fila.ivPromedio, hv20: fila.hv20 }), { cores: evals.get(s) });
   }
   async function traerIv(s, precio) {
     if (!(precio > 0)) return;
@@ -235,7 +254,7 @@ export function createUniversoVivo({ integraciones, factory, catalogo, tamano = 
     const snaps = await conReintento(() => alpaca().snapshotsOpciones(s, filtro), { esperar: esperarLimite });
     iv.set(s, { t: ahora(), opciones: snaps.map(x => ({ ...parsearOcc(x.contratoExternoId), volatilidadImplicita: x.volatilidadImplicita, fechaDato: x.fechaDato })).filter(o => o.tipo && o.strike) });
   }
-  async function completarIv(series) {
+  async function completarIv() {
     const orden = [...series.keys()].filter(s => !(iv.get(s) && ahora() - iv.get(s).t < IV_VIGENTE_MS))
       .sort((a, b) => (puntajes.get(b)?.puntajes.IRON_CONDOR ?? 0) - (puntajes.get(a)?.puntajes.IRON_CONDOR ?? 0));
     let seguidos = 0;
@@ -243,7 +262,7 @@ export function createUniversoVivo({ integraciones, factory, catalogo, tamano = 
       if (!activo) return;
       if (!empresas.has(s)) continue;
       const inicio = Date.now();
-      try { await traerIv(s, puntajes.get(s)?.precio); puntuarFila(s, series.get(s)); seguidos = 0; } catch { seguidos += 1; }
+      try { await traerIv(s, puntajes.get(s)?.precio); if (series.has(s)) puntuarFila(s, series.get(s)); seguidos = 0; } catch { seguidos += 1; }
       if (seguidos >= 10) { error = 'La volatilidad implícita no está disponible por ahora; el ranking usa solo precios.'; return; }
       await esperar(Math.max(0, ritmoIvMs - (Date.now() - inicio)));
     }
@@ -254,22 +273,79 @@ export function createUniversoVivo({ integraciones, factory, catalogo, tamano = 
     await asegurarCatalogo();
     const mapa = await obtenerMapa();
     if (!puntajes.size) fase = 'puntuando';
-    const series = new Map();
+    const nuevas = new Map();
     for (const lote of lotes(mapa.items.map(i => i.simbolo), LOTE_VELAS)) {
       const v = await velasDe(lote);
       for (const s of lote) {
         if ((v[s]?.length || 0) < MIN_VELAS) continue;
-        try { puntuarFila(s, v[s]); series.set(s, v[s]); } catch { /* sin datos suficientes: queda fuera del ranking */ }
+        try { puntuarFila(s, v[s]); nuevas.set(s, v[s]); } catch { /* sin datos suficientes: queda fuera del ranking */ }
       }
     }
-    for (const s of [...puntajes.keys()]) if (!series.has(s)) puntajes.delete(s);
+    for (const s of [...puntajes.keys()]) if (!nuevas.has(s)) puntajes.delete(s);
+    series = nuevas;
     await confirmarPrimeros();
     puntuadoEn = ahora();
-    fase = 'volatilidad';
     await guardar();
-    await Promise.all([completarIv(series), completarPerfiles().then(() => guardar())]);
+    lanzarLentas();
+  }
+
+  // ---- Cores lentos: todas las empresas, sin filtro previo.
+  const vence = (s, core, ms) => { const e = evals.get(s)?.[core]; return !e || ahora() - new Date(e.actualizadoEn).getTime() > ms; };
+  const vigenciaNoticias = () => (cacheMapa?.abierto ? VIGENCIA_CORE_MS.noticias : VIGENCIA_CORE_MS.noticiasCerrado);
+  const pendientesDe = (core, ms) => visibles().map(e => e.simbolo).filter(s => puntajes.has(s) && vence(s, core, ms));
+  const hayLentas = () => pendientesDe('noticias', vigenciaNoticias()).length + pendientesDe('fundamental', VIGENCIA_CORE_MS.fundamental).length + pendientesDe('institucional', VIGENCIA_CORE_MS.institucional).length > 0
+    || [...puntajes.keys()].some(s => !iv.get(s) || ahora() - iv.get(s).t > IV_VIGENTE_MS);
+  // Recorre las empresas pendientes de un core; `traer(empresa)` devuelve sus insumos. Sin datos del emisor (404) cuenta como evaluado.
+  async function completarCore(core, ms, ritmo, traer) {
+    let seguidos = 0, hechos = 0;
+    for (const s of pendientesDe(core, ms)) {
+      if (!activo) return;
+      const e = empresas.get(s);
+      if (!e) continue;
+      const inicio = Date.now(), ref = new Date(ahora()).toISOString();
+      try {
+        const datos = await traer(e).catch(err => { if (err?.codigo === 'NO_ENCONTRADO') return {}; throw err; });
+        anotarCore(s, core, evaluarCore(core, { simbolo: s, ...datos }, ref));
+        seguidos = 0; hechos += 1;
+        if (hechos % GUARDAR_CADA === 0) await guardar();
+      } catch (err) {
+        seguidos += 1;
+        if (seguidos >= 5) { proximasLentas = ahora() + ESPERA_LENTAS_MS; throw err; }
+      }
+      await esperar(Math.max(0, ritmo - (Date.now() - inicio)));
+    }
+  }
+  const noticiasDe = async e => ({ noticias: await conReintento(() => alpaca().noticias({ simbolos: [e.simbolo], desde: new Date(ahora() - DIAS_NOTICIAS * DIA).toISOString(), hasta: new Date(ahora()).toISOString(), limite: MAX_NOTICIAS }), { esperar: esperarLimite }) });
+  const porCik = new Map(); // dos clases de la misma empresa comparten sus reportes
+  const fundamentalesDe = async e => {
+    if (!porCik.has(e.cik)) { porCik.clear(); porCik.set(e.cik, await integraciones.sec.fundamentales(e.cik)); }
+    return { fundamentales: porCik.get(e.cik) };
+  };
+  async function completarInstitucional() {
+    if (!pendientesDe('institucional', VIGENCIA_CORE_MS.institucional).length) return;
+    await integraciones.sec.cargarTenencias13F();
+    await completarCore('institucional', VIGENCIA_CORE_MS.institucional, 0, async e => ({ reportes: await integraciones.sec.tenencias13F({ nombreEmisor: e.nombre, cortes: 2, soloMasivo: true }) }));
+  }
+  async function lentas() {
+    if (puntajes.size && fase !== 'error') fase = 'completando';
+    const avisos = [];
+    const paso = (nombre, fn) => fn().catch(e => { avisos.push(nombre); console.error('[universo]', nombre + ':', e?.mensaje || e?.message); });
+    await Promise.all([
+      // Primero lo que vota (noticias); la volatilidad solo ajusta el Iron Condor.
+      paso('noticias', () => completarCore('noticias', vigenciaNoticias(), ritmoIvMs, noticiasDe)).then(() => paso('volatilidad', completarIv)),
+      paso('perfiles', () => completarPerfiles().then(() => guardar()))
+        .then(() => paso('institucional', completarInstitucional))
+        .then(() => paso('fundamental', () => completarCore('fundamental', VIGENCIA_CORE_MS.fundamental, ritmoSecMs, fundamentalesDe))),
+    ]);
+    if (!activo) return;
+    if (avisos.length) { proximasLentas = ahora() + ESPERA_LENTAS_MS; error ||= 'Faltan datos por un fallo del proveedor (' + avisos.join(', ') + '); se reintenta en unos minutos.'; }
     fase = 'lista';
     await guardar();
+  }
+  function lanzarLentas() {
+    if (lentasPendiente || ahora() < proximasLentas) return lentasPendiente;
+    lentasPendiente = lentas().finally(() => { lentasPendiente = null; });
+    return lentasPendiente;
   }
   function lanzar() {
     if (!pasadaPendiente) {
@@ -285,6 +361,7 @@ export function createUniversoVivo({ integraciones, factory, catalogo, tamano = 
       const { abierto } = await reloj();
       const edad = puntuadoEn == null ? Infinity : ahora() - puntuadoEn;
       if (edad > (abierto ? REPUNTUAR_ABIERTO_MS : REPUNTUAR_CERRADO_MS)) lanzar();
+      else if (!pasadaPendiente && series.size && hayLentas()) lanzarLentas();
     } catch (e) {
       error = e?.mensaje || 'Proveedor no disponible; se reintentará.';
       if (!puntajes.size) fase = 'error';
@@ -298,7 +375,13 @@ export function createUniversoVivo({ integraciones, factory, catalogo, tamano = 
     const e = empresas.get(p.simbolo);
     return { id: idDeterminista(PROPIETARIO_SISTEMA, p.simbolo), datos: { ...p, ...Object.fromEntries(CAMPOS_EMPRESA.filter(c => e[c] != null).map(c => [c, e[c]])) } };
   });
-  async function guardar() {
+  // Un guardado a la vez; si llega otro mientras tanto, se repite al final con lo más reciente.
+  function guardar() {
+    if (guardando) { guardarOtraVez = true; return guardando; }
+    guardando = (async () => { do { guardarOtraVez = false; await escribir(); } while (guardarOtraVez && activo); })().finally(() => { guardando = null; });
+    return guardando;
+  }
+  async function escribir() {
     if (!activo) return; // al apagarse no se reabre la conexión a la base
     const items = [];
     let descartadas = 0, motivo;
@@ -325,6 +408,7 @@ export function createUniversoVivo({ integraciones, factory, catalogo, tamano = 
           if (empresas.has(f.simbolo)) continue;
           empresas.set(f.simbolo, { simbolo: f.simbolo, nombre: f.nombre, cik: f.cik, acciones: f.acciones ?? null, capitalizacion: f.capitalizacion ?? null,
             sector: f.sector || 'Sin clasificar', industria: f.industria || 'Sin clasificar', sic: f.sic, porConfirmar: false });
+          if (f.cores) evals.set(f.simbolo, { ...f.cores, ...evals.get(f.simbolo) });
           if (!puntajes.has(f.simbolo)) puntajes.set(f.simbolo, f);
         }
         baseGuardado = database;
@@ -349,12 +433,16 @@ export function createUniversoVivo({ integraciones, factory, catalogo, tamano = 
     filas: () => [...puntajes.values()].filter(p => empresas.has(p.simbolo)),
     async simbolos() { await asegurarCatalogo(); return visibles().map(e => e.simbolo); },
     estado: () => ({
-      automatico: activo, fase, conIv: [...puntajes.values()].filter(p => p.ivPromedio != null).length,
+      automatico: activo, fase,
+      // Cuántas empresas tienen ya evaluado cada core, y cuántas los cinco.
+      porCore: Object.fromEntries(CORES.map(c => [c, [...puntajes.keys()].filter(s => empresas.has(s) && evals.get(s)?.[c]).length])),
+      completas: [...puntajes.keys()].filter(s => empresas.has(s) && CORES.every(c => evals.get(s)?.[c])).length,
+      conIv: [...puntajes.values()].filter(p => p.ivPromedio != null).length,
       catalogo: { actualizadoEn: catalogoEn == null ? null : new Date(catalogoEn), ...(errorCatalogo ? { error: errorCatalogo, proximoIntento: new Date(proximoCatalogo) } : {}) },
       ...(error || errorCatalogo ? { aviso: error || errorCatalogo } : {}),
     }),
     // Una pasada completa (para pruebas y scripts).
-    async actualizarAhora() { const previo = activo; activo = true; await lanzar(); activo = previo; },
+    async actualizarAhora() { const previo = activo; activo = true; await lanzar(); await lentasPendiente; activo = previo; },
     recuperar,
 
     async mapa() {
@@ -363,7 +451,7 @@ export function createUniversoVivo({ integraciones, factory, catalogo, tamano = 
         const p = puntajes.get(i.simbolo);
         return { simbolo: i.simbolo, nombre: i.nombre, sector: i.sector, industria: i.industria, precio: i.precio, cambioPct: i.cambioPct,
           volumen: i.volumen, capitalizacion: i.capitalizacion, cambio5d: p?.cambio5d ?? null, cambio21d: p?.cambio21d ?? null,
-          ivPromedio: p?.ivPromedio ?? null, hv20: p?.hv20 ?? null, puntajes: p?.puntajes ?? null };
+          ivPromedio: p?.ivPromedio ?? null, hv20: p?.hv20 ?? null, puntajes: p?.puntajes ?? null, coresEvaluados: p ? CORES.filter(c => p.cores?.[c]).length : 0 };
       });
       return { abierto: m.abierto, actualizadoEn: m.actualizadoEn, desactualizado: Boolean(m.desactualizado), total: items.length, items,
         fuente: { proveedor: 'alpaca', tiempoReal: alpaca().feed || 'iex', consolidado: 'delayed_sip', empresas: 'sec' } };
@@ -405,7 +493,7 @@ export function createUniversoVivo({ integraciones, factory, catalogo, tamano = 
       }
       const p = puntajes.get(simbolo) || {};
       const campos = ['maximo52', 'minimo52', 'volumenPromedio', 'ivPromedio', 'hv20', 'cambio5d', 'cambio21d', 'cambioAnio', 'puntajes', 'resumenes'];
-      return { ...i, abierto: m.abierto, actualizadoEn: m.actualizadoEn, ...Object.fromEntries(campos.map(c => [c, p[c] ?? null])), velas };
+      return { ...i, abierto: m.abierto, actualizadoEn: m.actualizadoEn, ...Object.fromEntries(campos.map(c => [c, p[c] ?? null])), cores: coresDeFila(p), velas };
     },
   };
 }

@@ -7,7 +7,7 @@ import { CandleChart } from '../../components/CandleChart';
 import { ScoreBar } from '../../components/Gauge';
 import { Termino } from '../../components/Termino';
 import { ErrorMessage } from '../../components/States';
-import { ESTRATEGIAS, ESTRATEGIA_LABELS } from '../../utils/constants';
+import { CORE_LABELS, ESTRATEGIAS, ESTRATEGIA_LABELS } from '../../utils/constants';
 import { giroEs } from '../../utils/sic';
 import { fmtCompact, fmtFixed, fmtMoney, fmtPct, isNum } from '../../utils/format';
 
@@ -78,7 +78,20 @@ export default function FichaEmpresa({ simbolo, vivo, onCerrar }) {
             {d.resumenes?.[e] && <span className="muted small">{d.resumenes[e]}</span>}
           </Link>
         )) : <p className="muted small">Se está calculando; aparece en unos segundos.</p>}
-        <p className="muted small">Usa solo precio e indicadores. «Analizar y operar» agrega fundamentales, noticias e institucional.</p>
+        {d.cores && (
+          <>
+            <h4>Qué dice cada factor</h4>
+            <ul className="ficha__factores">
+              {d.cores.map(c => (
+                <li key={c.core}>
+                  <span>{CORE_LABELS[c.core]}</span>
+                  {c.estado === 'ok' ? <ScoreBar value={c.puntaje} label={`${CORE_LABELS[c.core]} (0 bajista, 100 alcista)`} /> : <span className="muted small">{c.estado === 'pendiente' ? 'Evaluándose' : 'Sin datos, no opina'}</span>}
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+        <p className="muted small">{d.cores?.some(c => c.estado === 'pendiente') ? 'Preliminar: aún faltan factores por evaluar.' : 'Combina los cinco factores.'} «Analizar y operar» lo detalla y agrega tus pesos.</p>
       </div>
     </div>
   );

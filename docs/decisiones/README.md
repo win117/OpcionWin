@@ -122,3 +122,13 @@ El sector es una agrupación del código SIC, menos fina que GICS. Con dos clase
 (c) Ajuste IV/HV ≤ 0 si hay resultados antes del vencimiento (falta una fuente de fechas). (d) Penalizar Call/Put cuando la IV es alta.
 (e) Acercar el puntaje a 50 según la confianza. Se calibran juntas porque interactúan.
 **Estado.** Requiere decisión del usuario: cambia todos los puntajes y el Top 5.
+
+## ADR-015 · El ranking y el análisis deciden con los cinco cores
+**Contexto.** El Top 5 usaba solo técnico e indicadores, y Análisis omitía Institucional por defecto mostrando cobertura 100 %. La decisión debe salir del conjunto.
+**Decisión.** Las ~500 empresas se evalúan con los cinco cores, sin filtro previo (un filtro por precio descartaría empresas buenas en lo demás).
+Técnico e indicadores salen por lotes en segundos; noticias, fundamental e institucional se completan en segundo plano por orden de capitalización y se
+guardan: noticias cada hora (6 h con el mercado cerrado), fundamental cada 3 días, institucional cada 7. Los 13F se leen en una sola pasada: 16
+instituciones × 2 cortes sirven para todas las empresas. Mientras falte algo, el ranking se marca «preliminar». En Análisis, Institucional viene activo y
+un factor sin datos se declara («Parcial: opinan 4 de 5»).
+**Consecuencias.** El puntaje de una empresa cambia conforme llegan sus factores. La combinación usa la confluencia vigente (ADR-012) con pesos iguales:
+no se recalibró (ADR-014 sigue como propuesta). El ranking usa velas SIP y Análisis IEX: puede haber diferencias pequeñas.
