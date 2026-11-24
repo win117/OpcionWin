@@ -17,7 +17,7 @@ export default function ResumenSector({ sector, items, modo, onElegir, onCerrar 
   return (
     <div className="ficha">
       <div className="ficha__cab">
-        <div><h3>{sector}</h3><p className="muted small">{items.length} empresas, capitalización {fmtCompact(r.cap)}</p></div>
+        <div><h3 tabIndex={-1}>{sector}</h3><p className="muted small">{items.length} empresas, USD {fmtCompact(r.cap)} de capitalización</p></div>
         <button type="button" className="btn btn--sm" onClick={onCerrar}>Ver todo el mercado</button>
       </div>
       <p className="ficha__precio"><strong className={r.cambio >= 0 ? 'up' : 'down'}>{signo(r.cambio)}</strong> <span className="muted small">hoy, ponderado por capitalización. {r.suben} suben y {r.bajan} bajan.</span></p>
@@ -25,7 +25,7 @@ export default function ResumenSector({ sector, items, modo, onElegir, onCerrar 
       <ol className="ficha__lista">
         {(todas ? lista : lista.slice(0, 15)).map(i => (
           <li key={i.simbolo}>
-            <button type="button" onClick={() => onElegir(i.simbolo)}>
+            <button type="button" data-lista={i.simbolo} onClick={() => onElegir(i.simbolo, `[data-lista="${i.simbolo}"]`)}>
               <span className="ficha__lista-nombre"><strong>{i.simbolo}</strong> <span className="muted small">{i.nombre}</span></span>
               <span>{fmtMoney(i.precio)}</span>
               <span className={modo.puntaje ? undefined : valor(i) >= 0 ? 'up' : 'down'}>{texto(valor(i))}</span>

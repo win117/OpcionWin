@@ -67,7 +67,7 @@ export default function Buscador({ seleccionado, onSelect, version, inicial = ''
       <label className="sr-only" htmlFor="buscar-activo">Buscar por símbolo o nombre</label>
       <input
         id="buscar-activo" ref={input} type="search" className="buscador__input" value={texto} autoComplete="off"
-        placeholder="Símbolo o nombre (AAPL, Tesla…)" onChange={e => setTexto(e.target.value)} onKeyDown={onKeyInput}
+        placeholder="Símbolo o nombre de la empresa" onChange={e => setTexto(e.target.value)} onKeyDown={onKeyInput}
         aria-controls="resultados-busqueda"
       />
       {aviso && <Notice tone="warning">{aviso}</Notice>}
@@ -80,7 +80,7 @@ export default function Buscador({ seleccionado, onSelect, version, inicial = ''
             <li key={it.simbolo + (it.mercado || '')}>
               <button type="button" className={'resultado' + (it.simbolo === seleccionado ? ' is-active' : '')} aria-current={it.simbolo === seleccionado ? 'true' : undefined} onClick={() => onSelect(it.simbolo)}>
                 <span className="resultado__sym">{it.simbolo}</span>
-                <span className="resultado__name">{it.nombre || '—'}{it.mercado ? <small className="muted"> · {it.mercado}</small> : null}</span>
+                <span className="resultado__name">{it.nombre || '—'}{it.mercado ? <small className="muted"> {it.mercado}</small> : null}</span>
                 <span className="resultado__badges">
                   {it.registrada && <Badge tone="success">Analizada</Badge>}
                   {it.opciones && <Badge tone="info">Opciones</Badge>}

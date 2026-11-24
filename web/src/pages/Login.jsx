@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Field } from '../components/Field';
@@ -10,6 +10,8 @@ export default function Login() {
   const [form, setForm] = useState({ email: '', password: '', baseDatos: 'mongodb' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+
+  useEffect(() => { document.title = 'Iniciar sesión | Opciones'; }, []);
 
   if (session?.token) return <Navigate to={location.state?.from || '/'} replace />;
 
@@ -45,15 +47,15 @@ export default function Login() {
         <Field label="Contraseña" required>
           <input type="password" autoComplete="current-password" value={form.password} onChange={set('password')} required />
         </Field>
-        <Field label="Base de datos" help="Los datos no se copian entre bases; cada sesión trabaja con la elegida.">
+        <Field label="Dónde guardar tus datos" help="Lo que guardes en uno no aparece en el otro. Si no sabes cuál, deja MongoDB.">
           <select value={form.baseDatos} onChange={set('baseDatos')}>
             <option value="mongodb">MongoDB</option>
-            <option value="supabase">Supabase (PostgreSQL)</option>
+            <option value="supabase">Supabase</option>
           </select>
         </Field>
         {error && <div className="alert alert--danger" role="alert">{error.message}</div>}
         <button type="submit" className="btn btn--primary btn--block" disabled={busy}>{busy ? 'Ingresando…' : 'Ingresar'}</button>
-        <p className="muted small">El token se guarda solo en esta pestaña (sessionStorage) y se pierde al cerrarla.</p>
+        <p className="muted small">Por seguridad, la sesión se cierra al cerrar esta pestaña.</p>
       </form>
     </div>
   );

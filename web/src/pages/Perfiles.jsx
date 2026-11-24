@@ -4,6 +4,7 @@ import { PageHeader } from '../components/Layout';
 import { ResourceManager } from '../components/ResourceManager';
 import { SubdocEditor } from '../components/SubdocEditor';
 import { Badge } from '../components/Badge';
+import { Termino } from '../components/Termino';
 import { ErrorMessage, Loading } from '../components/States';
 import { useAsync } from '../hooks/useAsync';
 import { perfiles } from '../api/resources';
@@ -34,7 +35,7 @@ const validateParams = values => {
 export default function Perfiles() {
   return (
     <>
-      <PageHeader title="Perfiles de análisis" subtitle="Cores, parámetros y reglas que se aplican al evaluar" />
+      <PageHeader title="Perfiles de análisis" subtitle={<><Termino id="core">Cores</Termino>, parámetros y reglas que se aplican al evaluar</>} />
       <ResourceManager
         api={perfiles}
         fields={FIELDS}
@@ -75,8 +76,8 @@ export function PerfilDetalle() {
   return (
     <>
       <PageHeader
-        title={p ? `Perfil · ${p.nombre}` : 'Perfil de análisis'}
-        subtitle={p ? `Versión ${p.version ?? 1} · actualizado ${fmtDateTime(p.updatedAt)}` : null}
+        title={p ? `Perfil: ${p.nombre}` : 'Perfil de análisis'}
+        subtitle={p ? `Versión ${p.version ?? 1}, actualizado ${fmtDateTime(p.updatedAt)}` : null}
         actions={<Link className="btn btn--sm" to="/configuracion/perfiles">Volver</Link>}
       />
       {perfil.loading && !p && <Loading />}

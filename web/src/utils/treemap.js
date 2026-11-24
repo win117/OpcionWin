@@ -44,21 +44,53 @@ const agrupar = (items, clave) => {
   return [...m].map(([nombre, lista]) => ({ nombre, lista, valor: lista.reduce((s, i) => s + i.valor, 0) }));
 };
 
-const TITULO_SECTOR = 20, TITULO_INDUSTRIA = 15, SEPARACION = 2;
+const TITULO_SECTOR = 22, TITULO_INDUSTRIA = 17, SEPARACION = 2;
+// Cuadro mínimo: cabe un símbolo a 11 px. Lo que sería menor se junta en un cuadro «+N», chico y fuera de escala.
+const MIN_ANCHO = 36, MIN_ALTO = 20, AREA_RESTO = 2400;
 
-/** Sector → industria → empresa. Devuelve { sectores, industrias, cuadros } con coordenadas absolutas. */
-export function disponerMapa(items, ancho, alto) {
+function llenar(lista, resto, x, y, w, h, valorResto) {
+  const industrias = [], cuadros = [];
+  const grupos = agrupar(lista, 'industria');
+  if (resto.length) grupos.push({ resto: resto.length, lista: [], valor: valorResto });
+  for (const g of cuadricula(grupos, x, y, w, h)) {
+    if (g.item.resto) { cuadros.push({ resto: g.item.resto, x: g.x, y: g.y, w: g.w, h: g.h }); continue; }
+    const titulo = g.w > 92 && g.h > 64 && g.item.lista.length > 1;
+    if (titulo) industrias.push({ nombre: g.item.nombre, x: g.x, y: g.y, w: g.w });
+    const dy = titulo ? TITULO_INDUSTRIA : 0;
+    for (const c of cuadricula(g.item.lista, g.x, g.y + dy, g.w, g.h - dy)) cuadros.push({ simbolo: c.item.simbolo, x: c.x, y: c.y, w: c.w, h: c.h });
+  }
+  return { industrias, cuadros };
+}
+
+// Muestra las empresas que caben legibles (a lo más `maximo`) y junta las demás en el resto.
+function llenarSector(items, x, y, w, h, maximo) {
+  let lista = [...items].sort((a, b) => b.valor - a.valor);
+  const resto = lista.splice(maximo);
+  let factor = 1, r;
+  for (let intento = 0; intento < 60; intento += 1) {
+    const suma = lista.reduce((s, i) => s + i.valor, 0), fraccion = Math.min(0.3, (AREA_RESTO * factor) / Math.max(1, w * h));
+    r = llenar(lista, resto, x, y, w, h, (suma * fraccion) / (1 - fraccion));
+    const chicos = r.cuadros.filter(c => c.w < MIN_ANCHO || c.h < MIN_ALTO);
+    if (!chicos.length) break;
+    // Salen primero los más chicos; al quedar espacio, los demás pueden caber.
+    const fuera = new Set(chicos.filter(c => !c.resto).sort((a, b) => a.w * a.h - b.w * b.h).slice(0, Math.max(1, Math.floor(chicos.length / 4))).map(c => c.simbolo));
+    if (fuera.size && lista.length > 1) { resto.push(...lista.filter(i => fuera.has(i.simbolo))); lista = lista.filter(i => !fuera.has(i.simbolo)); }
+    else if (chicos.some(c => c.resto) && factor < 3) factor += 0.5;
+    else break;
+  }
+  return r;
+}
+
+/** Sector → industria → empresa. Devuelve { sectores, industrias, cuadros } con coordenadas absolutas; un cuadro «+N» trae `resto` y `sector`. */
+export function disponerMapa(items, ancho, alto, { maximoPorSector = Infinity } = {}) {
   const sectores = [], industrias = [], cuadros = [];
-  for (const s of cuadricula(agrupar(items, 'sector'), 0, 0, ancho, alto)) {
+  for (const s of cuadricula(agrupar(items.filter(i => i.valor > 0), 'sector'), 0, 0, ancho, alto)) {
     const sx = s.x + SEPARACION, sw = s.w - SEPARACION * 2, conTitulo = s.h > 46 && sw > 46;
     const sy = s.y + (conTitulo ? TITULO_SECTOR : SEPARACION), sh = s.h - (conTitulo ? TITULO_SECTOR : SEPARACION) - SEPARACION;
     if (conTitulo) sectores.push({ nombre: s.item.nombre, x: sx, y: s.y, w: sw });
-    for (const g of cuadricula(agrupar(s.item.lista, 'industria'), sx, sy, sw, sh)) {
-      const titulo = g.w > 92 && g.h > 58 && g.item.lista.length > 1;
-      if (titulo) industrias.push({ nombre: g.item.nombre, x: g.x, y: g.y, w: g.w });
-      const dy = titulo ? TITULO_INDUSTRIA : 0;
-      for (const c of cuadricula(g.item.lista, g.x, g.y + dy, g.w, g.h - dy)) cuadros.push({ simbolo: c.item.simbolo, x: c.x, y: c.y, w: c.w, h: c.h });
-    }
+    const r = llenarSector(s.item.lista, sx, sy, sw, sh, maximoPorSector);
+    industrias.push(...r.industrias);
+    cuadros.push(...r.cuadros.map(c => (c.resto ? { ...c, sector: s.item.nombre } : c)));
   }
   return { sectores, industrias, cuadros };
 }

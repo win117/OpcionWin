@@ -156,7 +156,10 @@ export function ResourceManager({
         loading={list.loading}
         error={list.error}
         onRetry={list.reload}
-        emptyText={emptyText}
+        emptyText={emptyText || (search || Object.values(filterValues).some(Boolean) ? 'Nada coincide con la búsqueda o los filtros.' : undefined)}
+        emptyAction={search || Object.values(filterValues).some(Boolean)
+          ? <button type="button" className="btn btn--sm" onClick={() => { setSearchInput(''); setFilterValues({}); setPage(1); }}>Quitar filtros</button>
+          : creatable && <button type="button" className="btn btn--primary btn--sm" onClick={() => setEditing({})}>{createLabel}</button>}
         selectable={selectable && deletable}
         selected={selected}
         onSelectionChange={setSelected}
@@ -164,7 +167,7 @@ export function ResourceManager({
       />
       <Pagination page={page} limit={pageSize} total={list.data?.total} onPage={setPage} />
 
-      <Modal open={Boolean(editing)} title={formTitle || ((editing?.record ? 'Editar' : 'Crear') + (title ? ' · ' + title : ''))} onClose={() => setEditing(null)} size={modalSize}>
+      <Modal open={Boolean(editing)} title={formTitle || ((editing?.record ? 'Editar' : 'Crear') + (title ? ': ' + title : ''))} onClose={() => setEditing(null)} size={modalSize}>
         {editing && (
           <SchemaForm
             key={editing.record?._id || 'nuevo'}

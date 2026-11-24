@@ -1,17 +1,14 @@
-// Inicio: índices, mapa del mercado en vivo, las 5 mejores por estrategia (automático) y buscador de empresas.
-import { Link, useNavigate, useOutletContext } from 'react-router-dom';
-import { PageHeader } from '../components/Layout';
+// Inicio: franja de índices, mapa del mercado en vivo y las 5 mejores por estrategia (automático).
+import { Link, useOutletContext } from 'react-router-dom';
 import { ScoreBar } from '../components/Gauge';
 import { Empty, ErrorMessage, Notice } from '../components/States';
-import Buscador from './analizar/Buscador';
-import { MercadoEstado } from '../components/MercadoEstado';
+import { Termino } from '../components/Termino';
 import MapaMercado from './mercado/MapaMercado';
 import { useSondeo } from '../hooks/useSondeo';
 import { screener } from '../api/resources';
 import { ESTRATEGIAS, ESTRATEGIA_LABELS, DISCLAIMER } from '../utils/constants';
 import { fmtDateTime, fmtInt, fmtMoney, fmtNum, fmtPct, isNum } from '../utils/format';
 
-const NOMBRES_INDICE = { SPY: 'S&P 500', QQQ: 'Nasdaq 100', IWM: 'Russell 2000', DIA: 'Dow Jones' };
 const DESCRIPCION = {
   LONG_CALL: 'Compra de call: sesgo alcista y volatilidad razonable.',
   LONG_PUT: 'Compra de put: sesgo bajista y volatilidad razonable.',
@@ -24,39 +21,35 @@ function Cambio({ valor }) {
   return <span className={'inicio-change ' + (up ? 'up' : 'down')}>{up ? '▲' : '▼'} {fmtPct(Math.abs(valor), 2)}</span>;
 }
 
-/* ---------- Índices ---------- */
+/* ---------- Índices: son fondos (ETF) que los siguen; el nombre llega del proveedor ---------- */
 function Indices({ mercado }) {
   const { data, loading, error, reload } = mercado;
   const indices = data?.indices || [];
+  if (error && !data) return <div className="indices"><ErrorMessage error={error} onRetry={reload} title="No se pudo cargar el mercado" /></div>;
+  if (!loading && !indices.length) return <div className="indices"><Empty title="Sin datos de índices" accion={<button type="button" className="btn btn--sm" onClick={reload}>Reintentar</button>} /></div>;
   return (
-    <section className="inicio-sec" aria-label="Mercado hoy">
-      <div className="inicio-sec__head">
-        <h2>Mercado hoy</h2>
-        <MercadoEstado estado={mercado} />
-      </div>
-      {error && !data ? <ErrorMessage error={error} onRetry={reload} title="No se pudo cargar el mercado" />
-        : loading && !data ? <div className="inicio-grid inicio-grid--idx">{[0, 1, 2, 3].map(i => <div key={i} className="inicio-card"><span className="skel" style={{ height: 14, width: '60%' }} /><span className="skel" style={{ height: 22, width: '50%' }} /></div>)}</div>
-        : indices.length === 0 ? <Empty title="Sin datos de índices">El servidor no devolvió cotizaciones de SPY, QQQ, IWM o DIA.</Empty> : (
-          <div className="inicio-grid inicio-grid--idx">
-            {indices.map(i => (
-              <Link key={i.simbolo} to={'/analisis/' + i.simbolo} className="inicio-card">
-                <span className="inicio-card__top"><strong>{i.nombre || NOMBRES_INDICE[i.simbolo] || i.simbolo}</strong><span className="muted small">{i.simbolo}</span></span>
-                <span className="inicio-price">{isNum(i.precio) ? fmtMoney(i.precio) : '—'}</span>
-                <Cambio valor={i.cambioPct} />
-              </Link>
-            ))}
-          </div>
-        )}
-      {data?.fuente && <p className="muted small inicio-foot">Fuente: {typeof data.fuente === 'string' ? data.fuente : data.fuente.proveedor || 'Alpaca'}</p>}
-    </section>
+    <ul className="indices" aria-label="Fondos que siguen a los índices del mercado">
+      {(indices.length ? indices : [0, 1, 2, 3]).map(i => (
+        <li key={i.simbolo || i}>
+          {i.simbolo ? (
+            <Link to={'/analisis/' + encodeURIComponent(i.simbolo)} className="indice">
+              <span className="indice__sym">{i.simbolo}</span>
+              <span className="indice__px">{fmtMoney(i.precio)}</span>
+              <span className="indice__nom">{i.nombre && i.nombre !== i.simbolo ? i.nombre : 'Fondo que sigue un índice'}</span>
+              <Cambio valor={i.cambioPct} />
+            </Link>
+          ) : <span className="indice"><span className="skel" /><span className="skel" /></span>}
+        </li>
+      ))}
+    </ul>
   );
 }
 
-/* ---------- Screener ---------- */
+/* ---------- Mejores por estrategia ---------- */
 function Tarjeta({ codigo, items }) {
   return (
-    <article className="card screener-card" aria-label={'Top 5 ' + ESTRATEGIA_LABELS[codigo]}>
-      <h3>Top 5 {ESTRATEGIA_LABELS[codigo]}</h3>
+    <article className="card screener-card" aria-label={'Las 5 mejores para ' + ESTRATEGIA_LABELS[codigo]}>
+      <h3><Termino id={codigo.toLowerCase()}>{ESTRATEGIA_LABELS[codigo]}</Termino></h3>
       <p className="muted small">{DESCRIPCION[codigo]}</p>
       {items.length === 0 ? <p className="muted small">Sin empresas con puntaje para esta estrategia.</p> : (
         <ol className="screener-list">
@@ -67,10 +60,10 @@ function Tarjeta({ codigo, items }) {
                 <span className="screener-item__rank" aria-hidden="true">{i + 1}</span>
                 <span className="screener-item__main">
                   <span className="screener-item__top">
-                    <strong className="ticker">{it.simbolo}</strong>
+                    <strong>{it.simbolo}</strong>
                     <span className="muted small inicio-trunc">{it.nombre}</span>
+                    <span className="screener-item__px"><span>{fmtMoney(it.precio)}</span><Cambio valor={it.cambioPct} /></span>
                   </span>
-                  <span className="screener-item__px"><span>{fmtMoney(it.precio)}</span><Cambio valor={it.cambioPct} /></span>
                   <ScoreBar value={it.puntaje} label={'Puntaje de ' + it.simbolo} />
                   {it.resumen && <span className="muted small screener-item__sum">{it.resumen}</span>}
                 </span>
@@ -103,7 +96,17 @@ function Screener() {
       </div>
       {error && !d && <ErrorMessage error={error} title="No se pudo cargar el ranking; se reintenta solo" />}
       {u.aviso && <Notice tone="warning">{u.aviso}</Notice>}
-      {(loading || (d && !listo)) && <div className="screener-grid">{ESTRATEGIAS.map(c => <div key={c} className="card"><span className="skel" style={{ height: 18, width: '50%' }} /><span className="skel" style={{ height: 120 }} /></div>)}</div>}
+      {(loading || (d && !listo)) && (
+        <div className="screener-grid" aria-hidden="true">
+          {ESTRATEGIAS.map(c => (
+            <div key={c} className="card screener-card">
+              <h3>{ESTRATEGIA_LABELS[c]}</h3>
+              <p className="muted small">{DESCRIPCION[c]}</p>
+              <div className="screener-list">{[0, 1, 2, 3, 4].map(i => <span key={i} className="skel screener-skel" />)}</div>
+            </div>
+          ))}
+        </div>
+      )}
       {listo && <div className="screener-grid">{ESTRATEGIAS.map(c => <Tarjeta key={c} codigo={c} items={d.estrategias?.[c] || []} />)}</div>}
       <p className="muted small">Ranking informativo y educativo, calculado con datos del proveedor; no es una recomendación de inversión.</p>
     </section>
@@ -112,16 +115,12 @@ function Screener() {
 
 export default function Inicio() {
   const { mercado } = useOutletContext();
-  const navigate = useNavigate();
   return (
     <div className="inicio">
-      <PageHeader title="Inicio" subtitle="Mira el mercado, descubre las mejores empresas por estrategia o busca una para analizarla." />
+      <h1 className="sr-only">Inicio</h1>
       <Indices mercado={mercado} />
       <MapaMercado />
       <Screener />
-      <section className="inicio-sec" aria-label="Buscar empresa">
-        <Buscador seleccionado="" version={0} onSelect={s => navigate('/analisis/' + encodeURIComponent(s))} />
-      </section>
       <p className="disclaimer">{DISCLAIMER}</p>
     </div>
   );

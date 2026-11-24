@@ -1,9 +1,13 @@
-import { useId, useRef } from 'react';
+import { useEffect, useId, useRef } from 'react';
+import { centrarEn } from '../utils/desplazar';
 
 /** Pestañas accesibles (role=tablist, flechas izquierda/derecha). */
 export function Tabs({ tabs, value, onChange, label = 'Secciones' }) {
   const id = useId();
   const refs = useRef({});
+  const lista = useRef(null);
+  // En pantallas chicas la fila se desplaza: la pestaña activa siempre queda a la vista.
+  useEffect(() => { centrarEn(lista.current, refs.current[value]); }, [value]);
   const onKey = (event, index) => {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
@@ -16,7 +20,7 @@ export function Tabs({ tabs, value, onChange, label = 'Secciones' }) {
     refs.current[tabs[next].value]?.focus();
   };
   return (
-    <div className="tabs" role="tablist" aria-label={label}>
+    <div ref={lista} className="tabs" role="tablist" aria-label={label}>
       {tabs.map((tab, index) => (
         <button
           key={tab.value}

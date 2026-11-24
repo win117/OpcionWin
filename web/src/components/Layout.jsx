@@ -1,33 +1,70 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Link, NavLink, Outlet, useLocation, useNavigate, useNavigationType } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useAsync } from '../hooks/useAsync';
 import { cargarEstadoMercado } from '../api/resources';
 import { IntegrationStatus, useIntegraciones } from './IntegrationStatus';
 import { BrokerSelector } from './BrokerSelector';
 import { BuscadorTicker } from './BuscadorTicker';
+import { MenuCuenta } from './MenuCuenta';
 import { MercadoEstado } from './MercadoEstado';
+import { tituloDeRuta } from '../utils/constants';
 
+// `icono`: trazo de 24×24, solo se ve en la barra inferior.
 const NAV = [
-  { to: '/', label: 'Inicio', end: true },
-  { to: '/analisis', label: 'Análisis' },
-  { to: '/posiciones', label: 'Posiciones' },
-  { to: '/ordenes', label: 'Órdenes' },
-  { to: '/configuracion', label: 'Configuración' },
+  { to: '/', label: 'Inicio', end: true, icono: 'M4 11l8-7 8 7v9h-5v-6H9v6H4z' },
+  { to: '/analisis', label: 'Análisis', icono: 'M4 19h16M7 16V9m5 7V5m5 11v-5' },
+  { to: '/posiciones', label: 'Posiciones', icono: 'M4 8h16v11H4zM9 8V5h6v3M4 13h16' },
+  { to: '/ordenes', label: 'Órdenes', icono: 'M7 4h10v16H7zM10 9h4m-4 4h4' },
+  { to: '/configuracion', label: 'Configuración', icono: 'M4 7h10m4 0h2M4 17h2m4 0h10M14 4.5v5M6 14.5v5' },
 ];
 const MERCADO_REFRESH_MS = 60000;
+const ESPERA_H1_MS = 5000;
+
+/** Título del documento, scroll arriba y foco en el h1 al cambiar de página (si el h1 llega después, se espera a que aparezca). */
+function useNavegacion() {
+  const { pathname } = useLocation();
+  const tipo = useNavigationType();
+  const anterior = useRef(pathname);
+  useEffect(() => {
+    document.title = `${tituloDeRuta(pathname)} | Opciones`;
+    if (anterior.current === pathname) return undefined;
+    anterior.current = pathname;
+    if (tipo !== 'POP') window.scrollTo(0, 0);
+    const main = document.getElementById('contenido');
+    const enfocar = () => {
+      const h1 = main?.querySelector('h1');
+      if (!h1) return false;
+      h1.tabIndex = -1;
+      h1.focus({ preventScroll: true });
+      return true;
+    };
+    if (enfocar()) return undefined;
+    main?.focus({ preventScroll: true });
+    const obs = new MutationObserver(() => {
+      // Si la persona ya movió el foco, no se lo quitamos.
+      const quieto = document.activeElement === main || document.activeElement === document.body;
+      if (!quieto || enfocar()) obs.disconnect();
+    });
+    obs.observe(main, { childList: true, subtree: true });
+    const t = setTimeout(() => obs.disconnect(), ESPERA_H1_MS);
+    return () => { obs.disconnect(); clearTimeout(t); };
+  }, [pathname, tipo]);
+}
 
 export function Layout() {
   const { session, logout } = useAuth();
-  const [open, setOpen] = useState(false);
-  const location = useLocation();
+  const [buscando, setBuscando] = useState(false); // búsqueda sobre la cabecera, en pantallas chicas
+  const lupa = useRef(null);
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const integraciones = useIntegraciones();
   const mercado = useAsync(cargarEstadoMercado, []);
   const recarga = useRef(mercado.reload);
   recarga.current = mercado.reload;
+  useNavegacion();
 
-  useEffect(() => { setOpen(false); }, [location.pathname]);
+  useEffect(() => { setBuscando(false); }, [pathname]);
   useEffect(() => {
     const id = setInterval(() => { if (document.visibilityState === 'visible') recarga.current(); }, MERCADO_REFRESH_MS);
     return () => clearInterval(id);
@@ -37,6 +74,7 @@ export function Layout() {
     await logout();
     navigate('/login', { replace: true });
   };
+  const cerrarBusqueda = () => { setBuscando(false); lupa.current?.focus(); };
 
   return (
     <div className="app">
@@ -45,29 +83,37 @@ export function Layout() {
         <div className="topnav__inner">
           <Link to="/" className="brand" aria-label="Opciones, ir al inicio">
             <span className="brand__logo" aria-hidden="true">
-              <svg viewBox="0 0 32 32" width="26" height="26"><rect width="32" height="32" rx="7" fill="currentColor" /><path d="M6 22l6-7 5 4 9-11" stroke="var(--surface)" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              <svg viewBox="0 0 32 32" width="28" height="28"><rect width="32" height="32" rx="7" fill="currentColor" /><path d="M6 22l6-7 5 4 9-11" stroke="var(--surface)" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
             </span>
             <span className="brand__name">Opciones</span>
           </Link>
-          <button type="button" className="btn btn--ghost btn--icon menu-toggle" aria-label={open ? 'Cerrar menú' : 'Abrir menú'} aria-expanded={open} aria-controls="menu-principal" onClick={() => setOpen(o => !o)}>
-            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d={open ? 'M6 6l12 12M18 6L6 18' : 'M4 6h16M4 12h16M4 18h16'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
-          </button>
-          <nav id="menu-principal" className={'topnav__nav' + (open ? ' is-open' : '')} aria-label="Navegación principal">
+          <nav className="topnav__nav" aria-label="Navegación principal">
             <ul>
               {NAV.map(item => (
                 <li key={item.to}>
-                  <NavLink to={item.to} end={item.end} className={({ isActive }) => 'topnav__link' + (isActive ? ' is-active' : '')}>{item.label}</NavLink>
+                  <NavLink to={item.to} end={item.end} className={({ isActive }) => 'topnav__link' + (isActive ? ' is-active' : '')}>
+                    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d={item.icono} /></svg>
+                    {item.label}
+                  </NavLink>
                 </li>
               ))}
             </ul>
           </nav>
           <div className="topnav__tools">
             <BuscadorTicker />
+            <button ref={lupa} type="button" className="btn btn--ghost btn--icon topnav__lupa" aria-label="Buscar empresa" aria-expanded={buscando} onClick={() => setBuscando(true)}>
+              <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="11" cy="11" r="6.5" /><path d="M16 16l4.5 4.5" /></svg>
+            </button>
             <MercadoEstado estado={mercado} />
             <BrokerSelector />
-            <span className="topbar__email" title={session?.usuarioId}>{session?.email || 'Usuario'}</span>
-            <button type="button" className="btn btn--sm" onClick={onLogout}>Salir</button>
+            <MenuCuenta email={session?.email} usuarioId={session?.usuarioId} onSalir={onLogout} />
           </div>
+          {buscando && (
+            <div className="topnav__busca">
+              <BuscadorTicker autoFocus onListo={cerrarBusqueda} />
+              <button type="button" className="btn btn--ghost btn--icon" aria-label="Cerrar búsqueda" onClick={cerrarBusqueda}>×</button>
+            </div>
+          )}
         </div>
       </header>
       <main id="contenido" className="content" tabIndex={-1}>
@@ -76,7 +122,7 @@ export function Layout() {
       <footer className="app-foot muted small">
         <span>Herramienta educativa. No es asesoría financiera.</span>
         <IntegrationStatus state={integraciones} compact />
-        <span title="Base de datos de la sesión">{session?.baseDatos === 'supabase' ? 'Supabase' : 'MongoDB'}</span>
+        <span>Tus datos se guardan en {session?.baseDatos === 'supabase' ? 'Supabase' : 'MongoDB'}</span>
       </footer>
     </div>
   );

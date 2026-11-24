@@ -5,8 +5,10 @@ import { mercado } from '../../api/resources';
 import { useSondeo } from '../../hooks/useSondeo';
 import { CandleChart } from '../../components/CandleChart';
 import { ScoreBar } from '../../components/Gauge';
+import { Termino } from '../../components/Termino';
 import { ErrorMessage } from '../../components/States';
 import { ESTRATEGIAS, ESTRATEGIA_LABELS } from '../../utils/constants';
+import { giroEs } from '../../utils/sic';
 import { fmtCompact, fmtFixed, fmtMoney, fmtPct, isNum } from '../../utils/format';
 
 const RANGOS = ['1M', '3M', '6M', '1A'];
@@ -40,8 +42,8 @@ export default function FichaEmpresa({ simbolo, vivo, onCerrar }) {
     <div className="ficha">
       <div className="ficha__cab">
         <div>
-          <h3><span className="ticker">{simbolo}</span> <span className="muted ficha__nombre">{d.nombre}</span></h3>
-          <p className="muted small">{[d.sector, d.industria].filter(Boolean).join(', ')}</p>
+          <h3 tabIndex={-1}><span className="ticker">{simbolo}</span> <span className="muted ficha__nombre">{d.nombre}</span></h3>
+          <p className="muted small">{[d.sector, giroEs(d.industria)].filter(Boolean).join(', ')}</p>
         </div>
         <button type="button" className="btn btn--ghost btn--icon" aria-label="Cerrar ficha" onClick={onCerrar}>×</button>
       </div>
@@ -58,10 +60,10 @@ export default function FichaEmpresa({ simbolo, vivo, onCerrar }) {
         <div><dt>1 semana</dt><dd className={tono(d.cambio5d)}>{signo(d.cambio5d)}</dd></div>
         <div><dt>1 mes</dt><dd className={tono(d.cambio21d)}>{signo(d.cambio21d)}</dd></div>
         <div><dt>En el año</dt><dd className={tono(d.cambioAnio)}>{signo(d.cambioAnio)}</dd></div>
-        <div><dt>Capitalización</dt><dd>{fmtCompact(d.capitalizacion)}</dd></div>
+        <div><dt>Capitalización (USD)</dt><dd>{fmtCompact(d.capitalizacion)}</dd></div>
         <div><dt>Volumen</dt><dd>{fmtCompact(d.volumen)}{volRel != null && <span className="muted small"> ({fmtFixed(volRel, 1)}× lo normal)</span>}</dd></div>
-        <div><dt>Volatilidad implícita</dt><dd>{isNum(d.ivPromedio) ? fmtPct(d.ivPromedio, 1) : '—'}</dd></div>
-        <div><dt>Volatilidad 20 días</dt><dd>{isNum(d.hv20) ? fmtPct(d.hv20, 1) : '—'}</dd></div>
+        <div><dt><Termino id="iv">Volatilidad implícita</Termino></dt><dd>{isNum(d.ivPromedio) ? fmtPct(d.ivPromedio, 1) : '—'}</dd></div>
+        <div><dt><Termino id="hv">Volatilidad 20 días</Termino></dt><dd>{isNum(d.hv20) ? fmtPct(d.hv20, 1) : '—'}</dd></div>
         <div><dt>Apertura</dt><dd>{fmtMoney(d.apertura)}</dd></div>
         <div><dt>Cierre anterior</dt><dd>{fmtMoney(d.cierreAnterior)}</dd></div>
       </dl>
