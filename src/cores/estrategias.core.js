@@ -4,7 +4,7 @@
 import { DIA_MS, esNumero, round, tiempo } from './util.js';
 import { DIAS_ANIO, opcion, probabilidadSobre, TASA_LIBRE_RIESGO, volatilidadImplicita } from './blackscholes.js';
 
-export const VERSION = 'estrategias@1.1.0';
+export const VERSION = 'estrategias@1.2.0';
 // Hora UTC aproximada del vencimiento: las opciones de acciones de EE. UU. dejan de cotizar a las 16:00 ET
 // (20:00 UTC en horario de verano, 21:00 UTC en invierno; la diferencia de 1 h es despreciable para T).
 export const HORA_VENCIMIENTO_UTC = 20;
@@ -16,6 +16,35 @@ const valorIntrinseco = (c, precio) => (c.tipo === 'call' ? Math.max(0, precio -
 /** Resultado al vencimiento (en dinero) para un precio final del subyacente. Requiere precios en todas las patas. */
 export const payoff = (componentes, precioFinal, multiplicador = 100) =>
   componentes.reduce((acc, c) => acc + signo(c) * (valorIntrinseco(c, precioFinal) - c.precio) * c.cantidad * multiplicador, 0);
+
+// Tolerancia en dinero para decidir si un vértice del payoff vale cero.
+const CERO = 1e-6;
+
+/**
+ * Riesgo al vencimiento de CUALQUIER conjunto de patas. El payoff es lineal por tramos: basta evaluarlo en 0, en cada
+ * strike y conocer la pendiente a la derecha del último. Devuelve { gananciaMaxima, perdidaMaxima, breakevens };
+ * null = ilimitada; perdidaMaxima es positiva (0 si nunca se pierde).
+ */
+export const perfilVencimiento = (componentes, multiplicador = 100) => {
+  const nodos = [0, ...new Set(componentes.map(c => c.strike))].sort((a, b) => a - b);
+  const v = nodos.map(x => payoff(componentes, x, multiplicador));
+  const pendiente = componentes.filter(c => c.tipo === 'call').reduce((a, c) => a + signo(c) * c.cantidad * multiplicador, 0);
+  const cero = x => Math.abs(x) < CERO;
+  const breakevens = [];
+  nodos.forEach((x, i) => {
+    const ultimo = i === nodos.length - 1;
+    const derecha = ultimo ? v[i] + pendiente : v[i + 1]; // a la derecha del último strike basta el signo de la pendiente
+    // Un vértice en cero es breakeven salvo dentro de una meseta de cero.
+    if (cero(v[i])) { if (x > 0 && !(cero(v[i - 1]) && cero(derecha))) breakevens.push(x); return; }
+    if (ultimo) { if (pendiente !== 0 && Math.sign(v[i]) !== Math.sign(pendiente)) breakevens.push(x - v[i] / pendiente); return; }
+    if (!cero(v[i + 1]) && Math.sign(v[i]) !== Math.sign(v[i + 1])) breakevens.push(x + ((nodos[i + 1] - x) * -v[i]) / (v[i + 1] - v[i]));
+  });
+  return {
+    gananciaMaxima: pendiente > 0 ? null : Math.max(...v),
+    perdidaMaxima: pendiente < 0 ? null : Math.max(0, -Math.min(...v)),
+    breakevens,
+  };
+};
 
 const validarComponente = (c, i) => {
   const e = [];
@@ -36,6 +65,7 @@ export const validar = (estrategia, componentes) => {
   if (!Array.isArray(componentes)) return ['componentes debe ser un arreglo.'];
   const errores = componentes.flatMap(validarComponente);
   if (errores.length) return errores;
+  if (new Set(componentes.map(c => c.multiplicador ?? null)).size > 1) return ['Todas las patas deben tener el mismo multiplicador de contrato.'];
   if (estrategia === 'LONG_CALL' || estrategia === 'LONG_PUT') {
     const tipo = estrategia === 'LONG_CALL' ? 'call' : 'put';
     if (componentes.length !== 1) return [`${estrategia} requiere exactamente 1 componente.`];
@@ -122,8 +152,11 @@ const metricasBlackScholes = ({ estrategia, componentes, S, fechaReferencia, r, 
     if (credito <= 0) pop = 0;
     else {
       // Cada breakeven usa la IV de la pata vendida más cercana (aproxima la sonrisa de volatilidad).
-      const pInf = sobre(componentes[ps].strike - credito, ivs[ps]);
-      const pSup = sobre(componentes[cs].strike + credito, ivs[cs]);
+      // Un ala más angosta que el crédito no tiene breakeven de ese lado: todo ese lado es ganancia.
+      const alaPut = componentes[ps].strike - componentes[idx('put', 'buy')].strike;
+      const alaCall = componentes[idx('call', 'buy')].strike - componentes[cs].strike;
+      const pInf = alaPut < credito - 1e-9 ? 1 : sobre(componentes[ps].strike - credito, ivs[ps]);
+      const pSup = alaCall < credito - 1e-9 ? 0 : sobre(componentes[cs].strike + credito, ivs[cs]);
       pop = pInf == null || pSup == null ? null : Math.min(1, Math.max(0, pInf - pSup));
     }
   }
@@ -135,7 +168,8 @@ const metricasBlackScholes = ({ estrategia, componentes, S, fechaReferencia, r, 
 
 export function evaluarConfiguracion(input = {}) {
   const { estrategia, componentes = [], precioSubyacente } = input;
-  const multiplicador = esNumero(input.multiplicador) && input.multiplicador > 0 ? input.multiplicador : 100;
+  const delContrato = Array.isArray(componentes) ? componentes[0]?.multiplicador : undefined;
+  const multiplicador = [delContrato, input.multiplicador].find(v => esNumero(v) && v > 0) ?? 100;
   const tasa = esNumero(input.tasaLibreRiesgo) ? input.tasaLibreRiesgo : TASA_LIBRE_RIESGO;
   const errores = validar(estrategia, componentes);
   const motivos = [];
@@ -158,28 +192,25 @@ export function evaluarConfiguracion(input = {}) {
   const primaNeta = componentes.reduce((a, c) => a - signo(c) * c.precio * c.cantidad * multiplicador, 0);
   metricas.push(m('prima_neta', primaNeta));
 
-  if (estrategia === 'LONG_CALL') {
-    const [c] = componentes;
-    metricas.push(m('perdida_maxima', c.precio * q * multiplicador), m('ganancia_maxima', null), m('breakeven', c.strike + c.precio, 'precio'));
-    motivos.push('Long call: pérdida limitada a la prima; ganancia ilimitada (ganancia_maxima = null).');
-  } else if (estrategia === 'LONG_PUT') {
-    const [c] = componentes;
-    metricas.push(m('perdida_maxima', c.precio * q * multiplicador), m('ganancia_maxima', Math.max(0, c.strike - c.precio) * q * multiplicador), m('breakeven', c.strike - c.precio, 'precio'));
-    motivos.push('Long put: pérdida limitada a la prima; ganancia máxima si el subyacente llega a 0.');
+  const riesgo = perfilVencimiento(componentes, multiplicador);
+  metricas.push(m('perdida_maxima', riesgo.perdidaMaxima), m('ganancia_maxima', riesgo.gananciaMaxima));
+
+  if (estrategia === 'LONG_CALL' || estrategia === 'LONG_PUT') {
+    metricas.push(...riesgo.breakevens.map(b => m('breakeven', b, 'precio')));
+    motivos.push(estrategia === 'LONG_CALL'
+      ? 'Long call: pérdida limitada a la prima; ganancia ilimitada (ganancia_maxima = null).'
+      : 'Long put: pérdida limitada a la prima; ganancia máxima si el subyacente llega a 0.');
+    if (!riesgo.breakevens.length) motivos.push('Advertencia: la prima supera el strike; la estructura no tiene ganancia posible.');
   } else {
     const get = (tipo, accion) => componentes.find(c => c.tipo === tipo && c.accion === accion);
     const k1 = get('put', 'buy').strike, k2 = get('put', 'sell').strike, k3 = get('call', 'sell').strike, k4 = get('call', 'buy').strike;
     const credito = primaNeta / (q * multiplicador); // por acción
-    const ancho = Math.max(k2 - k1, k4 - k3);
-    metricas.push(
-      m('ganancia_maxima', credito * q * multiplicador),
-      m('perdida_maxima', Math.max(0, ancho - credito) * q * multiplicador),
-      m('breakeven_inferior', k2 - credito, 'precio'),
-      m('breakeven_superior', k3 + credito, 'precio'),
-      m('ancho_alas', ancho, 'precio'),
-    );
+    const inferior = riesgo.breakevens.find(b => b <= k2), superior = riesgo.breakevens.find(b => b >= k3);
+    if (inferior != null) metricas.push(m('breakeven_inferior', inferior, 'precio'));
+    if (superior != null) metricas.push(m('breakeven_superior', superior, 'precio'));
+    metricas.push(m('ancho_alas', Math.max(k2 - k1, k4 - k3), 'precio'));
     if (credito <= 0) motivos.push('Advertencia: el Iron Condor no genera crédito neto; la estructura no tiene ganancia posible.');
-    else motivos.push(`Iron Condor con crédito ${credito.toFixed(2)} por acción; zona de ganancia entre ${(k2 - credito).toFixed(2)} y ${(k3 + credito).toFixed(2)}.`);
+    else motivos.push(`Iron Condor con crédito ${credito.toFixed(2)} por acción; zona de ganancia ${inferior != null ? 'desde ' + inferior.toFixed(2) : 'sin límite inferior'} ${superior != null ? 'hasta ' + superior.toFixed(2) : 'sin límite superior'}.`);
   }
 
   if (esNumero(precioSubyacente) && precioSubyacente > 0) {

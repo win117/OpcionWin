@@ -2,10 +2,10 @@
 import { useState } from 'react';
 import TicketOrden from './TicketOrden';
 import { ErrorMessage } from './States';
-import { estrategias, evaluaciones, mercado, selecciones } from '../api/resources';
+import { confluencias, estrategias, evaluaciones, mercado, selecciones } from '../api/resources';
 import { CORES, ESTRATEGIA_LABELS } from '../utils/constants';
 import { leerConfig } from '../pages/analizar/flujo';
-import { construirPatas, contextoAnalisis, elegirVencimiento } from '../utils/estrategiasOrden';
+import { construirPatas, contextoAnalisis, elegirVencimiento, estadisticosConfluencia } from '../utils/estrategiasOrden';
 
 /** Carga selección completada más reciente, catálogo de estrategias y últimas evaluaciones por core. */
 export async function cargarDatosAnalisis(empresa) {
@@ -17,12 +17,22 @@ export async function cargarDatosAnalisis(empresa) {
   return { seleccion: sel.items?.[0], estrategiasById: new Map((est.items || []).map(e => [e._id, e])), evaluaciones: Object.fromEntries(evs) };
 }
 
-/** Cadena del primer vencimiento con ≥ diasMin días (y ≤ diasMax si es posible), si no el más cercano. */
-export async function cargarCadena(simbolo, { diasMin = 7, diasMax = null } = {}) {
-  let d = await mercado.opcionesResumen(simbolo, {});
-  const venc = elegirVencimiento(d.vencimientos || (d.vencimiento ? [d.vencimiento] : []), new Date(), diasMin, diasMax);
-  if (venc && venc !== d.vencimiento) d = await mercado.opcionesResumen(simbolo, { vencimiento: venc });
-  return d;
+/** Confluencia guardada con SUS evaluaciones (no las últimas) y sus estadísticos: { conf, evaluaciones: { core → ev }, est }. */
+export async function cargarConfluencia(confluenciaId, ponderaciones = []) {
+  const conf = await confluencias.get(confluenciaId);
+  const evs = await Promise.all((conf.evaluacionesIds || []).map(id => evaluaciones.get(id)));
+  return { conf, evaluaciones: Object.fromEntries(evs.map(e => [e.core, e])), est: estadisticosConfluencia(evs, ponderaciones, conf.coresSeleccionados || []) };
+}
+
+/**
+ * Cadena del vencimiento sugerido para la estrategia (30-45 días objetivo dentro de diasMin–diasMax). Nunca uno vencido:
+ * si todos lo están devuelve la cadena sin contratos.
+ */
+export async function cargarCadena(simbolo, { diasMin = 7, diasMax = null, codigo = null } = {}) {
+  const d = await mercado.opcionesResumen(simbolo, {});
+  const venc = elegirVencimiento(d.vencimientos || (d.vencimiento ? [d.vencimiento] : []), new Date(), diasMin, diasMax, codigo);
+  if (!venc) return { ...d, vencimiento: null, items: [], total: 0 };
+  return venc === d.vencimiento ? d : mercado.opcionesResumen(simbolo, { vencimiento: venc });
 }
 
 /**
@@ -39,15 +49,16 @@ export default function BotonOperar({ empresa, estrategiaCodigo, datos, label, c
     const rango = { diasMin: diasMin ?? cfg.diasMin, diasMax: diasMax ?? cfg.diasMax };
     try {
       const elegidas = legsElegidas?.length && chainElegida;
-      const [d, chain] = await Promise.all([
-        datos ? Promise.resolve(datos) : cargarDatosAnalisis(empresa),
-        elegidas ? Promise.resolve(chainElegida) : cargarCadena(empresa.simbolo, rango),
+      const d = datos || await cargarDatosAnalisis(empresa);
+      const codigo = estrategiaCodigo || contextoAnalisis(d, null).topCodigo || 'LONG_CALL';
+      const analisis = contextoAnalisis(d, codigo);
+      const [chain, est] = await Promise.all([
+        elegidas ? chainElegida : cargarCadena(empresa.simbolo, { ...rango, codigo }),
+        analisis.confluenciaId ? cargarConfluencia(analisis.confluenciaId, d.seleccion?.ponderaciones).then(c => c.est).catch(() => null) : null,
       ]);
-      let codigo = estrategiaCodigo;
-      if (!codigo) codigo = contextoAnalisis(d, null).topCodigo || 'LONG_CALL';
       const { legs, error } = elegidas ? { legs: legsElegidas } : construirPatas(codigo, chain.items || [], chain.precioSubyacente);
       if (error) throw new Error(error);
-      setEstado({ busy: false, error: null, ticket: { legs, chain, codigo, analisis: contextoAnalisis(d, codigo) } });
+      setEstado({ busy: false, error: null, ticket: { legs, chain, codigo, analisis: { ...analisis, est } } });
     } catch (error) {
       setEstado({ busy: false, error, ticket: null });
     }

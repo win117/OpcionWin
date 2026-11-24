@@ -48,9 +48,10 @@ const cruza = (a0, a1, b0, b1) => {
 };
 
 /**
- * Eventos de compra/venta en toda la serie:
- * cruces de SMA 20/50 y 50/200 (core técnico), RSI entrando en sobreventa (≤30, compra) o sobrecompra (≥70, venta)
- * y cruce MACD/señal (core indicadores). Devuelve [{ time, lado: 'compra'|'venta', origen, core, texto }] ascendente.
+ * Eventos de tendencia en toda la serie: cruces de SMA 20/50 y 50/200 (core técnico) y cruce MACD/señal (core indicadores),
+ * con lado 'compra' | 'venta'. El RSI entrando en sobreventa (≤30) o sobrecompra (≥70) es lado 'info': el core Indicadores
+ * lo lee como momentum, no como reversión, así que no se anuncia como compra ni venta.
+ * Devuelve [{ time, lado, origen, core, texto }] ascendente.
  */
 export function eventosSenales(velas) {
   const c = velas.map(x => x.close);
@@ -67,8 +68,8 @@ export function eventosSenales(velas) {
     if (y > 0) add(i, 'compra', 'cruce_sma_largo', 'tecnico', 'Cruce dorado: SMA 50 sobre SMA 200');
     if (y < 0) add(i, 'venta', 'cruce_sma_largo', 'tecnico', 'Cruce de la muerte: SMA 50 bajo SMA 200');
     if (rsi[i - 1] != null && rsi[i] != null) {
-      if (rsi[i - 1] > 30 && rsi[i] <= 30) add(i, 'compra', 'rsi', 'indicadores', 'RSI bajo (sobreventa)');
-      if (rsi[i - 1] < 70 && rsi[i] >= 70) add(i, 'venta', 'rsi', 'indicadores', 'RSI alto (sobrecompra)');
+      if (rsi[i - 1] > 30 && rsi[i] <= 30) add(i, 'info', 'rsi', 'indicadores', 'RSI en sobreventa (informativo)');
+      if (rsi[i - 1] < 70 && rsi[i] >= 70) add(i, 'info', 'rsi', 'indicadores', 'RSI en sobrecompra (informativo)');
     }
     const m = cruza(macd[i - 1], macd[i], senal[i - 1], senal[i]);
     if (m > 0) add(i, 'compra', 'macd', 'indicadores', 'MACD cruza sobre su señal');
@@ -82,16 +83,19 @@ export function etiquetaEvento(e) {
   const t = {
     cruce_sma: e.lado === 'compra' ? 'SMA ↑' : 'SMA ↓',
     cruce_sma_largo: e.lado === 'compra' ? 'Dorado' : 'Muerte',
-    rsi: e.lado === 'compra' ? 'RSI bajo' : 'RSI alto',
+    rsi: 'RSI',
     macd: e.lado === 'compra' ? 'MACD ↑' : 'MACD ↓',
   };
   return t[e.origen] || e.lado;
 }
 
+// Lectura de un oscilador: solo describe la zona; no es señal de compra ni de venta.
+const zona = (v, bajo, alto) => (v <= bajo ? 'Sobreventa (informativo)' : v >= alto ? 'Sobrecompra (informativo)' : 'Zona media (informativo)');
+
 /**
- * Lectura actual de cada señal: [{ id, nombre, core, valor (texto), direccion: 'alcista'|'bajista'|'neutral', detalle }].
- * Reglas: precio vs SMA50/SMA200 y SMA20 vs SMA50 (tendencia); RSI ≤30 alcista / ≥70 bajista; histograma MACD ±;
- * estocástico %K ≤20 alcista / ≥80 bajista; Bollinger %B ≤0.2 alcista / ≥0.8 bajista.
+ * Lectura actual de cada señal: [{ id, nombre, core, valor (texto), direccion: 'alcista'|'bajista'|'neutral'|'informativo', detalle }].
+ * Las de tendencia tienen el mismo signo que los cores del servidor: precio vs SMA50/SMA200 y SMA50 vs SMA200 (técnico) e
+ * histograma MACD (indicadores). RSI, estocástico y Bollinger %B son informativos y no cuentan en la confluencia.
  */
 export function estadoSenales(velas) {
   if (velas.length < 20) return [];
@@ -104,21 +108,22 @@ export function estadoSenales(velas) {
   if (d50) add('precio_sma50', 'Precio vs SMA 50', 'tecnico', f(r.precio, 2) + ' / ' + f(r.sma50, 2), d50, d50 === 'alcista' ? 'Precio sobre la media de 50' : 'Precio bajo la media de 50');
   const d200 = cmp(r.precio, r.sma200);
   if (d200) add('precio_sma200', 'Precio vs SMA 200', 'tecnico', f(r.precio, 2) + ' / ' + f(r.sma200, 2), d200, d200 === 'alcista' ? 'Tendencia larga alcista' : 'Tendencia larga bajista');
-  const dc = cmp(r.sma20, r.sma50);
-  if (dc) add('sma20_50', 'SMA 20 vs SMA 50', 'tecnico', f(r.sma20, 2) + ' / ' + f(r.sma50, 2), dc, dc === 'alcista' ? 'Media corta sobre la media media' : 'Media corta bajo la media media');
-  if (esNum(r.rsi)) add('rsi', 'RSI 14', 'indicadores', f(r.rsi), r.rsi <= 30 ? 'alcista' : r.rsi >= 70 ? 'bajista' : 'neutral', r.rsi <= 30 ? 'Sobreventa: posible rebote' : r.rsi >= 70 ? 'Sobrecompra: posible corrección' : 'Zona neutral (30–70)');
-  if (esNum(r.macdHist)) add('macd', 'MACD 12/26/9', 'indicadores', f(r.macdHist, 3), r.macdHist > 0 ? 'alcista' : r.macdHist < 0 ? 'bajista' : 'neutral', r.macdHist > 0 ? 'Histograma positivo' : 'Histograma negativo');
-  if (esNum(r.estocasticoK)) add('estocastico', 'Estocástico %K', 'indicadores', f(r.estocasticoK), r.estocasticoK <= 20 ? 'alcista' : r.estocasticoK >= 80 ? 'bajista' : 'neutral', r.estocasticoK <= 20 ? 'Sobreventa' : r.estocasticoK >= 80 ? 'Sobrecompra' : 'Zona media');
-  if (esNum(r.bollingerPctB)) add('bollinger', 'Bollinger %B', 'indicadores', f(r.bollingerPctB, 2), r.bollingerPctB <= 0.2 ? 'alcista' : r.bollingerPctB >= 0.8 ? 'bajista' : 'neutral', r.bollingerPctB <= 0.2 ? 'Cerca de la banda inferior' : r.bollingerPctB >= 0.8 ? 'Cerca de la banda superior' : 'Dentro de las bandas');
+  const dc = cmp(r.sma50, r.sma200);
+  if (dc) add('sma50_200', 'SMA 50 vs SMA 200', 'tecnico', f(r.sma50, 2) + ' / ' + f(r.sma200, 2), dc, dc === 'alcista' ? 'Media de 50 sobre la de 200' : 'Media de 50 bajo la de 200');
+  if (esNum(r.macdHist)) add('macd', 'MACD 12/26/9', 'indicadores', f(r.macdHist, 3), cmp(r.macdHist, 0), r.macdHist > 0 ? 'Histograma positivo' : 'Histograma negativo');
+  if (esNum(r.rsi)) add('rsi', 'RSI 14', 'indicadores', f(r.rsi), 'informativo', zona(r.rsi, 30, 70));
+  if (esNum(r.estocasticoK)) add('estocastico', 'Estocástico %K', 'indicadores', f(r.estocasticoK), 'informativo', zona(r.estocasticoK, 20, 80));
+  if (esNum(r.bollingerPctB)) add('bollinger', 'Bollinger %B', 'indicadores', f(r.bollingerPctB, 2), 'informativo', zona(r.bollingerPctB, 0.2, 0.8));
   return out;
 }
 
 /**
- * Confluencia: cuántas señales son alcistas/bajistas/neutrales y cuáles coinciden con la mayoría.
- * `cores`: si se indica, solo cuentan las señales de esos cores (los apagados se excluyen).
+ * Confluencia: cuántas señales de tendencia son alcistas/bajistas/neutrales y cuáles coinciden con la mayoría.
+ * Las informativas no se cuentan. `cores`: si se indica, solo cuentan las señales de esos cores (los apagados se excluyen).
  */
 export function confluencia(estado, cores = null) {
-  const usadas = cores ? estado.filter(s => cores.includes(s.core)) : estado;
+  const tendencia = estado.filter(s => s.direccion !== 'informativo');
+  const usadas = cores ? tendencia.filter(s => cores.includes(s.core)) : tendencia;
   const lista = d => usadas.filter(s => s.direccion === d);
   const alcistas = lista('alcista'), bajistas = lista('bajista'), neutrales = lista('neutral');
   const n = usadas.length;
@@ -128,5 +133,5 @@ export function confluencia(estado, cores = null) {
   const coinciden = sesgo === 'alcista' ? alcistas : sesgo === 'bajista' ? bajistas : neutrales;
   const fuerza = n ? Math.abs(alcistas.length - bajistas.length) / n : 0;
   const nivel = fuerza >= 0.6 ? 'fuerte' : fuerza >= 0.3 ? 'moderada' : 'débil';
-  return { total: n, alcistas, bajistas, neutrales, sesgo, coinciden, fuerza, nivel, excluidas: estado.length - n };
+  return { total: n, alcistas, bajistas, neutrales, sesgo, coinciden, fuerza, nivel, excluidas: tendencia.length - n };
 }

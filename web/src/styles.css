@@ -695,3 +695,12 @@ a.inicio-card:focus-visible { outline: 2px solid var(--focus); outline-offset: 2
 @media (max-width: 1179px) { .mapa--panel { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 960px) { .mapa__panel { scroll-margin-top: 225px; } }
 @media (max-width: 640px) { .mapa__grupo { width: 100%; } .mapa__op { flex: 1 1 auto; min-height: 40px; } .mapa__campo, .mapa__campo select { flex: 1 1 100%; width: 100%; } .mapa__buscar { max-width: none; flex-basis: 100%; } }
+
+/* Ticket y riesgo */
+.ticket__ilimitada { border-color: var(--danger-fg); font-weight: 600; }
+.ticket__notas { border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 8px 12px; background: var(--surface-2); }
+.ticket__notas .list { margin-top: 6px; }
+.ticket__confirmar { border: 1px solid var(--warning-fg); border-radius: var(--radius-sm); padding: 10px 12px; background: var(--warning-bg); color: var(--warning-fg); }
+.ticket__cifras dd { font-variant-numeric: tabular-nums; }
+.desglose-ajuste td { white-space: normal; }
+.desglose-total th, .desglose-total td { border-top: 2px solid var(--border); }

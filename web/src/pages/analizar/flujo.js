@@ -174,15 +174,16 @@ export async function ejecutarFlujo(simbolo, { sincronizar, recursos, cores, ind
   if (activos.length < cores.length) set('core:institucional', { estado: 'omitida', detalle: 'sin datos 13F' });
   if (!activos.length) throw new Error('No hay cores con datos para evaluar.');
 
-  const parametros = indicadores ? { parametros: { indicadores } } : {};
+  // El rango de días del usuario limita los contratos que entran en iv_promedio (evaluaciones y selección).
+  const parametros = { ...(indicadores ? { indicadores } : {}), ...(isNum(diasMin) && isNum(diasMax) ? { diasVencimientoMin: diasMin, diasVencimientoMax: diasMax } : {}) };
   await Promise.all(activos.map(core => paso('core:' + core,
-    () => acciones.evaluarCore(core, { empresaId: empresa._id, ...parametros }), r => jobPaths.evaluacionCore(core, r._id))));
+    () => acciones.evaluarCore(core, { empresaId: empresa._id, parametros }), r => jobPaths.evaluacionCore(core, r._id))));
 
   await paso('seleccion', () => acciones.seleccionar({
     modo: 'empresa',
     empresaId: empresa._id,
     coresSeleccionados: activos,
-    ...(indicadores ? { filtros: { indicadores } } : {}),
+    filtros: parametros,
     ponderaciones: ponderaciones.filter(p => activos.includes(p.core)),
   }), r => jobPaths.seleccion(r._id));
 }

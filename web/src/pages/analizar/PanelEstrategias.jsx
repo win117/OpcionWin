@@ -1,65 +1,65 @@
 // Resultado del análisis: pestañas por estrategia con compatibilidad, panel operativo (contratos sugeridos con
 // strike, vencimiento, días, prima y griegas), payoff, desglose por core y veredicto. Solo muestra los cores analizados.
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Tabs } from '../../components/Tabs';
 import { Badge } from '../../components/Badge';
-import { ScoreBar, direccion } from '../../components/Gauge';
+import { ScoreBar } from '../../components/Gauge';
 import { PayoffChart, analyzePayoff } from '../../components/PayoffChart';
 import { Empty, ErrorMessage, Loading, Notice } from '../../components/States';
 import { Select } from '../../components/Field';
-import BotonOperar, { cargarCadena } from '../../components/BotonOperar';
+import BotonOperar, { cargarCadena, cargarConfluencia } from '../../components/BotonOperar';
 import { useAsync } from '../../hooks/useAsync';
 import { useBroker } from '../../context/BrokerContext';
-import { confluencias, mercado } from '../../api/resources';
+import { mercado } from '../../api/resources';
 import { CORE_LABELS, ESTRATEGIA_LABELS } from '../../utils/constants';
-import { candidatosStrike, diasHasta, intencionPara, mid, netoMid, perfilRiesgo, redondearPrecio, rolesEstrategia, seleccionRecomendada, spreadPct, validarSeleccion } from '../../utils/estrategiasOrden';
-import { fmtDate, fmtDateTime, fmtFixed, fmtMoney, fmtNum, fmtPct, isNum } from '../../utils/format';
+import {
+  antiguedadCotizacion, candidatosStrike, costoSpread, desglosePuntaje, diasHasta, direccion, intencionPara, liquidez, mid, netoMid, perfilRiesgo, reconstruirPatas,
+  redondearPrecio, rolesEstrategia, seleccionRecomendada, signoNeto, SPREAD_AVISO, spreadPct, textoPuntaje, validarSeleccion, vencimientosVigentes, veredicto,
+} from '../../utils/estrategiasOrden';
+import { fmtDate, fmtDateTime, fmtFixed, fmtMoney, fmtPct, isNum } from '../../utils/format';
 
-/** Veredicto según la compatibilidad (0–100). */
-export function veredicto(p) {
-  if (!isNum(p)) return { texto: 'SIN DATOS', tono: 'neutral' };
-  if (p >= 60) return { texto: 'COMPATIBLE', tono: 'success' };
-  if (p >= 40) return { texto: 'NEUTRAL', tono: 'warning' };
-  return { texto: 'NO RECOM.', tono: 'danger' };
-}
+const pts = (v, signo = false) => (isNum(v) ? (signo && v > 0 ? '+' : '') + textoPuntaje(v) : '—');
 
-/** Calificación (0–100) de un core para la estrategia: alcista favorece Call, bajista Put, neutralidad Condor. */
-function calificacionPara(codigo, puntajeCore) {
-  if (!isNum(puntajeCore)) return null;
-  if (codigo === 'LONG_PUT') return 100 - puntajeCore;
-  if (codigo === 'IRON_CONDOR') return 100 - Math.abs(puntajeCore - 50) * 2;
-  return puntajeCore;
-}
-
-function Desglose({ fila, datos, config }) {
+/** Puntos por core más los ajustes de la confluencia: la columna «Puntos» suma exactamente el puntaje final. */
+function Desglose({ fila, datos, detalle, config }) {
   const cores = datos.seleccion?.coresSeleccionados || [];
-  // Los pesos efectivos viven en la confluencia guardada; el resultado de la selección solo trae su id.
-  const conf = useAsync(() => (fila.confluenciaId ? confluencias.get(fila.confluenciaId) : Promise.resolve(null)), [fila.confluenciaId]);
-  const filas = cores.map(core => {
-    const ev = datos.evaluaciones?.[core];
-    const peso = conf.data?.ponderaciones?.find(p => p.core === core)?.peso;
-    const calif = calificacionPara(fila.codigo, ev?.puntaje);
-    return { core, ev, peso, calif, suma: isNum(peso) && isNum(calif) ? peso * calif : null, dir: direccion(ev?.puntaje) };
-  });
+  const condor = fila.codigo === 'IRON_CONDOR';
+  const d = desglosePuntaje(fila.codigo, cores, detalle?.conf.ponderaciones, detalle?.evaluaciones || datos.evaluaciones, fila.puntaje, fila.motivos);
+  const ajuste = (nombre, nota, valor) => (
+    <tr className="desglose-ajuste"><th scope="row">{nombre}</th><td colSpan="3" className="muted small">{nota}</td><td className="num">{pts(valor, true)}</td><td /></tr>
+  );
   return (
     <div className="table-wrap">
       <table className="table table--dense">
         <caption className="sr-only">Desglose por core</caption>
         <thead><tr><th scope="col">Core</th><th scope="col">Lectura</th><th scope="col" className="num">Calificación</th><th scope="col" className="num">Importancia</th><th scope="col" className="num">Puntos</th><th scope="col"><span className="sr-only">Barra</span></th></tr></thead>
         <tbody>
-          {filas.map(f => (
-            <tr key={f.core}>
-              <th scope="row">{CORE_LABELS[f.core]}</th>
-              <td>{f.ev ? <span className={'dir dir--' + f.dir.tono}>{f.dir.texto}</span> : <span className="muted">Sin evaluación</span>}</td>
-              <td className="num">{isNum(f.calif) ? fmtNum(f.calif, 0) : '—'}</td>
-              <td className="num">{isNum(f.peso) ? fmtPct(f.peso, 0) : '—'}</td>
-              <td className="num">{isNum(f.suma) ? fmtNum(f.suma, 1) : '—'}</td>
-              <td className="desglose-barra"><ScoreBar value={f.calif} label={'Calificación de ' + CORE_LABELS[f.core]} /></td>
-            </tr>
-          ))}
+          {d.filas.map(f => {
+            const dir = direccion(f.ev?.puntaje);
+            return (
+              <tr key={f.core}>
+                <th scope="row">{CORE_LABELS[f.core]}</th>
+                <td>{f.ev ? <span className={'dir dir--' + dir.tono}>{dir.texto}</span> : <span className="muted">Sin evaluación</span>}</td>
+                <td className="num">{textoPuntaje(f.calif)}</td>
+                <td className="num">{isNum(f.peso) ? fmtPct(f.peso, 0) : '—'}</td>
+                <td className="num">{pts(f.puntos)}</td>
+                <td className="desglose-barra"><ScoreBar value={f.calif} label={'Calificación de ' + CORE_LABELS[f.core]} /></td>
+              </tr>
+            );
+          })}
         </tbody>
+        {d.subtotal != null && (
+          <tfoot>
+            <tr><th scope="row" colSpan="4">Suma de los cores</th><td className="num">{pts(d.subtotal)}</td><td /></tr>
+            {condor
+              ? ajuste('Dispersión', 'No se descuenta: el Iron Condor promedia la neutralidad de cada core.', 0)
+              : ajuste('Dispersión', detalle?.est ? `Descuento por desacuerdo entre cores (dispersión ${detalle.est.dispersion.toFixed(2)}): acerca el puntaje a 50.` : 'Descuento por desacuerdo entre cores: acerca el puntaje a 50.', d.dispersion)}
+            {ajuste('Ajuste IV/HV', condor ? (d.motivoIv ? `${d.motivoIv}; máximo ±15 puntos, sin pasar de 0–100.` : 'Sin datos de IV/HV.') : 'Solo aplica al Iron Condor.', condor ? d.ajusteIv : 0)}
+            <tr className="desglose-total"><th scope="row" colSpan="4">Puntaje final</th><td className="num"><strong>{pts(d.final)}</strong></td><td /></tr>
+          </tfoot>
+        )}
       </table>
-      <p className="muted small">Calificación: qué tan favorable es la lectura del core para esta estrategia. Importancia: peso efectivo (peso × confianza). El puntaje final también descuenta la dispersión entre cores. Pesos configurados: {cores.map(c => `${CORE_LABELS[c]} ${config.cores[c]?.peso ?? 1}`).join(' · ')}.</p>
+      <p className="muted small">Calificación: qué tan favorable es la lectura del core para esta estrategia. Importancia: peso efectivo (peso × confianza). Puntos: calificación × importancia. Pesos configurados: {cores.map(c => `${CORE_LABELS[c]} ${config.cores[c]?.peso ?? 1}`).join(' · ')}.</p>
     </div>
   );
 }
@@ -84,11 +84,13 @@ function TablaStrikes({ rol, cands, elegido, precio, onElegir, nombreGrupo }) {
     if (c) visibles = [...visibles, c];
   }
   visibles = [...visibles].sort((a, b) => a.item.strike - b.item.strike);
+  const sinLiquidez = cands.length > 0 && !cands[0].recomendable;
   const tituloId = nombreGrupo + '-t';
   return (
     <fieldset className="strikes">
       <legend id={tituloId}><Badge value={rol.accion === 'sell' ? 'Vender' : 'Comprar'} tone={rol.accion === 'sell' ? 'warning' : 'info'} /> {rol.etiqueta.replace(/^(Comprar|Vender) /, '')}</legend>
       <p className="muted small strikes__ayuda">{rol.ayuda}</p>
+      {sinLiquidez && <p className="small down">Sin recomendación: sin liquidez suficiente (ningún strike adecuado tiene cotización con spread de 25 % o menos).</p>}
       {!cands.length ? <p className="small down">No hay strikes válidos para esta pata en el vencimiento elegido.</p> : (
         <div className="table-wrap">
           <table className="table table--dense strikes__tabla" aria-labelledby={tituloId}>
@@ -102,16 +104,16 @@ function TablaStrikes({ rol, cands, elegido, precio, onElegir, nombreGrupo }) {
                 const sp = spreadPct(it);
                 const id = `${nombreGrupo}-${it.contratoId}`;
                 return (
-                  <tr key={it.contratoId} className={'strikes__fila' + (sel ? ' is-sel' : '') + (pos === 0 ? ' is-rec' : '')} onClick={() => onElegir(it)}>
-                    <td><input type="radio" id={id} name={nombreGrupo} checked={sel} onChange={() => onElegir(it)} aria-label={`Strike ${fmtFixed(it.strike, 2)}${pos === 0 ? ', recomendado' : ''}`} /></td>
+                  <tr key={it.contratoId} className={'strikes__fila' + (sel ? ' is-sel' : '') + (pos === 0 && c.recomendable ? ' is-rec' : '')} onClick={() => onElegir(it)}>
+                    <td><input type="radio" id={id} name={nombreGrupo} checked={sel} onChange={() => onElegir(it)} aria-label={`Strike ${fmtFixed(it.strike, 2)}${pos === 0 && c.recomendable ? ', recomendado' : ''}`} /></td>
                     <td className="num"><label htmlFor={id}><strong>{fmtFixed(it.strike, 2)}</strong></label></td>
                     <td>{d ? <abbr title={d.titulo}>{d.txt}</abbr> : '—'}</td>
                     <td className="num">{isNum(it.griegas?.delta) ? fmtFixed(it.griegas.delta, 2) : '—'}</td>
                     <td className="num">{isNum(mid(it)) ? fmtFixed(mid(it), 2) : '—'}</td>
-                    <td className={'num' + (isNum(sp) && sp > 0.1 ? ' down' : '')}>{isNum(sp) ? fmtPct(sp, 0) : '—'}</td>
+                    <td className={'num' + (isNum(sp) && sp > SPREAD_AVISO ? ' down' : '')}>{isNum(sp) ? fmtPct(sp, 0) : '—'}</td>
                     <td className="num">{isNum(it.volatilidadImplicita) ? fmtPct(it.volatilidadImplicita, 1) : '—'}</td>
                     <td className="strikes__idon" title={c.motivo}>
-                      {pos === 0 ? <Badge tone="success">★ Recomendado</Badge> : pos < 3 ? <Badge tone="info">Idóneo</Badge> : null}
+                      {!c.recomendable ? null : pos === 0 ? <Badge tone="success">★ Recomendado</Badge> : pos < 3 ? <Badge tone="info">Idóneo</Badge> : null}
                       <span className="muted small"> {c.idoneidad}</span>
                     </td>
                   </tr>
@@ -130,13 +132,23 @@ function TablaStrikes({ rol, cands, elegido, precio, onElegir, nombreGrupo }) {
   );
 }
 
-function Operativo({ empresa, fila, datos, chain, vencimiento, onVencimiento, config }) {
+function Operativo({ empresa, fila, datos, chain, onVencimiento, config, previa, onSel }) {
   const { nombre, entorno } = useBroker();
   const items = chain?.items || [];
   const precio = chain?.precioSubyacente;
   const roles = useMemo(() => rolesEstrategia(fila.codigo), [fila.codigo]);
   const recomendada = useMemo(() => seleccionRecomendada(fila.codigo, items, precio), [fila.codigo, items, precio]);
-  const [sel, setSel] = useState(recomendada);
+  // Al cambiar de vencimiento se conservan los strikes elegidos (los más cercanos) y se avisa al usuario.
+  const [inicial] = useState(() => {
+    if (!previa || previa.codigo !== fila.codigo || previa.vencimiento === chain.vencimiento || !roles.every(r => previa.sel[r.clave])) return { sel: recomendada };
+    const r = reconstruirPatas(fila.codigo, roles.map(x => ({ accion: x.accion, item: previa.sel[x.clave] })), items, precio);
+    if (r.error) return { sel: recomendada, aviso: r.error };
+    return { sel: Object.fromEntries(roles.map((x, i) => [x.clave, items.find(it => it.contratoId === r.legs[i].contratoId)])), aviso: r.aviso };
+  });
+  const [elegida, setSel] = useState(inicial.sel);
+  // Tras actualizar la cadena se usan las cotizaciones nuevas del mismo contrato, no las guardadas al elegir.
+  const sel = useMemo(() => Object.fromEntries(Object.entries(elegida).map(([k, it]) => [k, items.find(i => i.contratoId === it?.contratoId)])), [elegida, items]);
+  useEffect(() => { onSel({ codigo: fila.codigo, vencimiento: chain.vencimiento, sel }); }, [sel, fila.codigo, chain.vencimiento]); // eslint-disable-line react-hooks/exhaustive-deps
   const esRecomendada = roles.every(r => sel[r.clave]?.contratoId === recomendada[r.clave]?.contratoId);
 
   // Al cambiar una pata vendida, su ala protectora se reajusta si queda del lado incorrecto.
@@ -160,15 +172,15 @@ function Operativo({ empresa, fila, datos, chain, vencimiento, onVencimiento, co
     if (invalidos.length) return { invalidos };
     const patas = roles.map(r => ({ accion: r.accion, intencion: intencionPara(r.accion), contratoId: sel[r.clave].contratoId, item: sel[r.clave] }));
     const neto = netoMid(patas);
-    const credito = isNum(neto) && neto > 0;
+    const credito = signoNeto(patas, neto) === 'credito';
     const precioNeto = isNum(neto) ? redondearPrecio(neto) : null;
     const riesgo = isNum(precioNeto) ? perfilRiesgo(patas, precioNeto, credito, 1) : null;
-    const payoff = patas.every(p => p.item) ? analyzePayoff(patas.map(p => ({ tipo: p.item.tipo, strike: p.item.strike, accion: p.accion, cantidad: 1, multiplicador: 100, prima: mid(p.item) || 0 }))) : null;
-    return { patas, neto, credito, precioNeto, riesgo, payoff };
+    const payoff = analyzePayoff(patas.map(p => ({ tipo: p.item.tipo, strike: p.item.strike, accion: p.accion, cantidad: 1, multiplicador: 100, prima: mid(p.item) })));
+    return { patas, neto, credito, precioNeto, riesgo, payoff, liq: liquidez(patas), costo: costoSpread(patas), edad: antiguedadCotizacion(patas) };
   }, [chain, items, precio, roles, sel, fila.codigo]);
 
   if (!chain) return null;
-  const vencs = chain.vencimientos || [];
+  const vencs = vencimientosVigentes(chain.vencimientos);
   const venc = chain.vencimiento;
   const dte = venc ? diasHasta(venc) : null;
   const hoy = new Date();
@@ -190,6 +202,7 @@ function Operativo({ empresa, fila, datos, chain, vencimiento, onVencimiento, co
         </label>
       )}
       {fueraRango && <Notice tone="warning">El vencimiento disponible ({dte} días) queda fuera del rango configurado ({config.diasMin}–{config.diasMax}). Amplía el rango y sincroniza contratos.</Notice>}
+      {inicial.aviso && <Notice>{inicial.aviso}</Notice>}
       {op?.error && <Notice tone="warning" title="No se pudieron sugerir contratos.">{op.error} Activa «Traer contratos de opciones» en la configuración y vuelve a analizar.</Notice>}
       {!op?.error && roles.length > 0 && (
         <section className="stack" aria-labelledby="strikes-titulo">
@@ -236,11 +249,14 @@ function Operativo({ empresa, fila, datos, chain, vencimiento, onVencimiento, co
           <dl className="stats stats--row">
             <div><dt>{op.credito ? 'Crédito neto' : 'Débito neto'}</dt><dd>{isNum(op.precioNeto) ? fmtMoney(op.precioNeto * 100) : '—'}</dd></div>
             <div><dt>Ganancia máx.</dt><dd>{op.riesgo ? (op.riesgo.maxGanancia == null ? 'Ilimitada' : fmtMoney(op.riesgo.maxGanancia)) : '—'}</dd></div>
-            <div><dt>Pérdida máx.</dt><dd>{op.riesgo ? (op.riesgo.maxPerdida == null ? 'Ilimitada' : fmtMoney(op.riesgo.maxPerdida)) : '—'}</dd></div>
-            <div><dt>Breakeven</dt><dd>{op.riesgo ? op.riesgo.breakevens.map(b => fmtMoney(b)).join(' / ') : '—'}</dd></div>
+            <div><dt>Pérdida máx.</dt><dd className="down">{op.riesgo ? (op.riesgo.maxPerdida == null ? 'Ilimitada' : fmtMoney(op.riesgo.maxPerdida)) : '—'}</dd></div>
+            <div><dt>Breakeven</dt><dd>{op.riesgo ? op.riesgo.breakevens.map(b => fmtMoney(b)).join(' / ') || 'Ninguno' : '—'}</dd></div>
           </dl>
+          {op.riesgo && op.riesgo.maxPerdida == null && <Notice tone="danger" title="Pérdida ilimitada.">Esta combinación no tiene tope de pérdida.</Notice>}
+          {op.liq.sinCotizacion > 0 && <Notice tone="warning">{op.liq.sinCotizacion} {op.liq.sinCotizacion === 1 ? 'pata no tiene' : 'patas no tienen'} cotización bid/ask válida{op.payoff ? '; se usa el último precio operado, que puede estar desfasado' : ': no se calculan ganancia, pérdida ni gráfica'}.</Notice>}
+          {op.liq.avisar && <Notice tone="warning">Spread de hasta {fmtPct(op.liq.peorSpread, 0)} del precio{op.liq.insuficiente ? ': sin liquidez suficiente' : ''}.</Notice>}
           {op.payoff && <PayoffChart analysis={op.payoff} spot={chain.precioSubyacente} />}
-          <p className="muted small">Prima = punto medio bid/ask del último snapshot almacenado; los precios reales pueden variar.</p>
+          <p className="muted small">Prima = punto medio bid/ask del último snapshot almacenado{op.edad ? ` (cotización ${op.edad.texto}, ${fmtDateTime(op.edad.fecha)})` : ' (sin fecha de cotización)'}; los precios reales pueden variar.{isNum(op.costo) ? ` Cruzar el spread costaría ${fmtMoney(op.costo)} al entrar.` : ''}</p>
           <BotonOperar empresa={empresa} estrategiaCodigo={fila.codigo} datos={datos} chain={chain}
             legs={op.patas.map(({ accion, intencion, contratoId }) => ({ accion, intencion, contratoId }))}
             label={`Operar ${ESTRATEGIA_LABELS[fila.codigo]} en ${nombre} · ${entorno}${esRecomendada ? '' : ' (strikes elegidos)'}`} />
@@ -253,6 +269,7 @@ function Operativo({ empresa, fila, datos, chain, vencimiento, onVencimiento, co
 export default function PanelEstrategias({ empresa, simbolo, datos, cargando, error, onReload, config, version, estrategiaInicial }) {
   const [tab, setTab] = useState(null);
   const [venc, setVenc] = useState('');
+  const previa = useRef(null); // última selección de strikes, para conservarla al cambiar de vencimiento
   const filas = useMemo(() => {
     const est = datos?.estrategiasById;
     return (datos?.seleccion?.resultados || [])
@@ -262,8 +279,14 @@ export default function PanelEstrategias({ empresa, simbolo, datos, cargando, er
   }, [datos]);
   const activa = filas.find(f => f.codigo === tab) || filas.find(f => f.codigo === estrategiaInicial) || filas[0];
 
-  const chain = useAsync(() => (venc ? mercado.opcionesResumen(simbolo, { vencimiento: venc }) : cargarCadena(simbolo, { diasMin: config.diasMin, diasMax: config.diasMax })),
-    [simbolo, version, venc, config.diasMin, config.diasMax], { enabled: !!activa });
+  // La cadena se etiqueta con la estrategia que la pidió: al cambiar de pestaña o empresa no se arma nada con el vencimiento de la anterior.
+  const cargada = useAsync(() => (venc ? mercado.opcionesResumen(simbolo, { vencimiento: venc }) : cargarCadena(simbolo, { diasMin: config.diasMin, diasMax: config.diasMax, codigo: activa.codigo })).then(d => ({ codigo: activa.codigo, simbolo, d })),
+    [simbolo, version, venc, activa?.codigo, config.diasMin, config.diasMax], { enabled: !!activa });
+  const detalle = useAsync(() => cargarConfluencia(activa.confluenciaId, datos.seleccion?.ponderaciones), [activa?.confluenciaId], { enabled: !!activa?.confluenciaId });
+  const chain = { ...cargada, data: cargada.data?.codigo === activa?.codigo && cargada.data?.simbolo === simbolo ? cargada.data?.d : undefined };
+  const det = detalle.data?.conf._id === activa?.confluenciaId ? detalle.data : null;
+  const est = det?.est;
+  useEffect(() => { previa.current = null; setVenc(''); }, [simbolo]);
 
   if (cargando && !datos) return <Loading text="Cargando último análisis…" />;
   if (error && !datos) return <ErrorMessage error={error} onRetry={onReload} />;
@@ -273,7 +296,7 @@ export default function PanelEstrategias({ empresa, simbolo, datos, cargando, er
   }
   const v = veredicto(activa.puntaje);
   const antiguo = datos.seleccion?.createdAt && Date.now() - Date.parse(datos.seleccion.createdAt) > 24 * 3600000;
-  const tabs = filas.map(f => ({ value: f.codigo, label: `${ESTRATEGIA_LABELS[f.codigo] || f.codigo} · ${veredicto(f.puntaje).texto} · ${isNum(f.puntaje) ? fmtNum(f.puntaje, 1) : '—'}` }));
+  const tabs = filas.map(f => ({ value: f.codigo, label: `${ESTRATEGIA_LABELS[f.codigo] || f.codigo} · ${veredicto(f.puntaje).texto} · ${textoPuntaje(f.puntaje)}` }));
 
   return (
     <section className="card" aria-labelledby="estr-titulo">
@@ -289,18 +312,21 @@ export default function PanelEstrategias({ empresa, simbolo, datos, cargando, er
           {chain.error && !chain.data && (chain.error.status === 404
             ? <Notice tone="warning" title="Sin contratos de opciones.">Sincroniza los contratos (opción «Traer contratos de opciones» y Analizar) para ver strikes, vencimiento y prima.</Notice>
             : <ErrorMessage error={chain.error} onRetry={chain.reload} title="No se pudo cargar la cadena de opciones" />)}
-          {chain.data && <Operativo key={activa.codigo + '|' + (chain.data.vencimiento || '')}empresa={empresa} fila={activa} datos={datos} chain={chain.data} vencimiento={venc} onVencimiento={setVenc} config={config} />}
+          {chain.data && <Operativo key={activa.codigo + '|' + (chain.data.vencimiento || '')} empresa={empresa} fila={activa} datos={datos} chain={chain.data} onVencimiento={setVenc} config={config}
+            previa={previa.current} onSel={x => { previa.current = x; }} />}
           <h3>Desglose por core</h3>
-          <Desglose fila={activa} datos={datos} config={config} />
+          <Desglose fila={activa} datos={datos} detalle={det} config={config} />
           {activa.motivos?.length > 0 && <details className="details"><summary>Motivos del puntaje</summary><ul className="list list--compact">{activa.motivos.map((m, i) => <li key={i}>{m}</li>)}</ul></details>}
         </div>
         <aside className="estr-side" aria-label="Compatibilidad">
           <h3>Compatibilidad</h3>
-          <p className="estr-score"><strong>{isNum(activa.puntaje) ? fmtNum(activa.puntaje, 1) : '—'}</strong><span className="muted"> / 100</span></p>
+          <p className="estr-score"><strong>{textoPuntaje(activa.puntaje)}</strong><span className="muted"> / 100</span></p>
           <Badge tone={v.tono}>{v.texto}</Badge>
           <ScoreBar value={activa.puntaje} />
           <dl className="stats">
             <div><dt>Cobertura de cores</dt><dd>{fmtPct(activa.cobertura)}</dd></div>
+            <div><dt>Confianza</dt><dd>{est ? fmtPct(est.confianza) : '—'}</dd></div>
+            <div><dt>Dispersión entre cores</dt><dd>{est ? est.dispersion.toFixed(2) : '—'}</dd></div>
           </dl>
           <p className="small">{v.tono === 'success' ? 'Los cores analizados respaldan esta estrategia.' : v.tono === 'warning' ? 'Respaldo parcial: señales mixtas.' : v.tono === 'danger' ? 'Los cores analizados no respaldan esta estrategia.' : ''}</p>
           <p className="muted small">Acierto/error simulado y backtest aún no están disponibles.</p>
