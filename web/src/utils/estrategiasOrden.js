@@ -403,7 +403,7 @@ export function metricasOrden({ patas, precioNeto, credito, cantidad = 1, S, ite
     riesgo,
     probabilidad: riesgo ? probabilidadGanancia(legs, patas.map(p => p.item?.volatilidadImplicita), riesgo, S, T) : null,
     delta: griega('delta'), theta: griega('theta'), vega: griega('vega'),
-    retornoRiesgo: riesgo && isNum(riesgo.maxGanancia) && riesgo.maxPerdida > 0 ? riesgo.maxGanancia / riesgo.maxPerdida : null,
+    retornoRiesgo: riesgo && riesgo.maxGanancia > 0 && riesgo.maxPerdida > 0 ? riesgo.maxGanancia / riesgo.maxPerdida : null,
     creditoAncho,
     movimiento: isNum(em) && riesgo ? { monto: em, abajo: Math.max(0, S - em), arriba: S + em, plAbajo: payoffAt(legs, Math.max(0, S - em)), plArriba: payoffAt(legs, S + em) } : null,
     pctCuenta: isNum(riesgo?.maxPerdida) && isNum(patrimonio) && patrimonio > 0 ? riesgo.maxPerdida / patrimonio : null,

@@ -320,9 +320,10 @@ test('reconstruirPatas: conserva los strikes más cercanos, avisa y rearma si de
   const cerca_ = reconstruirPatas('IRON_CONDOR', IC(95, 90, 105, 110), cadena([88, 94, 100, 106, 112]), 100);
   assert.deepEqual(ids(cerca_), ['put94', 'put88', 'call106', 'call112']);
   assert.match(cerca_.aviso, /Put 95 → 94/);
-  // Solo dos strikes por debajo del precio actual: los más cercanos se cruzan, así que se arma de nuevo o se informa el error.
+  // Solo dos strikes por debajo del precio actual: los más cercanos se cruzan, así que se arma de nuevo.
   const mal = reconstruirPatas('IRON_CONDOR', IC(95, 90, 105, 110), cadena([60, 98, 99, 140]), 100);
-  assert.ok(mal.error || /se armó de nuevo/.test(mal.aviso) || /ajustados/.test(mal.aviso));
+  assert.match(mal.aviso, /se armó de nuevo/);
+  assert.deepEqual(ids(mal), ['put98', 'put60', 'call99', 'call140']);
   assert.ok(reconstruirPatas('LONG_CALL', [pata('buy', 'call', 100)], [opcion('put', 100, 1, 1)], 100).error);
   // construirPatas usa la misma recomendación que la tabla de strikes.
   assert.deepEqual(construirPatas('LONG_CALL', [opcion('call', 100, 0, 0, { ultimo: 2 }), opcion('call', 101, 1, 1.05)], 100).legs.map(l => l.contratoId), ['call101']);

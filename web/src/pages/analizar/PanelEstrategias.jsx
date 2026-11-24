@@ -250,7 +250,7 @@ function Operativo({ empresa, fila, datos, chain, onVencimiento, config, previa,
             <div><dt>{op.credito ? 'Crédito neto' : 'Débito neto'}</dt><dd>{isNum(op.precioNeto) ? fmtMoney(op.precioNeto * 100) : '—'}</dd></div>
             <div><dt>Ganancia máx.</dt><dd>{op.riesgo ? (op.riesgo.maxGanancia == null ? 'Ilimitada' : fmtMoney(op.riesgo.maxGanancia)) : '—'}</dd></div>
             <div><dt>Pérdida máx.</dt><dd className="down">{op.riesgo ? (op.riesgo.maxPerdida == null ? 'Ilimitada' : fmtMoney(op.riesgo.maxPerdida)) : '—'}</dd></div>
-            <div><dt>Breakeven</dt><dd>{op.riesgo ? op.riesgo.breakevens.map(b => fmtMoney(b)).join(' / ') : '—'}</dd></div>
+            <div><dt>Breakeven</dt><dd>{op.riesgo ? op.riesgo.breakevens.map(b => fmtMoney(b)).join(' / ') || 'Ninguno' : '—'}</dd></div>
           </dl>
           {op.riesgo && op.riesgo.maxPerdida == null && <Notice tone="danger" title="Pérdida ilimitada.">Esta combinación no tiene tope de pérdida.</Notice>}
           {op.liq.sinCotizacion > 0 && <Notice tone="warning">{op.liq.sinCotizacion} {op.liq.sinCotizacion === 1 ? 'pata no tiene' : 'patas no tienen'} cotización bid/ask válida{op.payoff ? '; se usa el último precio operado, que puede estar desfasado' : ': no se calculan ganancia, pérdida ni gráfica'}.</Notice>}
@@ -279,11 +279,11 @@ export default function PanelEstrategias({ empresa, simbolo, datos, cargando, er
   }, [datos]);
   const activa = filas.find(f => f.codigo === tab) || filas.find(f => f.codigo === estrategiaInicial) || filas[0];
 
-  // La cadena se etiqueta con la estrategia que la pidió: al cambiar de pestaña no se arma nada con el vencimiento de la anterior.
-  const cargada = useAsync(() => (venc ? mercado.opcionesResumen(simbolo, { vencimiento: venc }) : cargarCadena(simbolo, { diasMin: config.diasMin, diasMax: config.diasMax, codigo: activa.codigo })).then(d => ({ codigo: activa.codigo, d })),
+  // La cadena se etiqueta con la estrategia que la pidió: al cambiar de pestaña o empresa no se arma nada con el vencimiento de la anterior.
+  const cargada = useAsync(() => (venc ? mercado.opcionesResumen(simbolo, { vencimiento: venc }) : cargarCadena(simbolo, { diasMin: config.diasMin, diasMax: config.diasMax, codigo: activa.codigo })).then(d => ({ codigo: activa.codigo, simbolo, d })),
     [simbolo, version, venc, activa?.codigo, config.diasMin, config.diasMax], { enabled: !!activa });
   const detalle = useAsync(() => cargarConfluencia(activa.confluenciaId, datos.seleccion?.ponderaciones), [activa?.confluenciaId], { enabled: !!activa?.confluenciaId });
-  const chain = { ...cargada, data: cargada.data?.codigo === activa?.codigo ? cargada.data?.d : undefined };
+  const chain = { ...cargada, data: cargada.data?.codigo === activa?.codigo && cargada.data?.simbolo === simbolo ? cargada.data?.d : undefined };
   const det = detalle.data?.conf._id === activa?.confluenciaId ? detalle.data : null;
   const est = det?.est;
   useEffect(() => { previa.current = null; setVenc(''); }, [simbolo]);
