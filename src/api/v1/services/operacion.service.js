@@ -204,7 +204,10 @@ export function createOperacion({ integraciones, factory = repository, cola, aho
       let avisoSincronizacion; // se muestra lo vivo, pero lo guardado (necesario para cerrar) puede estar atrasado
       try { await sync.ejecutar(ctx, { recurso: 'posiciones', conexionId: conexion._id }); }
       catch (e) { avisoSincronizacion = 'No se pudieron guardar las posiciones: ' + mensajeError(e); }
-      const vivas = await adaptador.posiciones();
+      // Si el broker no da las posiciones, se avisa y se muestran cuenta y órdenes; nunca "sin posiciones".
+      let vivas = [], posicionesDisponibles = true;
+      try { vivas = await adaptador.posiciones(); }
+      catch (e) { posicionesDisponibles = false; avisoSincronizacion = 'No se pudieron consultar las posiciones: ' + mensajeError(e); }
       const simbolos = [...new Set(vivas.map(p => p.simbolo))];
       const contratos = new Map((await Promise.all(simbolos.map(s => todos('contratos', ctx, { proveedor: 'alpaca', contratoExternoId: s }, factory)))).flat().map(c => [c.contratoExternoId, c]));
       const guardadas = new Map((await todos('posiciones', ctx, { conexionId: conexion._id }, factory)).filter(p => p.estado === 'abierta').map(p => [p.posicionExternaId, p]));
@@ -225,7 +228,7 @@ export function createOperacion({ integraciones, factory = repository, cola, aho
         .map(o => ({ _id: o._id, estado: o.estado, tipo: o.tipo, cantidad: o.cantidad, precioLimite: o.precioLimite ?? null, credito: Boolean(o.credito), componentes: o.componentes,
           cantidadEjecutada: o.cantidadEjecutada ?? null, precioPromedioEjecucion: o.precioPromedioEjecucion ?? null,
           createdAt: o.createdAt, ordenExternaId: o.ordenExternaId ?? null, eventos: (o.eventos || []).slice(-3) }));
-      return { conexionId: conexion._id, broker: codigo, cuenta, ...(error ? { error } : {}), ...(avisoSincronizacion ? { avisoSincronizacion } : {}), posiciones, ordenes };
+      return { conexionId: conexion._id, broker: codigo, cuenta, ...(error ? { error } : {}), ...(avisoSincronizacion ? { avisoSincronizacion } : {}), posicionesDisponibles, posiciones, ordenes };
     },
 
     // 3) POST /ordenes/ticket

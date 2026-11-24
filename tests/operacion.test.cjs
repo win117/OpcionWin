@@ -450,6 +450,11 @@ test('resumen: avisa si falla la sincronización y solo consulta los contratos d
     const r=await createOperacion({integraciones:f,factory,cola:createCola()}).resumen(e.ctx);
     assert.match(r.avisoSincronizacion,/No se pudieron guardar/); assert.equal(r.posiciones.length,1); assert.equal(r.posiciones[0].contratoId,e.contratos.c100._id);
     assert.ok(filtros.length&&filtros.every(x=>x.contratoExternoId===e.contratos.c100.simbolo));
+    await e.call('GET','/broker/paper/resumen'); // guarda la posición
+    f.alpaca.posiciones=async()=>{throw err('PROVEEDOR',null,'formato no reconocido');};
+    const caido=await e.call('GET','/broker/paper/resumen');
+    assert.match(caido.avisoSincronizacion,/formato no reconocido/); assert.equal(caido.posicionesDisponibles,false); assert.equal(caido.cuenta.efectivo,1000);
+    assert.equal((await e.call('GET','/posiciones')).items[0].estado,'abierta'); // un fallo no cierra lo guardado
   } finally{e.cerrar();}
 });
 

@@ -176,7 +176,7 @@ export default function CarteraPaper({ titulo = 'Cartera paper', broker, vista =
             )}
 
             {vista !== 'ordenes' && <h3>Posiciones abiertas</h3>}
-            {vista !== 'ordenes' && (posiciones.length === 0 ? <p className="muted small">Sin posiciones abiertas.</p> : (
+            {vista !== 'ordenes' && (posiciones.length === 0 ? <p className="muted small">{d.posicionesDisponibles === false ? 'Posiciones no disponibles por ahora.' : 'Sin posiciones abiertas.'}</p> : (
               <div className="table-wrap">
                 <table className="table table--dense">
                   <caption className="sr-only">Posiciones abiertas</caption>
