@@ -181,7 +181,7 @@ export default function PanelEstrategias({ empresa, datos, cargando, error, onRe
     return (
       <section className="card veredicto" aria-labelledby="veredicto-titulo">
         <h2 id="veredicto-titulo" tabIndex={-1}>{trabajo === 'analisis' ? 'Analizando' : 'Todavía sin veredicto'}</h2>
-        <Empty title={trabajo === 'analisis' ? 'Esto tarda unos segundos' : trabajo ? 'Cuando lleguen los datos, pulsa «Analizar»' : 'Pulsa «Analizar»'}>Aquí verás qué estrategia encaja mejor, por qué, cuánto cuesta y cuánto podrías perder.</Empty>
+        <Empty title={trabajo === 'analisis' ? 'Esto tarda unos segundos' : trabajo ? 'Están llegando los datos' : 'Pulsa «Analizar»'}>Aquí verás qué estrategia encaja mejor, por qué, cuánto cuesta y cuánto podrías perder.</Empty>
       </section>
     );
   }
