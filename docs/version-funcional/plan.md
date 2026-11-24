@@ -188,3 +188,6 @@ Tres auditorías (funcionalidad/seguridad, cores/finanzas, diseño) y mejoras en
 
 ### 2026-11-24 · Decisión con los cinco cores (ADR-015)
 `screener@2.0.0` (`combinarCores`), universo vivo con cores lentos en segundo plano, `sec.cargarTenencias13F` (lectura masiva) y `tests/cinco-cores.test.cjs`.
+
+### 2026-11-24 · Ajustes pedidos tras revisar Render
+Inicio con las 5 mejores antes del mapa; buscador con coincidencias (tolera errores; Enter no analiza a ciegas); historico del consolidado desde 2016 con carga automatica por rango; soportes y resistencias con extremos del periodo y visitas; rotulos de la grafica sin encimarse.

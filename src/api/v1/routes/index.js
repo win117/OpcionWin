@@ -35,7 +35,7 @@ export default function routeAPI(app, { factory = repository, auth = createSessi
   router.use('/sesiones',sesiones({auth}));
   const secured=Router();
   secured.use(authenticate(auth));
-  secured.use(acciones({factory,integraciones,cola,ahora,cacheActivos}));
+  secured.use(acciones({factory,integraciones,cola,ahora,cacheActivos,universo}));
   secured.use('/empresas',empresas({factory}));
   secured.use('/estrategias',estrategias({factory}));
   secured.use('/configuraciones',configuraciones({factory}));

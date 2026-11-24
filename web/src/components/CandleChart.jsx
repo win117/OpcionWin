@@ -13,7 +13,7 @@ function themeOptions() {
     layout: { background: { color: 'transparent' }, textColor: text, fontFamily: 'inherit' },
     grid: { vertLines: { color: grid }, horzLines: { color: grid } },
     rightPriceScale: { borderColor: grid },
-    timeScale: { borderColor: grid, timeVisible: false },
+    timeScale: { borderColor: grid, timeVisible: false, minBarSpacing: 0.05 },
   };
 }
 
@@ -96,7 +96,7 @@ export function CandleChart({ velas, height = 380, intradia = false, overlays, t
     for (const o of overlays || []) {
       let l = mapa.get(o.id);
       if (!l) {
-        l = chart.addLineSeries({ color: cssVar(o.color, o.color), lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, title: o.label });
+        l = chart.addLineSeries({ color: cssVar(o.color, o.color), lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }); // la leyenda está bajo la gráfica: un rótulo aquí tapa los precios
         mapa.set(o.id, l);
       }
       l.setData(o.data);
@@ -108,6 +108,15 @@ export function CandleChart({ velas, height = 380, intradia = false, overlays, t
     const { candles } = seriesRef.current;
     if (!candles) return;
     for (const l of nivelesRef.current) { try { candles.removePriceLine(l); } catch { /* ya eliminada */ } }
+    // La escala incluye los niveles cercanos a lo visible; los lejanos no aplastan las velas.
+    const precios = (lineasPrecio || []).map(n => n.precio);
+    candles.applyOptions({ autoscaleInfoProvider: original => {
+      const r = original();
+      if (!r?.priceRange) return r;
+      const { minValue, maxValue } = r.priceRange, margen = (maxValue - minValue) * 0.35;
+      const dentro = precios.filter(p => p >= minValue - margen && p <= maxValue + margen);
+      return { ...r, priceRange: { minValue: Math.min(minValue, ...dentro), maxValue: Math.max(maxValue, ...dentro) } };
+    } });
     nivelesRef.current = (lineasPrecio || []).map(n => candles.createPriceLine({
       price: n.precio, color: cssVar(n.color, n.color), lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: n.titulo,
     }));

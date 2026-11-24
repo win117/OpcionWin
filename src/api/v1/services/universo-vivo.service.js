@@ -433,6 +433,7 @@ export function createUniversoVivo({ integraciones, factory, catalogo, tamano = 
     detener() { activo = false; clearInterval(temporizador); },
     listo: () => puntajes.size > 0 && (puntuadoEn != null || recuperado),
     filas: () => [...puntajes.values()].filter(p => empresas.has(p.simbolo)),
+    capitalizacionDe: s => empresas.get(String(s).toUpperCase())?.capitalizacion ?? null,
     async simbolos() { await asegurarCatalogo(); return visibles().map(e => e.simbolo); },
     estado: () => ({
       automatico: activo, fase,

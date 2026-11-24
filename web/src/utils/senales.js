@@ -8,8 +8,12 @@ const esNum = v => typeof v === 'number' && Number.isFinite(v);
  * 1) Pivotes: máximo (o mínimo) local respecto a `ventana` velas a cada lado.
  * 2) Agrupación: los pivotes cuyo precio dista ≤ `tolerancia` (fracción) de la media del grupo forman un nivel;
  *    el nivel es la media del grupo y `toques` el número de pivotes.
+ *    Dos pivotes a menos de `ventana` velas son la misma visita: cuentan un toque.
  * 3) Se conservan los niveles con ≥ `minToques`; por encima del último cierre son resistencias, por debajo soportes.
- * Devuelve [{ precio, toques, tipo: 'resistencia'|'soporte', ultimoToque }] con los `maxPorLado` más tocados de cada lado.
+ *    De cada lado: siempre el más cercano al precio y después los más tocados, hasta `maxPorLado`.
+ * 4) Los extremos del periodo también frenan el precio aunque se hayan tocado una vez: si el máximo (o el mínimo) queda más allá
+ *    de todos los niveles de su lado, se agrega con `extremo: true`.
+ * Devuelve [{ precio, toques, tipo: 'resistencia'|'soporte', ultimoToque, extremo? }] de mayor a menor precio.
  */
 export function soportesResistencias(velas, { ventana = 5, tolerancia = 0.015, minToques = 2, maxPorLado = 3, ultimas = 260 } = {}) {
   const v = velas.slice(-ultimas);
@@ -17,8 +21,8 @@ export function soportesResistencias(velas, { ventana = 5, tolerancia = 0.015, m
   const pivotes = [];
   for (let i = ventana; i < v.length - ventana; i++) {
     const w = v.slice(i - ventana, i + ventana + 1);
-    if (v[i].high >= Math.max(...w.map(x => x.high))) pivotes.push({ precio: v[i].high, time: v[i].time });
-    if (v[i].low <= Math.min(...w.map(x => x.low))) pivotes.push({ precio: v[i].low, time: v[i].time });
+    if (v[i].high >= Math.max(...w.map(x => x.high))) pivotes.push({ precio: v[i].high, time: v[i].time, i });
+    if (v[i].low <= Math.min(...w.map(x => x.low))) pivotes.push({ precio: v[i].low, time: v[i].time, i });
   }
   pivotes.sort((a, b) => a.precio - b.precio);
   const grupos = [];
@@ -27,14 +31,23 @@ export function soportesResistencias(velas, { ventana = 5, tolerancia = 0.015, m
     if (g && Math.abs(p.precio - g.suma / g.items.length) / (g.suma / g.items.length) <= tolerancia) { g.items.push(p); g.suma += p.precio; }
     else grupos.push({ items: [p], suma: p.precio });
   }
+  const visitas = items => [...items].sort((a, b) => a.i - b.i).reduce((r, p) => (r.ultima == null || p.i - r.ultima >= ventana ? { n: r.n + 1, ultima: p.i } : { ...r, ultima: p.i }), { n: 0, ultima: null }).n;
   const cierre = v.at(-1).close;
   const niveles = grupos
-    .filter(g => g.items.length >= minToques)
-    .map(g => ({ precio: g.suma / g.items.length, toques: g.items.length, ultimoToque: Math.max(...g.items.map(i => i.time)) }))
+    .map(g => ({ precio: g.suma / g.items.length, toques: visitas(g.items), ultimoToque: Math.max(...g.items.map(p => p.time)) }))
+    .filter(n => n.toques >= minToques)
     .map(n => ({ ...n, tipo: n.precio >= cierre ? 'resistencia' : 'soporte' }));
-  const lado = tipo => niveles.filter(n => n.tipo === tipo)
-    .sort((a, b) => b.toques - a.toques || Math.abs(a.precio - cierre) - Math.abs(b.precio - cierre))
-    .slice(0, maxPorLado);
+  const lado = tipo => {
+    const alza = tipo === 'resistencia';
+    const lista = niveles.filter(n => n.tipo === tipo).sort((a, b) => Math.abs(a.precio - cierre) - Math.abs(b.precio - cierre));
+    const [cercano, ...resto] = lista;
+    const elegidos = cercano ? [cercano, ...resto.sort((a, b) => b.toques - a.toques || Math.abs(a.precio - cierre) - Math.abs(b.precio - cierre)).slice(0, maxPorLado - 1)] : [];
+    const vela = v.reduce((m, x) => ((alza ? x.high > m.high : x.low < m.low) ? x : m));
+    const precio = alza ? vela.high : vela.low;
+    const masAlla = alza ? precio > Math.max(cierre, ...lista.map(n => n.precio * (1 + tolerancia))) : precio < Math.min(cierre, ...lista.map(n => n.precio * (1 - tolerancia)));
+    if (masAlla) elegidos.push({ precio, toques: 1, tipo, ultimoToque: vela.time, extremo: true });
+    return elegidos;
+  };
   return [...lado('resistencia'), ...lado('soporte')].sort((a, b) => b.precio - a.precio);
 }
 

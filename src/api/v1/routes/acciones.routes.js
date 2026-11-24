@@ -16,13 +16,13 @@ import { cores as modulosCores } from '../../../cores';
 const SIMBOLO = /^[A-Z][A-Z0-9.\-]{0,9}$/;
 const PROVEEDOR = { fundamentales: 'sec', institucional: 'sec' };
 
-export default ({ factory, integraciones, cola, ahora, cacheActivos }) => {
+export default ({ factory, integraciones, cola, ahora, cacheActivos, universo }) => {
   const router = Router();
   const sync = createSincronizador({ integraciones, factory });
   const analisis = createAnalisis({ cola, factory });
   const broker = createBroker({ integraciones, factory });
   const operacion = createOperacion({ integraciones, factory, cola, ahora });
-  const busqueda = createBusquedaActivos({ integraciones, factory, ahora, cache: cacheActivos });
+  const busqueda = createBusquedaActivos({ integraciones, factory, ahora, cache: cacheActivos, universo });
   const aceptado = (res, data) => respond(res, data, 202, 'Trabajo en proceso. Consulta el registro hasta completada o fallida.');
   const auditar = (req, accion, recurso, recursoId, fn) => auditado(req.context, { accion, recurso, recursoId }, fn, factory);
   // Creación de trabajos: se audita el registro creado (el resultado final queda en el propio trabajo).

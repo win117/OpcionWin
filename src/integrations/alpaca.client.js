@@ -295,13 +295,13 @@ export const createAlpacaClient = ({
     }));
   };
 
-  const velas = async (simbolo, { intervalo = '1Day', desde, hasta, limite = 1000, ajuste = 'split' } = {}) => {
+  const velas = async (simbolo, { intervalo = '1Day', desde, hasta, limite = 1000, ajuste = 'split', feed: feedVelas = feed } = {}) => {
     const s = exigirSimbolo(simbolo);
     const tope = Math.max(1, Math.min(Number(limite) || 1000, 10000));
     return paginar(
       token => datos('/v2/stocks/bars', {
         symbols: s, timeframe: intervalo, start: desde, end: hasta,
-        limit: Math.min(tope, 10000), feed, adjustment: ajuste, sort: 'asc', page_token: token,
+        limit: Math.min(tope, 10000), feed: feedVelas, adjustment: ajuste, sort: 'asc', page_token: token,
       }),
       cuerpo => (cuerpo.bars?.[s] || []).map(normalizarVela),
       tope,

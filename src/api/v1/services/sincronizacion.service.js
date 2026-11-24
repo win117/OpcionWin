@@ -20,6 +20,8 @@ function rango(datos, diasAtras) {
   return { desde, hasta };
 }
 
+const RETRASO_SIP_MS = 16 * 60000;
+
 export function createSincronizador({ integraciones, factory = repository }) {
   const { alpaca, sec } = integraciones;
   const cikDe = async simbolo => (await sec.cikDeSimbolo(simbolo))?.cik; // SEC devuelve {cik, nombre, simbolo}
@@ -41,11 +43,16 @@ export function createSincronizador({ integraciones, factory = repository }) {
       const empresa = await empresaPorSimbolo(ctx, simbolo, factory);
       const { desde, hasta } = rango(datos, 420); // ~290 sesiones: SMA200 + rango 52 semanas
       const intervalo = '1Day';
-      const velas = await alpaca.velas(empresa.simbolo, { intervalo, desde: iso(desde), hasta: iso(hasta), limite: 10000 }); // hasta ~40 años diarios
+      // Consolidado de todas las bolsas (desde 2016; el plan gratuito lo da con 15 min de retraso). Si no está disponible, IEX (desde 2020).
+      const pedir = (feed, hastaMs) => alpaca.velas(empresa.simbolo, { intervalo, desde: iso(desde), hasta: iso(hastaMs), limite: 10000, feed }).then(velas => ({ velas, feed }));
+      const { velas, feed } = await pedir('sip', Math.min(new Date(hasta).getTime(), Date.now() - RETRASO_SIP_MS)).catch(e => {
+        if (e?.codigo === 'LIMITE' || e?.codigo === 'RED') throw e;
+        return pedir(alpaca.feed || 'iex', hasta);
+      });
       return guardarLote('datos-mercado', ctx, velas.map(v => ({ id: idDeterminista(empresa._id, 'vela', intervalo, iso(v.fecha)), datos: {
         empresaId: empresa._id, tipo: 'vela', intervalo,
         apertura: v.apertura, maximo: v.maximo, minimo: v.minimo, cierre: v.cierre, volumen: v.volumen,
-        fuente: { proveedor: 'alpaca', fechaDato: v.fecha, feed: alpaca.feed || 'iex' },
+        fuente: { proveedor: 'alpaca', fechaDato: v.fecha, feed },
       } })), factory);
     },
     async cotizaciones(ctx, simbolo) {

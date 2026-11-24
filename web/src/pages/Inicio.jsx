@@ -136,9 +136,9 @@ export default function Inicio() {
     <div className="inicio">
       <h1 className="sr-only">Inicio</h1>
       <Indices mercado={mercado} />
+      <Screener />
       <MapaMercado />
       <Movimientos />
-      <Screener />
       <p className="disclaimer">{DISCLAIMER}</p>
     </div>
   );

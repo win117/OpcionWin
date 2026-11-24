@@ -42,7 +42,8 @@ export function BuscadorTicker({ autoFocus = false, onListo }) {
     navigate('/analisis/' + encodeURIComponent(simbolo));
   };
 
-  // Enter: la sugerencia marcada; si no, el símbolo exacto o la primera coincidencia. Sin servidor de búsqueda, el símbolo tal cual.
+  // Enter: la sugerencia marcada o el símbolo exacto. Con texto inexacto se muestran las coincidencias para elegir (no se analiza a ciegas).
+  // Sin servidor de búsqueda, el símbolo tal cual.
   const enviar = async e => {
     e.preventDefault();
     if (!q) return;
@@ -53,8 +54,9 @@ export function BuscadorTicker({ autoFocus = false, onListo }) {
       try { items = (await activos.buscar(q, MAX))?.items || []; fallo = false; } catch { items = []; fallo = true; }
       if (vigente.current !== q) return;
     }
-    const hallado = items.find(i => i.simbolo === simbolo) || items[0];
+    const hallado = items.find(i => i.simbolo === simbolo) || (items.length === 1 ? items[0] : null);
     if (hallado) ir(hallado.simbolo);
+    else if (items.length) { setRes({ q, items, estado: 'listo' }); setAbierto(true); setActivo(0); setAviso('Elige una de las coincidencias (flechas y Enter).'); }
     else if (fallo && TICKER.test(simbolo)) ir(simbolo);
     else setAviso(fallo ? 'La búsqueda no responde; escribe el símbolo exacto.' : `Ninguna empresa coincide con «${q}».`);
   };
