@@ -153,5 +153,7 @@ Pendiente: validar en vivo con credenciales reales de Webull (crédito multi-pat
 - Se integra en `version-funcional` el trabajo del 2026-11-19 (screener, brokers Alpaca/Webull, navegación superior y análisis técnico).
 - Corrección: «Desglose por core» mostraba vacíos Importancia y Puntos; ahora lee los pesos efectivos de la confluencia guardada.
 - Nuevo `scripts/smoke-screener.cjs` (Alpaca real + base real, sin órdenes, limpia al terminar). MongoDB: 492 símbolos en ~91 s, 7 sin datos.
-- Pendiente: crear `api_screener` en Supabase (PGRST205 hasta entonces); credenciales de Webull; empates a 100 en Iron Condor (orden alfabético);
-  retirar del universo FI, HES, ANSS, JNPR, IPG, WBA y CTLT (sin velas suficientes en Alpaca).
+- Ranking: los empates (Iron Condor topado en 100) se resuelven por el factor principal de la estrategia y después el alfabeto.
+- Universo: se retiran FI, HES, ANSS, JNPR, IPG, WBA y CTLT (sin velas suficientes en Alpaca); quedan 485 y 0 fallidos.
+- `api_screener` creada en Supabase y screener verificado ahí. Orden paper real (Iron Condor AAPL) aceptada y cancelada en Alpaca.
+- Webull: rutas, firma y crédito (side SELL, precio positivo) contrastados con developer.webull.com. Pendiente: credenciales paperTrade y prueba real.

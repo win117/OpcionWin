@@ -7,7 +7,7 @@ const { memoryFactory } = require('./helpers/memory.cjs');
 const { createSessionService } = require('../dist/api/v1/services/sesiones.service');
 const { createApp } = require('../dist/app');
 const { createCola } = require('../dist/jobs/cola');
-const { puntuarSimbolo, parsearOcc } = require('../dist/api/v1/services/screener.service');
+const { puntuarSimbolo, parsearOcc, createScreener } = require('../dist/api/v1/services/screener.service');
 const { UNIVERSO_DEFECTO } = require('../dist/data/universo');
 const { createAlpacaClient } = require('../dist/integrations/alpaca.client');
 const prefix = require('../dist/config/config').default.API_URL;
@@ -76,6 +76,15 @@ test('parsearOcc y universo por defecto', () => {
   assert.deepEqual(parsearOcc('AAPL251219C00200000'), { tipo: 'call', strike: 200, vencimiento: '2025-12-19' });
   assert.equal(parsearOcc('basura'), null);
   assert.ok(UNIVERSO_DEFECTO.length >= 450 && new Set(UNIVERSO_DEFECTO).size === UNIVERSO_DEFECTO.length);
+});
+
+test('Screener: los empates de puntaje se resuelven por el factor principal y no por orden alfabético', async () => {
+  const fila = (simbolo, neutralidad) => ({ _id: simbolo, simbolo, puntajes: { IRON_CONDOR: 100 }, factores: { IRON_CONDOR: [{ nombre: 'Neutralidad media de las señales', valor: neutralidad / 100, puntaje: neutralidad }] } });
+  const filas = [fila('AAA', 86), fila('ZZZ', 98), fila('MMM', 90), fila('BBB', 86)];
+  const ctx = { userId: 'u', database: 'mongodb' }, factory = memoryFactory();
+  for (const f of filas) await factory('screener', ctx).create(f);
+  const { items } = await createScreener({ integraciones: {}, factory }).ranking(ctx, { estrategia: 'IRON_CONDOR' });
+  assert.deepEqual(items.map(i => i.simbolo), ['ZZZ', 'MMM', 'AAA', 'BBB']);
 });
 
 test('Screener: sincroniza por lotes, guarda y ranquea sin llamar al proveedor', async () => {

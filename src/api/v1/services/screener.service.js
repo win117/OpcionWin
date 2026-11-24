@@ -27,6 +27,10 @@ export function parsearOcc(simbolo) {
   return m ? { tipo: m[4] === 'C' ? 'call' : 'put', strike: Number(m[5]) / 1000, vencimiento: `20${m[1]}-${m[2]}-${m[3]}` } : null;
 }
 
+// Desempate del ranking (p. ej. Iron Condor topado en 100): factor principal de la estrategia
+// (neutralidad media en Iron Condor, sesgo combinado en Long Call/Put) y después el alfabeto.
+const desempate = (r, estrategia) => r.factores?.[estrategia]?.[0]?.puntaje ?? -1;
+
 const direccion = s => (s > 0.1 ? 'alcista' : s < -0.1 ? 'bajista' : 'neutral');
 const pct = x => `${Math.round(x * 100)} %`;
 
@@ -163,7 +167,7 @@ export function createScreener({ integraciones, factory = repository, cola, ahor
       if (!Number.isSafeInteger(n) || n < 1 || n > 50) throw boom.badRequest('limite debe estar entre 1 y 50.');
       const registros = await todos('screener', ctx, undefined, factory);
       const top = e => registros.filter(r => Number.isFinite(r.puntajes?.[e]))
-        .sort((a, b) => b.puntajes[e] - a.puntajes[e] || a.simbolo.localeCompare(b.simbolo)).slice(0, n)
+        .sort((a, b) => b.puntajes[e] - a.puntajes[e] || desempate(b, e) - desempate(a, e) || a.simbolo.localeCompare(b.simbolo)).slice(0, n)
         .map(r => ({ simbolo: r.simbolo, nombre: r.nombre || r.simbolo, precio: r.precio ?? null, cambioPct: r.cambioPct ?? null, puntaje: r.puntajes[e],
           factores: (r.factores?.[e] || []).map(({ nombre, valor, puntaje }) => ({ nombre, valor: valor ?? null, puntaje })), resumen: r.resumenes?.[e] || '', actualizadoEn: r.actualizadoEn }));
       const ultima = registros.reduce((m, r) => (r.actualizadoEn && (!m || new Date(r.actualizadoEn) > new Date(m)) ? r.actualizadoEn : m), null);
