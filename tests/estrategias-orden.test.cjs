@@ -348,9 +348,10 @@ test('reconstruirPatas: conserva los strikes más cercanos, avisa y rearma si de
 // ---------- 10 y 11) sondeo y rango de días ----------
 test('ticket: usa la actualización de la orden (sin lanzar sincronizaciones) y flujo envía el rango de días', () => {
   const ticket = readFileSync(join(__dirname, '../web/src/components/TicketOrden.jsx'), 'utf8');
-  assert.match(ticket, /\/actualizacion`/);
+  assert.match(ticket, /useSeguimientoOrden/);
+  const seguir = readFileSync(join(__dirname, '../web/src/hooks/useSeguimientoOrden.js'), 'utf8');
+  assert.match(seguir, /operacion\.actualizarOrden/); assert.match(seguir, /SONDEO_MS = 3000/); // respaldo si no hay avisos
   assert.doesNotMatch(ticket, /acciones\.sincronizar/);
-  assert.match(ticket, /POLL_MS = 3000/);
   const flujo = readFileSync(join(__dirname, '../web/src/pages/analizar/flujo.js'), 'utf8');
   assert.match(flujo, /diasVencimientoMin: diasMin, diasVencimientoMax: diasMax \} : \{\}\) \};/);
   assert.match(flujo, /filtros: parametros/);

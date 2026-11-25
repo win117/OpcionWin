@@ -32,15 +32,18 @@ import { createIntegrations } from '../../../integrations';
 import { createUniversoVivo } from '../services/universo-vivo.service';
 import { createTasa } from '../services/tasa.service';
 import { createEventos } from '../services/eventos.service';
+import { createSeguimiento } from '../services/seguimiento.service';
 import { colaGlobal } from '../../../jobs/cola';
 export default function routeAPI(app, { factory = repository, auth = createSessionService(factory), integraciones = createIntegrations(process.env), cola = colaGlobal, ahora, cacheActivos, universo = createUniversoVivo({ integraciones, factory }) } = {}) {
   app.locals.universo=universo; // lo arranca src/index.js (no en pruebas)
   const tasa=createTasa({integraciones}), eventos=createEventos({integraciones}); // datos de mercado compartidos, en memoria
+  const seguimiento=createSeguimiento({integraciones,factory});
+  app.locals.cerrarConexiones=()=>{seguimiento.cerrar();integraciones.alpaca?.cerrarAvisos?.();};
   const router=Router();
   router.use('/sesiones',sesiones({auth}));
   const secured=Router();
   secured.use(authenticate(auth));
-  const deps={factory,integraciones,cola,ahora,cacheActivos,universo,tasa,eventos};
+  const deps={factory,integraciones,cola,ahora,cacheActivos,universo,tasa,eventos,seguimiento};
   // Acciones: antes de los CRUD para que /ejecuciones, /ticket o /catalogo no se confundan con /:id.
   secured.use(analisis(deps));
   secured.use(datosProveedores(deps));

@@ -2,6 +2,7 @@
 import { Router } from 'express';
 import { operacion as rutas } from '../schemas';
 import controller from '../controllers/operacion.controller';
+import seguimiento from '../controllers/seguimiento.controller';
 import { registrar } from './registrar';
 
 export default deps => {
@@ -15,6 +16,7 @@ export default deps => {
   registrar(router, rutas.enviar, c.enviar);
   registrar(router, rutas.cancelar, c.cancelar);
   registrar(router, rutas.actualizar, c.actualizar);
+  registrar(router, rutas.seguir, seguimiento(deps.seguimiento).orden);
   registrar(router, rutas.cerrarGrupo, c.cerrarGrupo);
   registrar(router, rutas.cerrar, c.cerrar);
   return router;

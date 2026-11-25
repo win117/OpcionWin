@@ -12,6 +12,7 @@ async function shutdown(){
   if(closing) return;
   closing=true;
   app.locals.universo.detener();
+  app.locals.cerrarConexiones(); // seguimientos de órdenes abiertos
   const timeout=setTimeout(()=>process.exit(1),10000);timeout.unref();
   server.close(async()=>{
     try{await closeMongo();clearTimeout(timeout);process.exitCode=0;}

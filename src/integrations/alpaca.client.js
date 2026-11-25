@@ -3,6 +3,7 @@
 // Documentación verificada: ver src/integrations/README.md.
 import { IntegrationError } from './errors';
 import { createHttp } from './http';
+import { createFlujoOrdenes } from './alpaca.stream';
 
 export const ALPACA_PAPER_URL = 'https://paper-api.alpaca.markets';
 export const ALPACA_DATA_URL = 'https://data.alpaca.markets';
@@ -228,6 +229,7 @@ export const createAlpacaClient = ({
   esperar,
   ahora,
   maxPaginas = MAX_PAGINAS,
+  WebSocket,
 } = {}) => {
   // ADR-005: solo paper. Cualquier otra URL de trading se rechaza al construir.
   if (normalizarUrl(tradingUrl) !== ALPACA_PAPER_URL) {
@@ -520,6 +522,9 @@ export const createAlpacaClient = ({
     return lista.map(normalizarPosicion);
   };
 
+  // Avisos en vivo: la conexión se abre solo mientras alguien sigue una orden.
+  const flujo = createFlujoOrdenes({ keyId: id, secretKey: secreto, normalizar: normalizarOrden, ...(WebSocket !== undefined ? { WebSocket } : {}) });
+
   return {
     proveedor: PROVEEDOR,
     entorno: 'paper',
@@ -528,5 +533,6 @@ export const createAlpacaClient = ({
     configurado,
     buscarActivo, listarActivos, velas, velasLote, cotizacionesLote, reloj, cotizacion, contratos, snapshotsOpciones, noticias, accionesCorporativas, velasOpciones,
     cuenta, enviarOrden, consultarOrden, consultarPorClientOrderId, cancelarOrden, ordenesAbiertas, posiciones, historialCartera,
+    suscribirOrdenes: configurado ? flujo.suscribir : undefined, avisosActivos: flujo.activo, cerrarAvisos: flujo.cerrar,
   };
 };

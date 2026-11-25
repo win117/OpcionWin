@@ -24,6 +24,7 @@ export const ticket = definir({ metodo: 'post', ruta: '/ordenes/ticket', grupo, 
 export const enviar = definir({ metodo: 'post', ruta: '/ordenes/:id/envio', grupo, resumen: 'Envía una orden pendiente (idempotente).', ...deOrden, headers: idempotencia, errores: { 403: 'Entorno no paper', 409: 'Clave distinta o estado inválido' } });
 export const cancelar = definir({ metodo: 'post', ruta: '/ordenes/:id/cancelacion', grupo, resumen: 'Cancela una orden en el broker.', ...deOrden, errores: { 409: 'La orden ya terminó' } });
 export const actualizar = definir({ metodo: 'post', ruta: '/ordenes/:id/actualizacion', grupo, resumen: 'Consulta esa orden en el broker y devuelve su estado.', ...deOrden });
+export const seguir = definir({ metodo: 'get', ruta: '/ordenes/:id/seguimiento', grupo, resumen: 'Sigue la orden en vivo (Server-Sent Events): eventos «orden» con cada cambio y «fin».', ...deOrden, errores: { 429: 'Demasiados seguimientos a la vez' } });
 
 export const cerrarGrupo = definir({ metodo: 'post', ruta: '/posiciones/cierre-grupo', grupo, resumen: 'Cierra de 2 a 4 posiciones con una sola orden.', exito: 201, headers: idempotencia, errores: repetida,
   body: z.looseObject({ posicionIds: z.array(id).min(2).max(4), ...precio }) });

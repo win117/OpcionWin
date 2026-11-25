@@ -1,5 +1,6 @@
 // Configuración: secciones (rutas anidadas) en tres grupos. En escritorio, columna lateral; en pantallas chicas, grupo + fila deslizable.
-import { useEffect, useRef } from 'react';
+import { Suspense, useEffect, useRef } from 'react';
+import { Loading } from '../components/States';
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { CONFIG_GRUPOS } from '../utils/constants';
 import { centrarEn } from '../utils/desplazar';
@@ -36,7 +37,7 @@ export default function Configuracion() {
         ))}
         <Link className="cfg__glosario" to="/glosario">Glosario de términos</Link>
       </nav>
-      <div className="cfg__cuerpo stack"><Outlet /></div>
+      <div className="cfg__cuerpo stack"><Suspense fallback={<Loading text="Cargando…" />}><Outlet /></Suspense></div>
     </div>
   );
 }

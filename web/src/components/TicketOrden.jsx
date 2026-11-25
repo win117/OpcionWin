@@ -8,9 +8,9 @@ import { Checkbox, Field } from './Field';
 import { Spinner } from './States';
 import { Termino } from './Termino';
 import { useBroker } from '../context/BrokerContext';
-import { api, esNoDisponible } from '../api/client';
 import { acciones, mercado, operacion } from '../api/resources';
 import { useAsync } from '../hooks/useAsync';
+import { ESTADOS_TERMINALES, useSeguimientoOrden } from '../hooks/useSeguimientoOrden';
 import { NOTA_PUNTAJE, CORE_LABELS, ESTRATEGIA_LABELS } from '../utils/constants';
 import { fmtDate, fmtDateTime, fmtFixed, fmtMoney, fmtPct, isNum } from '../utils/format';
 import {
@@ -19,9 +19,6 @@ import {
 } from '../utils/estrategiasOrden';
 import { uuid } from '../utils/objects';
 
-export const ESTADOS_TERMINALES = ['ejecutada', 'cancelada', 'rechazada', 'expirada'];
-const POLL_MS = 3000;
-const POLL_MAX_MS = 60000;
 let seq = 0;
 const nuevaPata = p => ({ id: ++seq, accion: p.accion || 'buy', intencion: p.intencion || intencionPara(p.accion), contratoId: p.contratoId });
 
@@ -47,7 +44,6 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
   const [error, setError] = useState(null);
   const [orden, setOrden] = useState(null);
   const [cancelando, setCancelando] = useState(false);
-  const [sondeo, setSondeo] = useState('idle'); // idle | activo | timeout
   const [cuenta, setCuenta] = useState({ loading: true, data: null, error: null });
   const clave = useRef(null);
   const abridorRef = useRef(abridor);
@@ -173,7 +169,7 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
   };
   const quitar = id => { setLegs(ls => ls.filter(l => l.id !== id)); setLimiteTocado(false); };
 
-  const volver = () => { clave.current = null; setConfirmado(false); setError(null); setOrden(null); setSondeo('idle'); setPaso('editar'); };
+  const volver = () => { clave.current = null; setConfirmado(false); setError(null); setOrden(null); setPaso('editar'); };
 
   const enviar = async () => {
     if (!empresa?._id) return;
@@ -194,7 +190,6 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
     try {
       const res = await operacion.ticket(body, clave.current);
       setOrden(res?.orden || res);
-      setSondeo('activo');
       setPaso('enviado');
     } catch (e) {
       setError(e);
@@ -203,45 +198,14 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
     }
   };
 
-  // Seguimiento: cada 3 s pide al servidor actualizar la orden (espera cada respuesta), hasta estado final o 60 s.
-  // Si ese recurso no existe en el servidor (404), consulta la orden guardada.
   const ordenId = orden?._id;
   const terminal = ESTADOS_TERMINALES.includes(orden?.estado);
-  useEffect(() => {
-    if (paso !== 'enviado' || !ordenId || terminal) return undefined;
-    let cancelado = false, timer, sinActualizacion = false;
-    const t0 = Date.now();
-    setSondeo('activo');
-    const tick = async () => {
-      try {
-        let o = null;
-        if (!sinActualizacion) {
-          try {
-            const r = await api.post(`/ordenes/${encodeURIComponent(ordenId)}/actualizacion`);
-            o = r?.orden || r;
-          } catch (e) {
-            if (!esNoDisponible(e)) throw e;
-            sinActualizacion = true;
-          }
-        }
-        if (cancelado) return;
-        if (!o) o = await operacion.orden(ordenId);
-        if (cancelado) return;
-        setOrden(o);
-        if (ESTADOS_TERMINALES.includes(o?.estado)) { setSondeo('idle'); return; }
-      } catch { /* se reintenta */ }
-      if (cancelado) return;
-      if (Date.now() - t0 >= POLL_MAX_MS) { setSondeo('timeout'); return; }
-      timer = setTimeout(tick, POLL_MS);
-    };
-    timer = setTimeout(tick, POLL_MS);
-    return () => { cancelado = true; clearTimeout(timer); };
-  }, [paso, ordenId, terminal]);
+  const sig = useSeguimientoOrden(ordenId, { activo: paso === 'enviado' && !terminal, alCambio: setOrden });
 
   const cancelar = async () => {
     setCancelando(true);
     setError(null);
-    try { setOrden(await acciones.cancelarOrden(ordenId)); setSondeo('idle'); } catch (e) { setError(e); } finally { setCancelando(false); }
+    try { setOrden(await acciones.cancelarOrden(ordenId)); } catch (e) { setError(e); } finally { setCancelando(false); }
   };
   const verCartera = () => { onClose?.(); navigate('/posiciones'); };
 
@@ -413,10 +377,10 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
             <div className="ticket__estado">
               <Badge value={orden.estado} />
               <span>{orden.estado === 'ejecutada' ? 'Orden ejecutada' : terminal ? 'La orden terminó sin ejecutarse por completo' : `Orden enviada a la cuenta simulada de ${brokerNombre}`}</span>
-              {sondeo === 'activo' && !terminal && <span className="muted small"><Spinner small /> Actualizando estado…</span>}
+              {sig.siguiendo && !terminal && <span className="muted small"><Spinner small /> {sig.enVivo ? 'El broker avisa en vivo…' : 'Esperando al broker…'}</span>}
             </div>
             {ultimoEvento && <p>{ultimoEvento.mensaje} <span className="muted small">{fmtDateTime(ultimoEvento.fecha)}</span></p>}
-            {sondeo === 'timeout' && !terminal && <div className="alert alert--info" role="note">La orden sigue abierta: nadie ha aceptado tu precio. Puedes esperar (la verás en Órdenes) o cancelarla y {credito ? 'pedir un poco menos' : 'ofrecer un poco más'}.</div>}
+            {sig.lenta && !terminal && <div className="alert alert--info" role="note">La orden sigue abierta: nadie ha aceptado tu precio. Puedes esperar (la verás en Órdenes) o cancelarla y {credito ? 'pedir un poco menos' : 'ofrecer un poco más'}.</div>}
             {error && <div className="alert alert--danger" role="alert">{error.message}</div>}
             <p className="muted small">ID orden: <code>{orden._id}</code></p>
           </div>

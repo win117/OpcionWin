@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
+import { Loading } from './States';
 import { Link, NavLink, Outlet, useLocation, useNavigate, useNavigationType } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useAsync } from '../hooks/useAsync';
@@ -117,7 +118,7 @@ export function Layout() {
         </div>
       </header>
       <main id="contenido" className="content" tabIndex={-1}>
-        <Outlet context={{ integraciones, mercado }} />
+        <Suspense fallback={<Loading text="Cargando…" />}><Outlet context={{ integraciones, mercado }} /></Suspense>
       </main>
       <footer className="app-foot muted small">
         <span>Herramienta educativa. No es asesoría financiera.</span>

@@ -1,3 +1,4 @@
+import { lazy } from 'react';
 import { Navigate, Route, Routes, generatePath, useLocation, useParams } from 'react-router-dom';
 import './utils/tema';
 import { useAuth } from './context/AuthContext';
@@ -8,19 +9,23 @@ import Inicio from './pages/Inicio';
 import Analisis from './pages/Analisis';
 import Posiciones from './pages/Posiciones';
 import Ordenes from './pages/Ordenes';
-import Configuracion from './pages/Configuracion';
-import Empresas from './pages/Empresas';
-import Estrategias from './pages/Estrategias';
-import Mercado from './pages/Mercado';
-import EvaluarCores from './pages/EvaluarCores';
-import Seleccion from './pages/Seleccion';
-import Perfiles, { PerfilDetalle } from './pages/Perfiles';
-import Configuraciones, { ConfiguracionDetalle } from './pages/Configuraciones';
-import Conexiones from './pages/broker/Conexiones';
-import Sincronizaciones from './pages/Sincronizaciones';
-import Glosario from './pages/Glosario';
-import Auditoria from './pages/Auditoria';
 import NotFound from './pages/NotFound';
+
+// Páginas poco visitadas: se descargan al abrirlas.
+const Configuracion = lazy(() => import('./pages/Configuracion'));
+const Empresas = lazy(() => import('./pages/Empresas'));
+const Estrategias = lazy(() => import('./pages/Estrategias'));
+const Mercado = lazy(() => import('./pages/Mercado'));
+const EvaluarCores = lazy(() => import('./pages/EvaluarCores'));
+const Seleccion = lazy(() => import('./pages/Seleccion'));
+const Configuraciones = lazy(() => import('./pages/Configuraciones'));
+const Perfiles = lazy(() => import('./pages/Perfiles'));
+const Sincronizaciones = lazy(() => import('./pages/Sincronizaciones'));
+const Glosario = lazy(() => import('./pages/Glosario'));
+const Auditoria = lazy(() => import('./pages/Auditoria'));
+const Conexiones = lazy(() => import('./pages/broker/Conexiones'));
+const PerfilDetalle = lazy(() => import('./pages/Perfiles').then(m => ({ default: m.PerfilDetalle })));
+const ConfiguracionDetalle = lazy(() => import('./pages/Configuraciones').then(m => ({ default: m.ConfiguracionDetalle })));
 
 function RequireAuth({ children }) {
   const { session } = useAuth();

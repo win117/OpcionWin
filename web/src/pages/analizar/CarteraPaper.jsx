@@ -5,11 +5,13 @@ import { Field } from '../../components/Field';
 import { Modal } from '../../components/Modal';
 import { ErrorMessage, Spinner } from '../../components/States';
 import { useAsync } from '../../hooks/useAsync';
+import { ESTADOS_TERMINALES, useSeguimientoOrden } from '../../hooks/useSeguimientoOrden';
 import { acciones, operacion } from '../../api/resources';
 import { fmtDate, fmtDateTime, fmtFixed, fmtMoney, fmtPct, isNum } from '../../utils/format';
 import { uuid } from '../../utils/objects';
 import { cederPrecio } from '../../utils/estrategiasOrden';
 import { ejecutado } from '../broker/ejecutado';
+import HistorialCartera from './HistorialCartera';
 
 const CANCELABLES = ['pendiente', 'enviada', 'aceptada', 'parcial'];
 const REFRESH_MS = 30000;
@@ -22,8 +24,6 @@ function resumenPatas(o) {
 }
 
 const mcd = (a, b) => (b ? mcd(b, a % b) : a);
-const FINALES = ['ejecutada', 'cancelada', 'rechazada', 'expirada'];
-const SONDEO_MS = 3000, SONDEO_MAX_MS = 60000;
 const MENSAJE_CIERRE = { ejecutada: 'Posición cerrada.', cancelada: 'Orden de cierre cancelada: la posición sigue abierta.', rechazada: 'El broker rechazó el cierre: la posición sigue abierta.',
   expirada: 'La orden venció sin ejecutarse: la posición sigue abierta.', parcial: 'Cierre parcial: falta el resto.' };
 const LADO = { long: 'comprada', short: 'vendida' };
@@ -74,31 +74,19 @@ function CerrarModal({ cierre, broker, onClose, onDone }) {
   const listo = limiteOk && (!esGrupo || sentido);
   const descubre = !esGrupo && dejaCortaDescubierta(posiciones[0], grupo);
 
-  // Seguimiento del cierre hasta estado final o 60 s: enviar no es lo mismo que haber cerrado.
-  const [agotado, setAgotado] = useState(false);
+  // Seguimiento del cierre hasta estado final: enviar no es lo mismo que haber cerrado.
   const [cancelando, setCancelando] = useState(false);
-  const okId = ok?._id, terminado = FINALES.includes(ok?.estado);
+  const okId = ok?._id, terminado = ESTADOS_TERMINALES.includes(ok?.estado);
   const doneRef = useRef(onDone);
   doneRef.current = onDone;
-  useEffect(() => {
-    if (!okId || terminado || agotado) return undefined;
-    let vivo = true, timer;
-    const t0 = Date.now();
-    const tick = async () => {
-      try { const r = await operacion.actualizarOrden(okId); if (vivo) setOk(r?.orden || r); } catch { /* se reintenta */ }
-      if (!vivo) return;
-      if (Date.now() - t0 >= SONDEO_MAX_MS) setAgotado(true); else timer = setTimeout(tick, SONDEO_MS);
-    };
-    timer = setTimeout(tick, SONDEO_MS);
-    return () => { vivo = false; clearTimeout(timer); };
-  }, [okId, terminado, agotado]);
+  const sig = useSeguimientoOrden(okId, { activo: !terminado, alCambio: setOk });
   useEffect(() => { if (okId && terminado) doneRef.current?.(); }, [okId, terminado]);
 
   const cancelarCierre = async () => {
     setCancelando(true); setError(null);
     try { const r = await acciones.cancelarOrden(okId); setOk(r?.orden || r); } catch (e) { setError(e); } finally { setCancelando(false); }
   };
-  const otroPrecio = () => { clave.current = null; setOk(null); setAgotado(false); setError(null); };
+  const otroPrecio = () => { clave.current = null; setOk(null); setError(null); };
   const ejecutadas = ok?.cantidadEjecutada || 0;
   const puedeReintentar = terminado && ok.estado !== 'ejecutada' && !ejecutadas; // con un cierre parcial, las cantidades de esta ventana ya no valen
 
@@ -139,10 +127,10 @@ function CerrarModal({ cierre, broker, onClose, onDone }) {
                 {ok.estado === 'ejecutada' && isNum(ok.precioPromedioEjecucion) && <p className="small">{cobra ? 'Cobraste' : 'Pagaste'} {fmtMoney(ok.precioPromedioEjecucion * 100 * unidades)} (precio {fmtFixed(ok.precioPromedioEjecucion)} × 100 × {unidades}).</p>}
                 {terminado && ok.estado !== 'ejecutada' && ejecutadas > 0 && <p className="small">Se cerraron {ejecutadas} antes de terminar; revisa en Posiciones lo que queda.</p>}
                 {ok.estado === 'rechazada' && ok.eventos?.length > 0 && <p className="small">{ok.eventos[ok.eventos.length - 1].mensaje}</p>}
-                {!terminado && !agotado && <p className="small muted"><Spinner small /> Consultando al broker cada 3 segundos…</p>}
+                {!terminado && sig.siguiendo && <p className="small muted"><Spinner small /> {sig.enVivo ? 'El broker avisa en vivo…' : 'Esperando al broker…'}</p>}
               </div>
             </div>
-            {agotado && !terminado && <div className="alert alert--warning" role="alert">Sigue abierta: nadie ha aceptado tu precio y la posición todavía no está cerrada. Puedes esperar (la verás en Órdenes) o cancelarla aquí y ceder un poco.</div>}
+            {sig.lenta && !terminado && <div className="alert alert--warning" role="alert">Sigue abierta: nadie ha aceptado tu precio y la posición todavía no está cerrada. Puedes esperar (la verás en Órdenes) o cancelarla aquí y ceder un poco.</div>}
             {error && <div className="alert alert--danger" role="alert">{error.message}</div>}
           </>
         ) : (
@@ -235,6 +223,7 @@ export default function CarteraPaper({ nombre = 'el broker', broker, vista = 'to
               <div className="alert alert--warning" role="note">No hay datos de la cuenta simulada de {nombre}{d.error ? ': ' + d.error : '.'} Revisa las credenciales del broker en el servidor.</div>
             )}
 
+            {vista !== 'ordenes' && cuenta && <HistorialCartera broker={broker} nombre={nombre} />}
             {vista !== 'ordenes' && <h3>Posiciones abiertas</h3>}
             {vista !== 'ordenes' && (posiciones.length === 0 ? <p className="muted small">{d.posicionesDisponibles === false ? 'Posiciones no disponibles por ahora.' : 'Sin posiciones abiertas.'}</p> : (
               <div className="table-wrap">

@@ -96,6 +96,32 @@ export async function request(path, { method = 'GET', body, headers = {}, signal
   };
 }
 
+/**
+ * Escucha el seguimiento de una orden (Server-Sent Events). Se usa fetch y no EventSource porque la API pide el token en una cabecera.
+ * Resuelve con el motivo del fin ('final' | 'tiempo' | 'apagado') o null si la conexión se cortó.
+ */
+export async function seguirOrden(id, { signal, alEvento }) {
+  const token = readSession()?.token;
+  const r = await fetch(`${API_PREFIX}/ordenes/${encodeURIComponent(id)}/seguimiento`, { headers: { Accept: 'text/event-stream', ...(token ? { Authorization: 'Bearer ' + token } : {}) }, signal });
+  if (!r.ok || !r.body || !/text\/event-stream/.test(r.headers.get('Content-Type') || '')) throw new ApiError('No se pudo seguir la orden.', r.status);
+  const lector = r.body.pipeThrough(new TextDecoderStream()).getReader();
+  let pendiente = '', fin = null;
+  for (;;) {
+    const { done, value } = await lector.read();
+    if (done) return fin;
+    pendiente += value;
+    const bloques = pendiente.split('\n\n');
+    pendiente = bloques.pop();
+    for (const b of bloques) {
+      const evento = /^event: (.+)$/m.exec(b)?.[1], datos = /^data: (.+)$/m.exec(b)?.[1];
+      if (!evento || !datos) continue;
+      const data = JSON.parse(datos);
+      if (evento === 'fin') fin = data.motivo;
+      alEvento(evento, data);
+    }
+  }
+}
+
 const unwrap = promise => promise.then(result => result.data);
 
 export const api = {

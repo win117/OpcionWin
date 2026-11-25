@@ -10,7 +10,7 @@ export const METODOS_BROKER = {
   posiciones: 'Posiciones vivas, una entrada por contrato',
 };
 // Opcionales: si el broker no los ofrece, la aplicación lo dice.
-export const METODOS_OPCIONALES = { historialCartera: 'Valor diario de la cuenta', suscribirOrdenes: 'Avisos de órdenes en vivo' };
+export const METODOS_OPCIONALES = { historialCartera: 'Valor diario de la cuenta', suscribirOrdenes: 'Avisos de órdenes en vivo: recibe una función y devuelve cómo darse de baja', avisosActivos: 'true si los avisos están llegando' };
 
 /** Falla al arrancar, y no a media operación, si a un broker le falta algo. */
 export function exigirContratoBroker(adaptador) {
