@@ -28,14 +28,17 @@ import acciones from './acciones.routes';
 import screener from './screener.routes';
 import { createIntegrations } from '../../../integrations';
 import { createUniversoVivo } from '../services/universo-vivo.service';
+import { createTasa } from '../services/tasa.service';
+import { createEventos } from '../services/eventos.service';
 import { colaGlobal } from '../../../jobs/cola';
 export default function routeAPI(app, { factory = repository, auth = createSessionService(factory), integraciones = createIntegrations(process.env), cola = colaGlobal, ahora, cacheActivos, universo = createUniversoVivo({ integraciones, factory }) } = {}) {
   app.locals.universo=universo; // lo arranca src/index.js (no en pruebas)
+  const tasa=createTasa({integraciones}), eventos=createEventos({integraciones}); // datos de mercado compartidos, en memoria
   const router=Router();
   router.use('/sesiones',sesiones({auth}));
   const secured=Router();
   secured.use(authenticate(auth));
-  secured.use(acciones({factory,integraciones,cola,ahora,cacheActivos,universo}));
+  secured.use(acciones({factory,integraciones,cola,ahora,cacheActivos,universo,tasa,eventos}));
   secured.use('/empresas',empresas({factory}));
   secured.use('/estrategias',estrategias({factory}));
   secured.use('/configuraciones',configuraciones({factory}));
@@ -54,7 +57,7 @@ export default function routeAPI(app, { factory = repository, auth = createSessi
   secured.use('/posiciones',posiciones({factory}));
   secured.use('/sincronizaciones',sincronizaciones({factory}));
   secured.use('/auditoria',auditoria({factory}));
-  secured.use('/mercado',mercado({factory,integraciones,universo}));
+  secured.use('/mercado',mercado({factory,integraciones,universo,tasa,eventos}));
   secured.use('/screener',screener({factory,universo}));
   secured.use('/cores',cores({factory}));
   router.use(secured);

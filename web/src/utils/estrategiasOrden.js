@@ -10,6 +10,8 @@ export const intencionPara = accion => (accion === 'sell' ? 'sell_to_open' : 'bu
 export const SPREAD_AVISO = 0.1;
 export const SPREAD_CONFIRMAR = 0.2;
 export const SPREAD_MAXIMO = 0.25;
+// Menos contratos vivos que esto en una pata: pocas contrapartes para entrar y salir.
+export const INTERES_MINIMO = 100;
 
 /** Única definición de cotización válida: hay comprador (bid > 0) y el ask no está cruzado. */
 export const cotizacionValida = item => isNum(item?.bid) && isNum(item?.ask) && item.bid > 0 && item.ask >= item.bid;
@@ -45,12 +47,13 @@ export function costoSpread(patas, cantidad = 1) {
   return patas.reduce((a, p) => a + ((p.item.ask - p.item.bid) / 2) * (p.proporcion || 1), 0) * MULTIPLICADOR * cantidad;
 }
 
-/** Liquidez de las patas: { sinCotizacion, peorSpread, avisar, confirmar, insuficiente }. */
+/** Liquidez de las patas: { sinCotizacion, peorSpread, interesMinimo, pocoInteres, avisar, confirmar, insuficiente }. interesMinimo: null si ninguna pata lo informa. */
 export function liquidez(patas) {
   const sinCotizacion = patas.filter(p => !cotizacionValida(p.item)).length;
   const peorSpread = Math.max(0, ...patas.map(p => spreadPct(p.item) ?? 0));
+  const intereses = patas.map(p => p.item?.interesAbierto).filter(isNum), interesMinimo = intereses.length ? Math.min(...intereses) : null;
   return {
-    sinCotizacion, peorSpread,
+    sinCotizacion, peorSpread, interesMinimo, pocoInteres: interesMinimo != null && interesMinimo < INTERES_MINIMO,
     avisar: peorSpread > SPREAD_AVISO,
     confirmar: sinCotizacion > 0 || peorSpread > SPREAD_CONFIRMAR,
     insuficiente: sinCotizacion > 0 || peorSpread > SPREAD_MAXIMO,
@@ -354,7 +357,16 @@ export function analyzePayoff(legs, samples = 240) {
 }
 
 // ---- Probabilidad (mismo modelo que src/cores/blackscholes.js: lognormal, neutral al riesgo, días naturales/365) ----
-const TASA = 0.04;
+// r (Tesoro) y q (dividendos) los obtiene el servidor; sin dato se usa 0. Mismas fórmulas que src/cores/tasa.js.
+export function tasaParaPlazo(puntos, dias) {
+  const p = (Array.isArray(puntos) ? puntos : []).filter(x => isNum(x?.dias) && x.dias > 0 && isNum(x?.tasa)).sort((a, b) => a.dias - b.dias);
+  if (!p.length || !isNum(dias) || dias <= 0) return null;
+  const i = p.findIndex(x => x.dias >= dias);
+  const simple = i === 0 ? p[0].tasa : i < 0 ? p.at(-1).tasa : p[i - 1].tasa + ((p[i].tasa - p[i - 1].tasa) * (dias - p[i - 1].dias)) / (p[i].dias - p[i - 1].dias);
+  const T = dias / 365;
+  return Math.log(1 + simple * T) / T;
+}
+export const rendimientoDividendo = (anual, precio) => (isNum(anual) && anual > 0 && isNum(precio) && precio > 0 ? Math.log(1 + anual / precio) : 0);
 const HORA_VENCIMIENTO_UTC = 20;
 /** N(x), Abramowitz & Stegun 26.2.17. */
 export function cdf(x) {
@@ -364,10 +376,10 @@ export function cdf(x) {
   return x >= 0 ? 1 - cola : cola;
 }
 /** P(S_T > X) = N(d2). */
-export function probabilidadSobre({ S, X, T, sigma, r = TASA }) {
+export function probabilidadSobre({ S, X, T, sigma, r = 0, q = 0 }) {
   if (X <= 0) return 1;
   if (![S, X, T, sigma].every(v => isNum(v) && v > 0)) return null;
-  return cdf((Math.log(S / X) + (r - (sigma * sigma) / 2) * T) / (sigma * Math.sqrt(T)));
+  return cdf((Math.log(S / X) + (r - q - (sigma * sigma) / 2) * T) / (sigma * Math.sqrt(T)));
 }
 /** Años hasta el cierre del día de vencimiento; null si ya pasó. */
 export function aniosHasta(vencimiento, ahora = new Date()) {
@@ -376,11 +388,11 @@ export function aniosHasta(vencimiento, ahora = new Date()) {
 }
 
 /** Probabilidad de ganar al vencimiento: suma de las zonas con P/L > 0. Cada breakeven usa la IV de la pata vendida más cercana (o de la más cercana). */
-function probabilidadGanancia(legs, ivs, riesgo, S, T) {
+function probabilidadGanancia(legs, ivs, riesgo, S, T, r, q) {
   const vendidas = legs.map((l, i) => i).filter(i => legs[i].accion === 'sell');
   const usar = vendidas.length ? vendidas : legs.map((_, i) => i);
   const cortes = [...riesgo.breakevens].sort((a, b) => a - b);
-  const sobre = cortes.map(X => probabilidadSobre({ S, X, T, sigma: ivs[cercano(usar, X, (i, x) => Math.abs(legs[i].strike - x))] }));
+  const sobre = cortes.map(X => probabilidadSobre({ S, X, T, r, q, sigma: ivs[cercano(usar, X, (i, x) => Math.abs(legs[i].strike - x))] }));
   if (!T || !isNum(S) || sobre.some(p => p == null)) return null;
   let total = 0;
   for (let i = 0; i <= cortes.length; i++) {
@@ -407,13 +419,14 @@ export const CREDITO_ANCHO_MINIMO = 0.2;
  * riesgo, probabilidad, delta ($ por cada $1 del subyacente), theta ($ por día), vega ($ por punto de IV), retornoRiesgo,
  * creditoAncho (condor), movimiento esperado ±1σ con su P/L y pctCuenta (pérdida máxima / patrimonio).
  */
-export function metricasOrden({ patas, precioNeto, credito, cantidad = 1, S, items = [], vencimiento, patrimonio, ahora = new Date() }) {
+export function metricasOrden({ patas, precioNeto, credito, cantidad = 1, S, items = [], vencimiento, patrimonio, tasa = null, dividendoAnual = null, ahora = new Date() }) {
   const legs = legsConNeto(patas, precioNeto, credito, cantidad);
   const riesgo = legs && riesgoGenerico(legs);
   const griega = nombre => (patas.length && patas.every(p => isNum(p.item?.griegas?.[nombre]))
     ? patas.reduce((a, p) => a + (p.accion === 'sell' ? -1 : 1) * p.item.griegas[nombre] * (p.proporcion || 1), 0) * MULTIPLICADOR * cantidad : null);
   const T = vencimiento ? aniosHasta(vencimiento, ahora) : null;
   const iv = ivATM(items, S);
+  const r = (T && tasaParaPlazo(tasa, Math.max(1, Math.round(T * 365)))) ?? 0, q = rendimientoDividendo(dividendoAnual, S);
   const em = isNum(iv) && T ? S * iv * Math.sqrt(T) : null;
   let creditoAncho = null;
   if (riesgo && credito && patas.length === 4) {
@@ -423,13 +436,37 @@ export function metricasOrden({ patas, precioNeto, credito, cantidad = 1, S, ite
   }
   return {
     riesgo,
-    probabilidad: riesgo ? probabilidadGanancia(legs, patas.map(p => p.item?.volatilidadImplicita), riesgo, S, T) : null,
+    probabilidad: riesgo ? probabilidadGanancia(legs, patas.map(p => p.item?.volatilidadImplicita), riesgo, S, T, r || 0, q) : null,
+    tasa: r || null, dividendo: q,
     delta: griega('delta'), theta: griega('theta'), vega: griega('vega'),
     retornoRiesgo: riesgo && riesgo.maxGanancia > 0 && riesgo.maxPerdida > 0 ? riesgo.maxGanancia / riesgo.maxPerdida : null,
     creditoAncho,
     movimiento: isNum(em) && riesgo ? { monto: em, abajo: Math.max(0, S - em), arriba: S + em, plAbajo: payoffAt(legs, Math.max(0, S - em)), plArriba: payoffAt(legs, S + em) } : null,
     pctCuenta: isNum(riesgo?.maxPerdida) && isNum(patrimonio) && patrimonio > 0 ? riesgo.maxPerdida / patrimonio : null,
   };
+}
+
+/**
+ * Avisos por eventos anunciados o estimados antes del vencimiento. `eventos`: respuesta de /mercado/eventos. Devuelve [{ tipo, texto }].
+ * Dividendo: solo importa para la asignación de calls vendidos; el riesgo es alto si el call está dentro del dinero y lo que le queda de
+ * valor extra es menor que el dividendo.
+ */
+export function avisosEventos(patas, S, vencimiento, eventos, fmtFecha = f => f) {
+  if (!eventos || !vencimiento) return [];
+  const avisos = [], antes = f => f && f <= vencimiento;
+  const r = eventos.reportes?.proximo;
+  if (r && antes(r.desde)) {
+    const seguro = antes(r.hasta);
+    avisos.push({ tipo: 'resultados', texto: `Reporte de resultados estimado entre el ${fmtFecha(r.desde)} y el ${fmtFecha(r.hasta)}${seguro ? ', antes de que venza tu opción' : ': puede caer antes de que venza tu opción'}. El precio puede saltar y la volatilidad implícita caer de golpe${patas.some(p => p.accion === 'sell') && patas.length === 4 ? '; en un Iron Condor un salto puede costarte la pérdida máxima' : ''}.` });
+  }
+  const calls = patas.filter(p => p.accion === 'sell' && p.item?.tipo === 'call');
+  for (const d of eventos.dividendos?.proximos || []) {
+    if (!antes(d.exFecha) || !calls.length) continue;
+    const alto = calls.some(p => isNum(S) && p.item.strike < S && isNum(mid(p.item)) && mid(p.item) - (S - p.item.strike) < d.monto);
+    avisos.push({ tipo: 'dividendo', texto: `Dividendo de ${d.monto.toFixed(2)} por acción el ${fmtFecha(d.exFecha)} (fecha ex), antes del vencimiento. ${alto ? 'Riesgo alto: a quien compró tu call le conviene ejercerlo el día anterior para cobrarlo.' : 'Si tu call vendido queda dentro del dinero, pueden ejercerlo el día anterior para cobrarlo.'}` });
+  }
+  for (const d of eventos.divisiones || []) if (antes(d.exFecha)) avisos.push({ tipo: 'division', texto: `División de acciones el ${fmtFecha(d.exFecha)}${d.de && d.a ? ` (${d.a} por ${d.de})` : ''}: el contrato se ajustará.` });
+  return avisos;
 }
 
 /** Notas sobre asignación y vencimiento, en lenguaje llano. */

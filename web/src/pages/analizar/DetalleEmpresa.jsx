@@ -2,6 +2,7 @@
 // Se dibuja igual antes y después de tener datos, para que nada se mueva al llegar.
 import { useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
+import EventosEmpresa from '../../components/EventosEmpresa';
 import { Termino } from '../../components/Termino';
 import { useAsync } from '../../hooks/useAsync';
 import { mercado } from '../../api/resources';
@@ -78,6 +79,7 @@ export function DetalleEmpresa({ empresa, simbolo, velas, ficha, version, proces
           <div><dt><Termino id="spread">Compra / venta</Termino></dt><dd>{cargando && !cotizacion ? hueco : <BidAsk cotizacion={cotizacion} abierto={sesion?.data?.abierto} />}</dd></div>
         </dl>
       </div>
+      <EventosEmpresa simbolo={simbolo} />
       <div className="detalle__pie">
         <div className="detalle__acciones">{acciones}</div>
         <Estado proceso={proceso} corriendo={corriendo} fecha={fecha} abierto={verPasos} onAlternar={() => setVerPasos(v => !v)} />

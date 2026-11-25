@@ -3,12 +3,14 @@ import controller from '../controllers/mercado.controller';
 import { forRepository as empresas } from '../controllers/empresas.controller';
 import { forRepository as contratos } from '../controllers/contratos.controller';
 import { forRepository as noticias } from '../controllers/noticias.controller';
-export default ({factory, integraciones, universo}={})=>{
-  const router=Router(), c=controller(factory, integraciones, universo);
+export default ({factory, integraciones, universo, tasa, eventos}={})=>{
+  const router=Router(), c=controller(factory, integraciones, universo, {tasa, eventos});
   router.get('/empresas',empresas(factory).list);
   router.get('/estado',c.estado);
   router.get('/movimientos',c.movimientos);
   router.get('/mapa',c.mapa);
+  router.get('/tasa',c.tasa);
+  router.get('/eventos/:simbolo',c.eventos);
   router.get('/mapa/:simbolo',c.ficha);
   router.get('/panorama',c.panorama);
   router.get('/cotizaciones/:simbolo/en-vivo',c.liveQuote);
@@ -18,6 +20,7 @@ export default ({factory, integraciones, universo}={})=>{
   router.get('/institucional/:simbolo',c.institutional);
   router.get('/opciones/cadena/:simbolo',c.chain);
   router.get('/opciones/resumen/:simbolo',c.resumenOpciones);
+  router.get('/opciones/velas/:occ',c.velasOpcion);
   router.get('/opciones',contratos(factory).list);
   router.get('/opciones/:contratoId/snapshot',c.snapshot);
   router.get('/opciones/:id',contratos(factory).get);

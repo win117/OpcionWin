@@ -1,4 +1,4 @@
-import { text, choice, positiveNumber, positiveInteger, reference, entitySchema, register } from './shared';
+import { text, choice, number, positiveNumber, positiveInteger, reference, entitySchema, register } from './shared';
 
 
 export const schema = entitySchema({
@@ -6,7 +6,8 @@ export const schema = entitySchema({
   simbolo: text(), tipo: choice(['call', 'put']),
   strike: positiveNumber(), vencimiento: { type: Date, required: true },
   multiplicador: positiveInteger(100), moneda: { type: String, default: 'USD', enum: ['USD'] },
-  activo: { type: Boolean, default: true }
+  activo: { type: Boolean, default: true },
+  interesAbierto: number(false, 0), interesAbiertoFecha: Date // contratos vivos según el proveedor
 });
 schema.index({ proveedor: 1, contratoExternoId: 1 }, { unique: true });
 schema.index({ empresaId: 1, vencimiento: 1, tipo: 1 });

@@ -98,6 +98,9 @@ export const mercado = {
   estado: () => api.get('/mercado/estado'),
   mapa: () => api.get('/mercado/mapa'),
   movimientos: () => api.get('/mercado/movimientos'),
+  tasa: () => api.get('/mercado/tasa'),
+  eventos: simbolo => api.get(`/mercado/eventos/${sym(simbolo)}`),
+  velasOpcion: occ => api.get(`/mercado/opciones/velas/${enc(occ)}`),
   ficha: simbolo => api.get(`/mercado/mapa/${sym(simbolo)}`),
 };
 

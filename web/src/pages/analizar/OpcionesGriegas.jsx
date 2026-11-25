@@ -3,6 +3,8 @@ import { useMemo, useState } from 'react';
 import TicketOrden from '../../components/TicketOrden';
 import { cargarCadena } from '../../components/BotonOperar';
 import { diasHasta, intencionPara, vencimientosVigentes } from '../../utils/estrategiasOrden';
+import GraficaLinea from '../../components/GraficaLinea';
+import { Modal } from '../../components/Modal';
 import { Termino } from '../../components/Termino';
 import { SyncButton } from '../../components/SyncButton';
 import { Empty, ErrorMessage, Loading, Notice } from '../../components/States';
@@ -11,7 +13,7 @@ import { useAsync } from '../../hooks/useAsync';
 import { mercado } from '../../api/resources';
 import { fmtDate, fmtFixed, fmtMoney, fmtPct, isNum } from '../../utils/format';
 
-const COLUMNAS = [['IV', 'iv'], ['Δ', 'delta'], ['Γ', 'gamma'], ['Θ', 'theta'], ['ν', 'vega'], ['Bid', null], ['Ask', null]];
+const COLUMNAS = [['IV', 'iv'], ['Δ', 'delta'], ['Γ', 'gamma'], ['Θ', 'theta'], ['ν', 'vega'], ['OI', 'interes_abierto'], ['Bid', null], ['Ask', null]];
 const f = (v, d = 3) => (isNum(v) ? fmtFixed(v, d) : '—');
 const px = v => (isNum(v) ? fmtFixed(v, 2) : '—');
 const iv = v => (isNum(v) ? fmtPct(v, 1) : '—');
@@ -63,7 +65,7 @@ function Sonrisa({ filas, precio }) {
 
 function Lado({ o, lado, onOperar }) {
   const g = o?.griegas || {};
-  const celdas = [iv(o?.volatilidadImplicita), f(g.delta), f(g.gamma, 4), f(g.theta), f(g.vega)];
+  const celdas = [iv(o?.volatilidadImplicita), f(g.delta), f(g.gamma, 4), f(g.theta), f(g.vega), isNum(o?.interesAbierto) ? o.interesAbierto.toLocaleString('es-MX') : '—'];
   const boton = (accion, valor) => {
     const etiqueta = `${accion === 'buy' ? 'Comprar' : 'Vender'} ${o?.tipo === 'put' ? 'put' : 'call'} strike ${o?.strike} a ${accion === 'buy' ? 'ask' : 'bid'} ${valor}`;
     return o && o.contratoId && onOperar && isNum(valor)
@@ -79,8 +81,21 @@ function Lado({ o, lado, onOperar }) {
   );
 }
 
+/** Precio diario al que se operó un contrato (no incluye días sin operaciones). */
+function Historial({ contrato }) {
+  const st = useAsync(() => mercado.velasOpcion(contrato.simbolo), [contrato.simbolo]);
+  const puntos = useMemo(() => (st.data?.items || []).map(v => ({ fecha: v.fecha, valor: v.cierre })), [st.data]);
+  return (
+    <section>
+      <h3>{contrato.tipo === 'put' ? 'Put' : 'Call'} {fmtFixed(contrato.strike, 2)}</h3>
+      {st.loading ? <Loading text="Cargando historial…" /> : st.error ? <ErrorMessage error={st.error} onRetry={st.reload} /> : puntos.length < 2 ? <p className="muted small">{puntos.length ? 'Solo se ha negociado un día.' : 'Aún no se ha negociado.'}</p> : <GraficaLinea puntos={puntos} height={180} etiqueta={'Precio del contrato ' + contrato.simbolo} />}
+    </section>
+  );
+}
+
 export default function OpcionesGriegas({ simbolo, empresa, vencimiento = '' }) {
   const [ticket, setTicket] = useState(null);
+  const [historial, setHistorial] = useState(null);
   const [venc, setVenc] = useState(vencimiento);
   const state = useAsync(() => (venc ? mercado.opcionesResumen(simbolo, { vencimiento: venc }) : cargarCadena(simbolo)), [simbolo, venc]);
   const d = state.data;
@@ -123,20 +138,25 @@ export default function OpcionesGriegas({ simbolo, empresa, vencimiento = '' }) 
         <table className="table table--dense chain">
           <caption className="sr-only">Cadena de opciones de {simbolo}</caption>
           <thead>
-            <tr><th colSpan="7" scope="colgroup" className="chain__grp chain__grp--call">Calls</th><th rowSpan="2" scope="col">Strike</th><th colSpan="7" scope="colgroup" className="chain__grp chain__grp--put">Puts</th></tr>
+            <tr><th colSpan="8" scope="colgroup" className="chain__grp chain__grp--call">Calls</th><th rowSpan="2" scope="col">Strike</th><th colSpan="8" scope="colgroup" className="chain__grp chain__grp--put">Puts</th></tr>
             <tr>{COLUMNAS.map(([h, id]) => <th key={'c' + h} scope="col" className="num">{id ? <Termino id={id}>{h}</Termino> : h}</th>)}{COLUMNAS.map(([h, id]) => <th key={'p' + h} scope="col" className="num">{id ? <Termino id={id}>{h}</Termino> : h}</th>)}</tr>
           </thead>
           <tbody>
             {filas.map(r => (
               <tr key={r.strike} className={r.strike === atm ? 'chain__atm' : ''}>
                 <Lado o={r.call} lado={isNum(precio) && r.strike < precio ? 'itm' : ''} onOperar={empresa ? operar : null} />
-                <th scope="row" className="num chain__strike">{fmtFixed(r.strike, 2)}</th>
+                <th scope="row" className="num chain__strike"><button type="button" className="enlace" onClick={() => setHistorial(r)} title="Ver historial de precios" aria-label={`Historial de precios del strike ${fmtFixed(r.strike, 2)}`}>{fmtFixed(r.strike, 2)}</button></th>
                 <Lado o={r.put} lado={isNum(precio) && r.strike > precio ? 'itm' : ''} onOperar={empresa ? operar : null} />
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      {historial && (
+        <Modal open title={`Historial de ${simbolo} ${fmtFixed(historial.strike, 2)}, vence ${fmtDate(d.vencimiento)}`} onClose={() => setHistorial(null)}>
+          <div className="stack">{[historial.call, historial.put].filter(Boolean).map(c => <Historial key={c.simbolo} contrato={c} />)}<p className="muted small">Precio por acción al que se operó cada día. Los días sin operaciones no aparecen.</p></div>
+        </Modal>
+      )}
       {ticket && empresa && <TicketOrden open empresa={empresa} chain={ticket.chain} legs={ticket.legs} abridor={ticket.abridor} onClose={() => setTicket(null)} />}
     </div>
   );

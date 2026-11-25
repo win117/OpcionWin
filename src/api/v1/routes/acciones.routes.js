@@ -16,10 +16,10 @@ import { cores as modulosCores } from '../../../cores';
 const SIMBOLO = /^[A-Z][A-Z0-9.-]{0,9}$/;
 const PROVEEDOR = { fundamentales: 'sec', institucional: 'sec' };
 
-export default ({ factory, integraciones, cola, ahora, cacheActivos, universo }) => {
+export default ({ factory, integraciones, cola, ahora, cacheActivos, universo, tasa, eventos }) => {
   const router = Router();
   const sync = createSincronizador({ integraciones, factory });
-  const analisis = createAnalisis({ cola, factory });
+  const analisis = createAnalisis({ cola, factory, tasa, eventos });
   const broker = createBroker({ integraciones, factory });
   const operacion = createOperacion({ integraciones, factory, cola, ahora });
   const busqueda = createBusquedaActivos({ integraciones, factory, ahora, cache: cacheActivos, universo });

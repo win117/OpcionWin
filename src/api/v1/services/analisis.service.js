@@ -2,6 +2,7 @@
 import boom from '@hapi/boom';
 import { repository } from '../../../repositories';
 import { cores, confluencia, estrategias as estrategiasCore } from '../../../cores';
+import { rendimientoDividendo } from '../../../cores/tasa';
 import { CORES, ESTRATEGIAS } from '../models/shared';
 import { todos, obtener, crear, idDeterminista } from './registros';
 import { iniciarTrabajo } from './trabajos.service';
@@ -60,7 +61,7 @@ function ultimaFuente(registros, tipo) {
   return [{ proveedor: ultima.proveedor, fechaDato: ultima.fechaDato, ...(ultima.feed ? { feed: ultima.feed } : {}), referencia: tipo }];
 }
 
-export function createAnalisis({ cola, factory = repository }) {
+export function createAnalisis({ cola, factory = repository, tasa, eventos }) {
   async function insumos(ctx, empresa, requiere, parametros = {}) {
     const input = { simbolo: empresa.simbolo, velas: [], fundamentales: [], reportes: [], noticias: [], opciones: [] };
     const fuentes = [], faltantes = [];
@@ -268,7 +269,15 @@ export function createAnalisis({ cola, factory = repository }) {
           const vela = cot ? null : masReciente((await todos('datos-mercado', ctx, { empresaId: config.empresaId, tipo: 'vela' }, factory)).filter(v => (v.intervalo || '1Day') === intervalo));
           precioSubyacente = cot?.ultimo ?? vela?.cierre;
         }
-        const r = estrategiasCore.evaluarConfiguracion({ estrategia: estrategia.codigo, componentes, precioSubyacente, fechaReferencia: ahora.toISOString() });
+        // Tasa del Tesoro para el plazo y dividendos del último año: si faltan se calcula con 0 y queda escrito.
+        const venc = componentes.length ? Math.min(...componentes.map(c => fecha(c.vencimiento))) : NaN;
+        const tasaLibreRiesgo = await tasa?.para(Math.max(1, Math.round((venc - ahora.getTime()) / DIA))) ?? null;
+        const empresa = await obtener('empresas', ctx, config.empresaId, factory);
+        const ev = await eventos?.(empresa.simbolo).catch(() => null);
+        if (tasa && tasaLibreRiesgo == null) faltantes.push('tasa libre de riesgo (Tesoro)');
+        if (eventos && !ev?.dividendos) faltantes.push('dividendos');
+        const r = estrategiasCore.evaluarConfiguracion({ estrategia: estrategia.codigo, componentes, precioSubyacente, fechaReferencia: ahora.toISOString(),
+          ...(tasaLibreRiesgo != null ? { tasaLibreRiesgo } : {}), rendimientoDividendo: rendimientoDividendo(ev?.dividendos?.anualPorAccion, precioSubyacente) });
         const errores = [...(r.errores || []), ...vencidos.map(x => `El contrato ${x} ya venció.`)];
         const conPrecio = componentes.filter(c => c.precio !== undefined).length;
         // Una estructura inválida o vencida nunca se reporta como completa: sin montos, cobertura 0 y configuracion_valida = 0.

@@ -81,7 +81,8 @@ export function createSincronizador({ integraciones, factory = repository }) {
       await guardarLote('contratos', ctx, lista.map(c => ({ id: ids.get(c.contratoExternoId), datos: {
         proveedor: 'alpaca', contratoExternoId: c.contratoExternoId, empresaId: empresa._id,
         simbolo: c.contratoExternoId, tipo: c.tipo, strike: c.strike, vencimiento: c.vencimiento,
-        multiplicador: c.multiplicador || 100, activo: true } })), factory);
+        multiplicador: c.multiplicador || 100, activo: true,
+        ...(c.interesAbierto != null ? { interesAbierto: c.interesAbierto, ...(c.interesAbiertoFecha ? { interesAbiertoFecha: c.interesAbiertoFecha } : {}) } : {}) } })), factory);
       // Snapshot (cotización, IV y griegas indicativas): uno vigente por contrato, se sobrescribe (evita crecimiento ilimitado).
       const snaps = lista.length ? await alpaca.snapshotsOpciones(empresa.simbolo, filtros) : [];
       await guardarLote('datos-mercado', ctx, snaps.filter(s => ids.has(s.contratoExternoId) && s.fechaDato).map(s => {

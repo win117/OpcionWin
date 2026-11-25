@@ -5,6 +5,8 @@ import { empresaPorSimbolo } from '../services/sincronizacion.service';
 import { handle, respond } from './crud.controller';
 import { createMercadoEstado, createNombres, indicesReferencia } from '../services/mercado-estado.service';
 import { diaNY } from '../services/mercado-reloj.service';
+import { createEventos } from '../services/eventos.service';
+import { createTasa } from '../services/tasa.service';
 
 const fecha = d => new Date(d).getTime();
 const limite = (valor, porDefecto, maximo) => {
@@ -33,10 +35,15 @@ async function panoramaSimbolo(alpaca, simbolo, nombreDe, ahora = Date.now()) {
   return dato;
 }
 
-export default (factory, integraciones, universo) => {
+export default (factory, integraciones, universo, { tasa = createTasa({ integraciones }), eventos = createEventos({ integraciones }) } = {}) => {
   const crud = name => createCrudService(name, factory);
   const nombreDe = createNombres({ integraciones });
   const estadoMercado = createMercadoEstado({ integraciones, nombreDe });
+  const simboloDe = req => {
+    const s = String(req.params.simbolo).toUpperCase();
+    if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(s)) throw boom.badRequest('Símbolo inválido.');
+    return s;
+  };
   const forCompany = (name, extra = {}) => handle(async(req,res) => {
     const empresa = await empresaPorSimbolo(req.context, req.params.simbolo, factory).catch(() => { throw boom.notFound('Empresa no registrada.'); });
     respond(res,await crud(name).list(req.context,{...req.query,...extra,empresaId:empresa._id}));
@@ -53,6 +60,15 @@ export default (factory, integraciones, universo) => {
   });
   return {
     estado: handle(async (_req, res) => respond(res, await estadoMercado())),
+    eventos: handle(async (req, res) => respond(res, await eventos(simboloDe(req)))),
+    tasa: handle(async (_req, res) => respond(res, await tasa.curva() || { fecha: null, puntos: [], fuente: { proveedor: 'tesoro' } })),
+    // Precio diario de un contrato desde que cotiza (máximo 400 días); consulta directa, no se guarda.
+    velasOpcion: handle(async (req, res) => {
+      const occ = String(req.params.occ).toUpperCase();
+      if (!/^[A-Z]{1,6}\d?\d{6}[CP]\d{8}$/.test(occ)) throw boom.badRequest('Contrato inválido (formato OCC).');
+      const items = (await integraciones.alpaca.velasOpciones([occ], { desde: new Date(Date.now() - 400 * 86400000).toISOString().slice(0, 10) }))[occ] || [];
+      respond(res, { simbolo: occ, items, total: items.length, fuente: { proveedor: 'alpaca', referencia: 'precios operados del contrato' } });
+    }),
     movimientos: handle(async (_req, res) => respond(res, universo.movimientos())),
     mapa: handle(async (_req, res) => respond(res, await universo.mapa())),
     ficha: handle(async (req, res) => respond(res, await universo.ficha(String(req.params.simbolo).toUpperCase()))),
@@ -79,7 +95,7 @@ export default (factory, integraciones, universo) => {
         const s = snaps.get(c._id);
         return { contratoId: c._id, simbolo: c.simbolo, tipo: c.tipo, strike: c.strike, vencimiento: dia(c),
           bid: s?.bid ?? null, ask: s?.ask ?? null, ultimo: s?.ultimo ?? null, volatilidadImplicita: s?.volatilidadImplicita ?? null,
-          griegas: s?.griegas ?? null, fechaDato: s?.fuente?.fechaDato ?? null };
+          interesAbierto: c.interesAbierto ?? null, interesAbiertoFecha: c.interesAbiertoFecha ? new Date(c.interesAbiertoFecha).toISOString().slice(0, 10) : null, griegas: s?.griegas ?? null, fechaDato: s?.fuente?.fechaDato ?? null };
       }).sort((a, b) => a.strike - b.strike || String(a.tipo).localeCompare(String(b.tipo)));
       // Precio del subyacente: última cotización guardada; si no hay, cierre de la última vela.
       const ultima = lista => lista.sort((a, b) => fecha(b.fuente.fechaDato) - fecha(a.fuente.fechaDato))[0];

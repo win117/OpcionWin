@@ -454,7 +454,7 @@ test('estrategias: probabilidad de ganancia y verificación de delta con Black-S
   const venc = '2027-11-16'; // T = 1 año (cierre 20:00 UTC)
   const c = bs.opcion({ tipo: 'call', S: 100, K: 100, T: 1, r: 0.04, sigma: 0.2 });
   const r = estrategias.evaluarConfiguracion({
-    estrategia: 'LONG_CALL', fechaReferencia: ref, precioSubyacente: 100,
+    estrategia: 'LONG_CALL', fechaReferencia: ref, precioSubyacente: 100, tasaLibreRiesgo: 0.04,
     componentes: [{ tipo: 'call', accion: 'buy', strike: 100, cantidad: 1, vencimiento: venc, precio: c.precio, volatilidadImplicita: 0.2, griegas: { delta: 0.6 } }],
   });
   cerca(met(r, 'anos_al_vencimiento'), 1);
@@ -465,7 +465,7 @@ test('estrategias: probabilidad de ganancia y verificación de delta con Black-S
   cerca(met(r, 'delta_neta_bs'), c.delta * 100, 1e-3);
   // Iron condor: probabilidad entre breakevens, en (0, 1)
   const ic = estrategias.evaluarConfiguracion({
-    estrategia: 'IRON_CONDOR', fechaReferencia: ref, precioSubyacente: 100,
+    estrategia: 'IRON_CONDOR', fechaReferencia: ref, precioSubyacente: 100, tasaLibreRiesgo: 0.04,
     componentes: condor().map(x => ({ ...x, vencimiento: venc, volatilidadImplicita: 0.25 })),
   });
   const pop = met(ic, 'probabilidad_ganancia');

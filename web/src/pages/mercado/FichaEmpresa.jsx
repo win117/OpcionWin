@@ -5,6 +5,7 @@ import { mercado } from '../../api/resources';
 import { useSondeo } from '../../hooks/useSondeo';
 import { CandleChart } from '../../components/CandleChart';
 import { ScoreBar } from '../../components/Gauge';
+import EventosEmpresa from '../../components/EventosEmpresa';
 import { Termino } from '../../components/Termino';
 import { ErrorMessage } from '../../components/States';
 import { NOTA_PUNTAJE, CORE_LABELS, ESTRATEGIAS, ESTRATEGIA_LABELS } from '../../utils/constants';
@@ -67,6 +68,7 @@ export default function FichaEmpresa({ simbolo, vivo, onCerrar }) {
         <div><dt>Apertura</dt><dd>{fmtMoney(d.apertura)}</dd></div>
         <div><dt>Cierre anterior</dt><dd>{fmtMoney(d.cierreAnterior)}</dd></div>
       </dl>
+      <EventosEmpresa simbolo={simbolo} />
       <Rango titulo="Rango del día" minimo={d.minimo} maximo={d.maximo} precio={d.precio} />
       <Rango titulo="Rango de 52 semanas" minimo={isNum(d.minimo52) ? Math.min(d.minimo52, d.precio) : null} maximo={isNum(d.maximo52) ? Math.max(d.maximo52, d.precio) : null} precio={d.precio} />
       <div className="ficha__puntajes">

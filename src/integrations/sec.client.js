@@ -231,6 +231,23 @@ export const createSecClient = ({
       presenta10Q: (cuerpo?.filings?.recent?.form || []).some(f => f === '10-Q' || f === '10-Q/A') };
   };
 
+  // Fechas (AAAA-MM-DD, ascendentes) de los 8-K con punto 2.02, «resultados de operaciones». Los emisores con miles de documentos
+  // (bancos) apenas traen unos meses en `recent`: en ese caso se usa la búsqueda de EDGAR, que también informa los puntos.
+  const reportesResultados = async cik => {
+    const c = formatearCik(cik), r = (await pedir(`${SEC_DATA}/submissions/CIK${c}.json`))?.filings?.recent || {};
+    const fechas = new Set((r.form || []).map((f, i) => (f === '8-K' && /(^|,)2\.02(,|$)/.test(r.items?.[i] || '') ? r.filingDate[i] : null)).filter(Boolean));
+    if (fechas.size < 9 && (r.form || []).length >= 900) {
+      const hoy = (ahora || Date.now)(), dia = t => new Date(t).toISOString().slice(0, 10);
+      for (let desde = 0; desde < 500; desde += 100) {
+        const b = await pedir('https://efts.sec.gov/LATEST/search-index', { query: { q: '', forms: '8-K', ciks: c, dateRange: 'custom', startdt: dia(hoy - 900 * 86400000), enddt: dia(hoy), from: desde } });
+        const hits = b?.hits?.hits || [];
+        for (const h of hits) if (h._source?.file_date && (h._source.items || []).includes('2.02')) fechas.add(h._source.file_date);
+        if (hits.length < 100) break;
+      }
+    }
+    return [...fechas].sort();
+  };
+
   const fundamentales = async (cik, { maxPeriodos = MAX_PERIODOS } = {}) => {
     const cuerpo = await pedir(`${SEC_DATA}/api/xbrl/companyfacts/CIK${formatearCik(cik)}.json`);
     return construirFundamentales(cuerpo, maxPeriodos);
@@ -420,5 +437,5 @@ export const createSecClient = ({
       }));
   };
 
-  return { proveedor: PROVEEDOR, configurado, cikDeSimbolo, fundamentales, tenencias13F, cargarTenencias13F, tickers: listaTickers, marco, perfil };
+  return { proveedor: PROVEEDOR, configurado, cikDeSimbolo, fundamentales, tenencias13F, cargarTenencias13F, tickers: listaTickers, marco, perfil, reportesResultados };
 };

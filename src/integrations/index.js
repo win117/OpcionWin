@@ -3,9 +3,10 @@
 import { createAlpacaClient } from './alpaca.client';
 import { createSecClient } from './sec.client';
 import { createWebullClient } from './webull.client';
+import { createTesoroClient } from './tesoro.client';
 
 export { IntegrationError } from './errors';
-export { createAlpacaClient, createSecClient, createWebullClient };
+export { createAlpacaClient, createSecClient, createWebullClient, createTesoroClient };
 
 const limpio = v => (typeof v === 'string' ? v.trim() : '');
 
@@ -15,12 +16,14 @@ export const createIntegrations = (env = process.env, fetch = globalThis.fetch) 
   const sec = createSecClient({ userAgent: limpio(env.SEC_USER_AGENT), fetch });
   const webull = createWebullClient({ appKey: limpio(env.WEBULL_APP_KEY), appSecret: limpio(env.WEBULL_APP_SECRET), accountId: limpio(env.WEBULL_ACCOUNT_ID),
     entorno: limpio(env.WEBULL_ENTORNO) || 'paper', baseUrl: limpio(env.WEBULL_BASE_URL), accessToken: limpio(env.WEBULL_ACCESS_TOKEN), fetch });
+  const tesoro = createTesoroClient({ fetch });
   const estado = () => ({
     alpaca: { configurado: alpaca.configurado, feed, opcionesFeed: alpaca.opcionesFeed, entorno: 'paper' },
     sec: { configurado: sec.configurado },
     webull: { configurado: webull.configurado },
+    tesoro: { configurado: tesoro.configurado },
   });
-  return { alpaca, sec, webull, estado };
+  return { alpaca, sec, webull, tesoro, estado };
 };
 
 export default createIntegrations;

@@ -7,11 +7,9 @@
 //   call = S·e^(−qT)·N(d1) − K·e^(−rT)·N(d2) ;  put = K·e^(−rT)·N(−d2) − S·e^(−qT)·N(−d1)
 // Las opciones de acciones de EE. UU. son americanas: para calls sin dividendos el valor coincide con el europeo;
 // para puts (y calls con dividendos) Black-Scholes es una aproximación (subestima levemente el ejercicio anticipado).
-export const VERSION = 'blackscholes@1.0.0';
+export const VERSION = 'blackscholes@1.1.0';
 
-// Tasa libre de riesgo por defecto: ~4 % anual (orden de magnitud de las letras del Tesoro de EE. UU. a 3 meses en 2025-2026).
-// Es una constante documentada, no un dato de mercado; el llamador puede pasar otra.
-export const TASA_LIBRE_RIESGO = 0.04;
+// r y q los pasa quien llama (curva del Tesoro y dividendos obtenidos por el servidor; ver tasa.js). Sin dato se usa 0: no se supone ninguno.
 // Días por año para T: convención de días naturales (la usada por la mayoría de proveedores de griegas).
 export const DIAS_ANIO = 365;
 // Límites de búsqueda de la volatilidad implícita (fracción anual): 0.01 % a 500 %.
@@ -42,7 +40,7 @@ export const cdf = x => {
 const valido = ({ S, K, T, sigma }) => finito(S) && finito(K) && finito(T) && finito(sigma) && S > 0 && K > 0 && T > 0 && sigma > 0;
 
 /** d1 y d2; null si los parámetros no son válidos (S, K, T, σ > 0). */
-export const d1d2 = ({ S, K, T, r = TASA_LIBRE_RIESGO, q = 0, sigma }) => {
+export const d1d2 = ({ S, K, T, r = 0, q = 0, sigma }) => {
   if (!valido({ S, K, T, sigma }) || !finito(r) || !finito(q)) return null;
   const raiz = sigma * Math.sqrt(T);
   const d1 = (Math.log(S / K) + (r - q + (sigma * sigma) / 2) * T) / raiz;
@@ -58,7 +56,7 @@ export const d1d2 = ({ S, K, T, r = TASA_LIBRE_RIESGO, q = 0, sigma }) => {
  * - rho: por 1 punto porcentual de tasa (∂V/∂r / 100).
  * - probabilidadITM: probabilidad neutral al riesgo de terminar dentro del dinero = N(d2) (call) o N(−d2) (put).
  */
-export const opcion = ({ tipo, S, K, T, r = TASA_LIBRE_RIESGO, q = 0, sigma }) => {
+export const opcion = ({ tipo, S, K, T, r = 0, q = 0, sigma }) => {
   const d = d1d2({ S, K, T, r, q, sigma });
   if (!d || !['call', 'put'].includes(tipo)) return null;
   const { d1, d2 } = d;
@@ -87,7 +85,7 @@ export const precio = args => opcion(args)?.precio ?? null;
  * Probabilidad neutral al riesgo de que S_T > X al vencimiento bajo el modelo lognormal de Black-Scholes: N(d2(X)).
  * Es la "probabilidad de terminar ITM" de un call de strike X. No es una probabilidad del mundo real (no incluye prima de riesgo).
  */
-export const probabilidadSobre = ({ S, X, T, r = TASA_LIBRE_RIESGO, q = 0, sigma }) => {
+export const probabilidadSobre = ({ S, X, T, r = 0, q = 0, sigma }) => {
   if (finito(X) && X <= 0) return 1;
   const d = d1d2({ S, K: X, T, r, q, sigma });
   return d ? cdf(d.d2) : null;
@@ -97,7 +95,7 @@ export const probabilidadSobre = ({ S, X, T, r = TASA_LIBRE_RIESGO, q = 0, sigma
  * Volatilidad implícita por bisección sobre [IV_MIN, IV_MAX] (el precio BS es monótono creciente en σ).
  * null si el precio está fuera de los límites sin arbitraje o no converge.
  */
-export const volatilidadImplicita = ({ tipo, precio: objetivo, S, K, T, r = TASA_LIBRE_RIESGO, q = 0 }) => {
+export const volatilidadImplicita = ({ tipo, precio: objetivo, S, K, T, r = 0, q = 0 }) => {
   if (!finito(objetivo) || objetivo <= 0 || !valido({ S, K, T, sigma: 1 })) return null;
   const f = s => opcion({ tipo, S, K, T, r, q, sigma: s })?.precio;
   let bajo = IV_MIN;

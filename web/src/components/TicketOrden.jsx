@@ -10,10 +10,11 @@ import { Termino } from './Termino';
 import { useBroker } from '../context/BrokerContext';
 import { api, esNoDisponible } from '../api/client';
 import { acciones, mercado, operacion } from '../api/resources';
+import { useAsync } from '../hooks/useAsync';
 import { NOTA_PUNTAJE, CORE_LABELS, ESTRATEGIA_LABELS } from '../utils/constants';
-import { fmtDateTime, fmtFixed, fmtMoney, fmtPct, isNum } from '../utils/format';
+import { fmtDate, fmtDateTime, fmtFixed, fmtMoney, fmtPct, isNum } from '../utils/format';
 import {
-  antiguedadCotizacion, precioInmediato, camposPrecio, costoSpread, cotizacionValida, CREDITO_ANCHO_MINIMO, diasHasta, intencionPara, liquidez, metricasOrden, mid, netoMid, nombreConContexto,
+  antiguedadCotizacion, avisosEventos, INTERES_MINIMO, precioInmediato, camposPrecio, costoSpread, cotizacionValida, CREDITO_ANCHO_MINIMO, diasHasta, intencionPara, liquidez, metricasOrden, mid, netoMid, nombreConContexto,
   nombreOrden, notasVencimiento, reconstruirPatas, redondearPrecio, signoNeto, SPREAD_AVISO, spreadPct, textoPuntaje, validarPatas, vencimientosVigentes,
 } from '../utils/estrategiasOrden';
 import { uuid } from '../utils/objects';
@@ -107,9 +108,13 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
   const cantOk = Number.isInteger(cant) && cant >= 1 && cant <= 100;
   const total = isNum(precioUnit) ? precioUnit * 100 * (cantOk ? cant : 1) : null;
   const unidades = cantOk ? cant : 1;
+  // Eventos y tasa son apoyo: si una fuente falla, el ticket sigue y lo dice.
+  const eventos = useAsync(() => mercado.eventos(empresa.simbolo), [empresa?.simbolo], { enabled: Boolean(open && empresa?.simbolo) });
+  const tasa = useAsync(() => mercado.tasa(), [], { enabled: open });
   const metricas = useMemo(() => metricasOrden({
     patas, precioNeto: precioUnit, credito, cantidad: unidades, S: precioSub, items, vencimiento: chain?.vencimiento, patrimonio: cuenta.data?.cuenta?.patrimonio,
-  }), [legs, porId, precioUnit, credito, unidades, precioSub, chain, cuenta.data]); // eslint-disable-line react-hooks/exhaustive-deps
+    tasa: tasa.data?.puntos, dividendoAnual: eventos.data?.dividendos?.anualPorAccion,
+  }), [legs, porId, precioUnit, credito, unidades, precioSub, chain, cuenta.data, tasa.data, eventos.data]); // eslint-disable-line react-hooks/exhaustive-deps
   const perfil = metricas.riesgo;
   const ilimitada = Boolean(perfil) && perfil.maxPerdida == null;
   const liq = liquidez(patas);
@@ -139,6 +144,8 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
   const advertencias = [];
   if (liq.sinCotizacion > 0) advertencias.push(`${liq.sinCotizacion} de ${patas.length} patas sin cotización bid/ask válida: el precio estimado usa el último operado y puede no ser real.`);
   if (liq.avisar) advertencias.push(`Spread de hasta ${fmtPct(liq.peorSpread, 0)} del precio${liq.insuficiente ? ' (sin liquidez suficiente)' : ''}: ${tipo === 'market' ? 'una orden de mercado puede ejecutarse a un precio mucho peor; considera una límite.' : 'puede que no se ejecute en el punto medio.'}`);
+  if (liq.pocoInteres) advertencias.push(`Una de las patas tiene solo ${liq.interesMinimo} contratos vivos (menos de ${INTERES_MINIMO}): puede costar entrar o salir.`);
+  advertencias.push(...avisosEventos(patas, precioSub, chain?.vencimiento, eventos.data, fmtDate).map(a => a.texto));
   if (edad && edad.horas > 24) advertencias.push(`La cotización es de ${edad.texto}: el precio actual puede ser distinto. Sincroniza los contratos.`);
   if (!edad && patas.length) advertencias.push('No se conoce la fecha de las cotizaciones.');
   if (!estrategiaCodigo && legs.length > 1 && legs.length < 4) advertencias.push('El servidor solo registra órdenes de una pata o iron condor de cuatro: puede rechazar esta combinación.');
@@ -326,6 +333,7 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
                       <div><dt>Ask</dt><dd>{isNum(it?.ask) ? fmtFixed(it.ask) : '—'}</dd></div>
                       <div><dt>Medio</dt><dd>{isNum(mid(it)) ? <>{fmtFixed(mid(it))}{!cotizacionValida(it) && <abbr title="Último precio operado: no hay cotización bid/ask válida">*</abbr>}</> : '—'}</dd></div>
                       <div><dt><Termino id="spread">Spread</Termino></dt><dd className={(spreadPct(it) ?? 0) > SPREAD_AVISO ? 'aviso-texto' : undefined}>{isNum(spreadPct(it)) ? fmtPct(spreadPct(it), 0) : '—'}</dd></div>
+                      <div><dt><Termino id="interes_abierto">Interés abierto</Termino></dt><dd className={isNum(it?.interesAbierto) && it.interesAbierto < INTERES_MINIMO ? 'aviso-texto' : undefined}>{isNum(it?.interesAbierto) ? it.interesAbierto.toLocaleString('es-MX') : '—'}</dd></div>
                       <div><dt><Termino id="iv">IV</Termino></dt><dd>{isNum(it?.volatilidadImplicita) ? fmtPct(it.volatilidadImplicita, 1) : '—'}</dd></div>
                       <div><dt><Termino id="delta">Delta</Termino></dt><dd>{isNum(it?.griegas?.delta) ? fmtFixed(it.griegas.delta, 3) : '—'}</dd></div>
                     </dl>
@@ -386,7 +394,8 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
               <strong>Antes de confirmar</strong>
               <ul className="list list--compact">
                 {notasVencimiento(patas, precioSub, dias).map(n => <li key={n}>{n}</li>)}
-                <li>Fecha de resultados: no disponible. Comprueba si la empresa publica resultados antes del {chain?.vencimiento || 'vencimiento'}: el precio puede saltar y la volatilidad implícita caer de golpe.</li>
+                {!eventos.loading && !eventos.data?.reportes?.proximo && <li>Fecha de resultados: no disponible. Comprueba si la empresa publica resultados antes del {chain?.vencimiento || 'vencimiento'}: el precio puede saltar y la volatilidad implícita caer de golpe.</li>}
+                {eventos.data?.reportes?.proximo && !avisosEventos(patas, precioSub, chain?.vencimiento, eventos.data).some(a => a.tipo === 'resultados') && <li>Reporte de resultados estimado hacia el {fmtDate(eventos.data.reportes.proximo.fecha)}: después de tu vencimiento.</li>}
               </ul>
             </div>
             {liq.confirmar && (
@@ -455,7 +464,7 @@ function Cifras({ m, costo, edad }) {
       <p className="small">{mv
         ? <>Movimiento esperado hasta el vencimiento: ±{fmtMoney(mv.monto)}. Si baja a {fmtMoney(mv.abajo)}: {dinero(mv.plAbajo)}; si sube a {fmtMoney(mv.arriba)}: {dinero(mv.plArriba)} (al vencimiento).</>
         : 'Movimiento esperado: no disponible (falta volatilidad implícita o precio del subyacente).'}</p>
-      <p className="muted small">Cotización {edad ? edad.texto : 'de fecha desconocida'}. Probabilidad estimada con Black-Scholes y la volatilidad implícita; no es una garantía. Griegas indicativas del proveedor.</p>
+      <p className="muted small">Cotización {edad ? edad.texto : 'de fecha desconocida'}. Probabilidad estimada con Black-Scholes, la volatilidad implícita{isNum(m.tasa) ? <>, la <Termino id="tasa">tasa del Tesoro</Termino> ({fmtPct(m.tasa, 2)})</> : ' (sin tasa del Tesoro disponible: se usó 0)'}{m.dividendo > 0 ? ` y un dividendo anual de ${fmtPct(m.dividendo, 2)}` : ''}; no es una garantía. Griegas indicativas del proveedor.</p>
     </>
   );
 }

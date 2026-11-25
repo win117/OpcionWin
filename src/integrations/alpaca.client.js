@@ -88,6 +88,7 @@ export const normalizarContrato = c => ({
   vencimiento: c.expiration_date,
   multiplicador: num(c.multiplier) || num(c.size) || 100,
   activo: c.status ? c.status === 'active' : true,
+  ...(num(c.open_interest) != null ? { interesAbierto: num(c.open_interest), interesAbiertoFecha: texto(c.open_interest_date) } : {}),
 });
 
 export const normalizarSnapshotOpcion = (simbolo, s = {}) => {
@@ -429,6 +430,33 @@ export const createAlpacaClient = ({
     );
   };
 
+  // Dividendos en efectivo y divisiones de acciones. Alpaca publica los dividendos cuando la empresa los anuncia.
+  const accionesCorporativas = async (simbolo, { desde, hasta } = {}) => {
+    const s = exigirSimbolo(simbolo);
+    const dividendos = [], divisiones = [];
+    await paginar(token => datos('/v1/corporate-actions', { symbols: s, types: 'cash_dividend,forward_split,reverse_split', start: fechaIso(desde), end: fechaIso(hasta), limit: 1000, page_token: token }), cuerpo => {
+      const a = cuerpo.corporate_actions || {};
+      for (const d of a.cash_dividends || []) if (d.ex_date && num(d.rate) > 0) dividendos.push({ exFecha: d.ex_date, pagoFecha: d.payable_date || null, monto: num(d.rate), especial: Boolean(d.special) });
+      for (const d of [...(a.forward_splits || []), ...(a.reverse_splits || [])]) if (d.ex_date) divisiones.push({ exFecha: d.ex_date, de: num(d.old_rate), a: num(d.new_rate) });
+      return [];
+    });
+    const orden = (a, b) => a.exFecha.localeCompare(b.exFecha);
+    return { dividendos: dividendos.sort(orden), divisiones: divisiones.sort(orden) };
+  };
+
+  // Velas históricas de contratos (símbolos OCC): { OCC: [vela] }, solo los que se negociaron.
+  const velasOpciones = async (simbolos, { intervalo = '1Day', desde, hasta } = {}) => {
+    const lista = [...new Set((Array.isArray(simbolos) ? simbolos : [simbolos]).map(exigirSimbolo))], salida = {};
+    for (let i = 0; i < lista.length; i += 100) {
+      const pares = await paginar(
+        token => datos('/v1beta1/options/bars', { symbols: lista.slice(i, i + 100), timeframe: intervalo, start: desde, end: hasta, limit: 10000, sort: 'asc', page_token: token }),
+        cuerpo => Object.entries(cuerpo.bars || {}).flatMap(([s, barras]) => (barras || []).map(b => [s, normalizarVela(b)])),
+      );
+      for (const [s, vela] of pares) (salida[s] ||= []).push(vela);
+    }
+    return salida;
+  };
+
   // --- Trading (solo paper) ---
   const cuenta = async () => {
     const c = await trading('/v2/account');
@@ -476,6 +504,14 @@ export const createAlpacaClient = ({
     return consultarOrden(idOrden);
   };
 
+  // Valor de la cuenta por día. Los días anteriores a que la cuenta existiera llegan en 0: se omiten.
+  const historialCartera = async ({ periodo = '1M' } = {}) => {
+    if (!['1W', '1M', '3M', '1A'].includes(periodo)) throw validacion('periodo debe ser 1W, 1M, 3M o 1A.');
+    const r = await trading('/v2/account/portfolio/history', { query: { period: periodo, timeframe: '1D' } });
+    if (!Array.isArray(r?.timestamp) || !Array.isArray(r?.equity)) throw new IntegrationError({ proveedor: PROVEEDOR, codigo: 'PROVEEDOR', mensaje: 'Alpaca devolvió el historial de la cartera en un formato no reconocido.' });
+    return r.timestamp.map((t, i) => ({ fecha: new Date(t * 1000).toISOString(), valor: num(r.equity[i]) })).filter(p => p.valor > 0);
+  };
+
   const posiciones = async () => {
     const r = await trading('/v2/positions');
     const lista = Array.isArray(r) ? r : r?.positions;
@@ -489,7 +525,7 @@ export const createAlpacaClient = ({
     feed,
     opcionesFeed,
     configurado,
-    buscarActivo, listarActivos, velas, velasLote, cotizacionesLote, reloj, cotizacion, contratos, snapshotsOpciones, noticias,
-    cuenta, enviarOrden, consultarOrden, consultarPorClientOrderId, cancelarOrden, ordenesAbiertas, posiciones,
+    buscarActivo, listarActivos, velas, velasLote, cotizacionesLote, reloj, cotizacion, contratos, snapshotsOpciones, noticias, accionesCorporativas, velasOpciones,
+    cuenta, enviarOrden, consultarOrden, consultarPorClientOrderId, cancelarOrden, ordenesAbiertas, posiciones, historialCartera,
   };
 };
