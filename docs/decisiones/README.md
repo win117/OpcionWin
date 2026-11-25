@@ -188,3 +188,14 @@ El error se calcula entre vencimientos, porque las empresas de un mismo mes se m
 calls. Sin 13F. Se mantiene hasta vencer: no mide salidas anticipadas. 18 cóndores tienen un crédito atípico; sin ellos el resultado es el mismo.
 **Decisión.** No se cambian los puntajes con una sola prueba: ajustar a estos datos sería sobreajuste. Se mantiene la nota «no es la probabilidad de ganar».
 **A debate.** Ordenar Iron Condor por crédito respecto al ancho y probabilidad, en vez de por neutralidad, y probarlo con datos que no se usaron para diseñarlo.
+
+## ADR-021 · Operar como en un broker: todos los vencimientos, precios al día y horario
+**Contexto.** La app solo descargaba vencimientos de 7 a 60 días (el plazo del análisis), proponía a veces uno recién listado sin precios y el ticket no se parecía a una pantalla de órdenes.
+**Decisión.**
+- El plazo del análisis **sugiere**, no limita. `GET /mercado/opciones/vencimientos/:simbolo` da todas las fechas que existen y `POST /mercado/opciones/cadena/:simbolo` trae una, la guarda (la orden necesita sus contratos) y la devuelve.
+  Como máximo, los 60 strikes más cercanos al precio por vencimiento.
+- Nunca se propone un vencimiento sin precios; los que nadie ha negociado quedan al final.
+- Con el mercado abierto, el ticket cotiza cada 5 s y la cadena cada 10 s (`GET /mercado/opciones/cotizaciones`, no se guarda). Al revisar, el precio queda fijo.
+- Con el mercado cerrado se ven los precios de la última sesión, se puede preparar y revisar, y **no se puede enviar** desde la pantalla hasta que abra. Es una regla de la interfaz: la API la acepta o rechaza el broker.
+- Las cotizaciones tomadas fuera de 9:30–16:15 de Nueva York no reemplazan a las de la sesión, y con un spread mayor a 25 % no fijan precios. Un último precio de más de 7 días se muestra, pero no se usa para calcular.
+**Límites.** Datos indicativos de Alpaca (no son la cotización consolidada). Las órdenes son límite o mercado; no hay stop.

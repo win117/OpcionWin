@@ -4,13 +4,12 @@ import { Badge } from '../../components/Badge';
 import { ScoreBar } from '../../components/Gauge';
 import { PayoffChart } from '../../components/PayoffChart';
 import { Empty, ErrorMessage, Notice } from '../../components/States';
-import { Select } from '../../components/Field';
 import { Termino } from '../../components/Termino';
 import BotonOperar from '../../components/BotonOperar';
 import SinPrecios, { etiquetaVencimiento } from '../../components/SinPrecios';
 import { participacion, encaje, razones, titular } from '../../utils/analisis';
 import { NOTA_PUNTAJE, CORE_LABELS, ESTRATEGIA_LABELS } from '../../utils/constants';
-import { candidatosStrike, diasHasta, mid, sinPrecios, SPREAD_AVISO, spreadPct, textoPuntaje, vencimientosVigentes } from '../../utils/estrategiasOrden';
+import { candidatosStrike, diasHasta, mid, sinPrecios, SPREAD_AVISO, spreadPct, textoPuntaje } from '../../utils/estrategiasOrden';
 import { fmtDate, fmtDateTime, fmtFixed, fmtMoney, fmtPct, isNum } from '../../utils/format';
 
 const DIA_MS = 24 * 3600000;
@@ -125,7 +124,8 @@ function Pata({ rol, pos }) {
 
 function Contratos({ empresa, datos, pos, config, onComparar }) {
   const { chain, op, roles, error, cargando } = pos;
-  const vencs = vencimientosVigentes(chain?.vencimientos);
+  const vencs = pos.vencimientos, dentro = v => diasHasta(v) >= config.diasMin && diasHasta(v) <= config.diasMax;
+  const grupoVenc = (titulo, l) => l.length > 0 && <optgroup label={titulo}>{l.map(v => <option key={v} value={v}>{etiquetaVencimiento(v, chain.detalleVencimientos)}</option>)}</optgroup>;
   const dias = chain?.vencimiento ? diasHasta(chain.vencimiento) : null;
   const fueraRango = isNum(dias) && (dias < config.diasMin || dias > config.diasMax);
   return (
@@ -142,11 +142,15 @@ function Contratos({ empresa, datos, pos, config, onComparar }) {
         <>
           {vencs.length > 0 && (
             <label className="field"><span className="field__label">Vencimiento</span>
-              <Select value={chain.vencimiento || ''} onChange={pos.cambiarVencimiento} options={vencs.map(v => ({ value: v, label: etiquetaVencimiento(v, chain.detalleVencimientos) }))} />
+              <select value={chain.vencimiento || ''} onChange={e => pos.cambiarVencimiento(e.target.value)} disabled={cargando}>
+                {grupoVenc(`Tu plazo: ${config.diasMin} a ${config.diasMax} días`, vencs.filter(dentro))}
+                {grupoVenc('Antes', vencs.filter(v => diasHasta(v) < config.diasMin))}
+                {grupoVenc('Después', vencs.filter(v => diasHasta(v) > config.diasMax))}
+              </select>
             </label>
           )}
           <SinPrecios chain={chain} onCambiar={pos.cambiarVencimiento} />
-          {fueraRango && <Notice tone="warning">Vence en {dias} días, fuera de tu rango ({config.diasMin}–{config.diasMax}). Amplía el rango y vuelve a analizar.</Notice>}
+          {fueraRango && <Notice>Vence en {dias} días, fuera del plazo con que se analizó ({config.diasMin}–{config.diasMax}). Puedes operarlo; el puntaje no se calculó pensando en él.</Notice>}
           {pos.aviso && <Notice>{pos.aviso}</Notice>}
           {op?.error && <Notice tone="warning" title="No se pudo armar la estrategia.">{op.error} Activa «Traer contratos de opciones» y vuelve a analizar.</Notice>}
           {!op?.error && <div className="patas">{roles.map(r => <Pata key={r.clave} rol={r} pos={pos} />)}</div>}

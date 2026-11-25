@@ -23,6 +23,35 @@ function rango(datos, diasAtras) {
 
 const RETRASO_SIP_MS = 16 * 60000;
 
+/**
+ * Contratos y snapshots listos para guardar (uno vigente por contrato: se sobrescribe, no crece sin límite).
+ * Fuera de horario se conservan cotización, IV y griegas de la última sesión (`previos`): las de antes de abrir no se pueden operar.
+ */
+export function documentosOpciones(ctx, empresa, lista, snaps, previos = []) {
+  const ids = new Map(lista.map(c => [c.contratoExternoId, idDeterminista(ctx.userId, 'contrato', 'alpaca', c.contratoExternoId)]));
+  const antes = new Map(previos.map(p => [p._id, p]));
+  const deSesion = (s, p) => (p && !enSesion(s.fechaDato) && enSesion(p.fuente?.fechaDato) && snapshotVigente(p.fuente?.fechaDato) && p.bid != null
+    ? { ...s, bid: p.bid, ask: p.ask, volatilidadImplicita: p.volatilidadImplicita, griegas: p.griegas, fechaDato: p.fuente.fechaDato } : s);
+  return {
+    contratos: lista.map(c => ({ id: ids.get(c.contratoExternoId), datos: {
+      proveedor: 'alpaca', contratoExternoId: c.contratoExternoId, empresaId: empresa._id,
+      simbolo: c.contratoExternoId, tipo: c.tipo, strike: c.strike, vencimiento: c.vencimiento,
+      multiplicador: c.multiplicador || 100, activo: true,
+      ...(c.interesAbierto != null ? { interesAbierto: c.interesAbierto, ...(c.interesAbiertoFecha ? { interesAbiertoFecha: c.interesAbiertoFecha } : {}) } : {}) } })),
+    snapshots: snaps.filter(s => ids.has(s.contratoExternoId) && s.fechaDato).map(x => {
+      const contratoId = ids.get(x.contratoExternoId), id = idDeterminista(contratoId, 'snapshot'), s = deSesion(x, antes.get(id));
+      const bid = s.bid, ask = s.ask != null && bid != null && s.ask < bid ? undefined : s.ask;
+      return { id, datos: {
+        empresaId: empresa._id, contratoId, tipo: 'snapshot_opcion',
+        ...(bid != null ? { bid } : {}), ...(ask != null ? { ask } : {}), ...(s.ultimo != null ? { ultimo: s.ultimo, ...(s.ultimoFecha ? { ultimoFecha: s.ultimoFecha } : {}) } : {}),
+        ...(s.cierreAnterior != null ? { cierreAnterior: s.cierreAnterior } : {}), ...(s.volumen != null ? { volumen: s.volumen } : {}),
+        ...(s.volatilidadImplicita != null ? { volatilidadImplicita: s.volatilidadImplicita } : {}),
+        ...(s.griegas ? { griegas: s.griegas } : {}),
+        fuente: { proveedor: 'alpaca', fechaDato: s.fechaDato, feed: 'indicative', referencia: s.contratoExternoId } } };
+    }),
+  };
+}
+
 export function createSincronizador({ integraciones, factory = repository }) {
   const { alpaca, sec } = integraciones;
   const cikDe = async simbolo => (await sec.cikDeSimbolo(simbolo))?.cik; // SEC devuelve {cik, nombre, simbolo}
@@ -78,28 +107,11 @@ export function createSincronizador({ integraciones, factory = repository }) {
       const rangoStrike = Number.isFinite(precio) ? { strikeMin: Math.floor(precio * 0.75), strikeMax: Math.ceil(precio * 1.25) } : {};
       const filtros = { ...rangoStrike, vencimientoDesde: iso(hoy + min * DIA).slice(0, 10), vencimientoHasta: iso(hoy + max * DIA).slice(0, 10) };
       const lista = await alpaca.contratos({ subyacente: empresa.simbolo, ...filtros });
-      const ids = new Map(lista.map(c => [c.contratoExternoId, idDeterminista(ctx.userId, 'contrato', 'alpaca', c.contratoExternoId)]));
-      await guardarLote('contratos', ctx, lista.map(c => ({ id: ids.get(c.contratoExternoId), datos: {
-        proveedor: 'alpaca', contratoExternoId: c.contratoExternoId, empresaId: empresa._id,
-        simbolo: c.contratoExternoId, tipo: c.tipo, strike: c.strike, vencimiento: c.vencimiento,
-        multiplicador: c.multiplicador || 100, activo: true,
-        ...(c.interesAbierto != null ? { interesAbierto: c.interesAbierto, ...(c.interesAbiertoFecha ? { interesAbiertoFecha: c.interesAbiertoFecha } : {}) } : {}) } })), factory);
-      // Snapshot (cotización, IV y griegas indicativas): uno vigente por contrato, se sobrescribe (evita crecimiento ilimitado).
       const snaps = lista.length ? await alpaca.snapshotsOpciones(empresa.simbolo, filtros) : [];
-      // Fuera de horario se conservan cotización, IV y griegas de la última sesión: las de antes de abrir no se pueden operar.
-      const previos = new Map(snaps.some(s => !enSesion(s.fechaDato)) ? (await todos('datos-mercado', ctx, { empresaId: empresa._id, tipo: 'snapshot_opcion' }, factory)).map(p => [p._id, p]) : []);
-      const deSesion = (s, p) => (p && !enSesion(s.fechaDato) && enSesion(p.fuente?.fechaDato) && snapshotVigente(p.fuente?.fechaDato) && p.bid != null
-        ? { ...s, bid: p.bid, ask: p.ask, volatilidadImplicita: p.volatilidadImplicita, griegas: p.griegas, fechaDato: p.fuente.fechaDato } : s);
-      await guardarLote('datos-mercado', ctx, snaps.filter(s => ids.has(s.contratoExternoId) && s.fechaDato).map(x => {
-        const contratoId = ids.get(x.contratoExternoId), s = deSesion(x, previos.get(idDeterminista(contratoId, 'snapshot')));
-        const bid = s.bid, ask = s.ask != null && bid != null && s.ask < bid ? undefined : s.ask;
-        return { id: idDeterminista(contratoId, 'snapshot'), datos: {
-          empresaId: empresa._id, contratoId, tipo: 'snapshot_opcion',
-          ...(bid != null ? { bid } : {}), ...(ask != null ? { ask } : {}), ...(s.ultimo != null ? { ultimo: s.ultimo, ...(s.ultimoFecha ? { ultimoFecha: s.ultimoFecha } : {}) } : {}),
-          ...(s.volatilidadImplicita != null ? { volatilidadImplicita: s.volatilidadImplicita } : {}),
-          ...(s.griegas ? { griegas: s.griegas } : {}),
-          fuente: { proveedor: 'alpaca', fechaDato: s.fechaDato, feed: 'indicative', referencia: s.contratoExternoId } } };
-      }), factory);
+      const previos = snaps.some(s => !enSesion(s.fechaDato)) ? await todos('datos-mercado', ctx, { empresaId: empresa._id, tipo: 'snapshot_opcion' }, factory) : [];
+      const docs = documentosOpciones(ctx, empresa, lista, snaps, previos);
+      await guardarLote('contratos', ctx, docs.contratos, factory);
+      await guardarLote('datos-mercado', ctx, docs.snapshots, factory);
       return lista.length;
     },
     async noticias(ctx, simbolo, datos) {

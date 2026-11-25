@@ -3,8 +3,9 @@ import { Notice } from './States';
 import { diasHasta, sinPrecios, vencimientosConPrecio, vencimientosVigentes } from '../utils/estrategiasOrden';
 import { fmtDate } from '../utils/format';
 
+export const diasTxt = d => (d === 0 ? 'hoy' : d === 1 ? '1 día' : d + ' días');
 /** Texto de un vencimiento en los selectores; avisa si aún no tiene precios. */
-export const etiquetaVencimiento = (v, detalle = []) => `${fmtDate(v)}, ${diasHasta(v)} días${detalle.some(d => d.vencimiento === v && d.conPrecio === 0) ? ', sin precios' : ''}`;
+export const etiquetaVencimiento = (v, detalle = []) => `${fmtDate(v)}, ${diasTxt(diasHasta(v))}${detalle.some(d => d.vencimiento === v && d.conPrecio === 0) ? ', sin precios' : ''}`;
 
 export default function SinPrecios({ chain, onCambiar }) {
   if (!chain?.vencimiento || !sinPrecios(chain.items)) return null;

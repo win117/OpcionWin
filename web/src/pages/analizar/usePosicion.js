@@ -7,7 +7,7 @@ import { mercado, operacion } from '../../api/resources';
 import { filasEstrategia, movimientoEsperado } from '../../utils/analisis';
 import {
   analyzePayoff, antiguedadCotizacion, candidatosStrike, costoSpread, diasHasta, intencionPara, ivATM, liquidez, mid, netoMid, perfilRiesgo, reconstruirPatas, redondearPrecio,
-  rolesEstrategia, seleccionRecomendada, signoNeto, validarSeleccion,
+  rolesEstrategia, seleccionRecomendada, signoNeto, validarSeleccion, vencimientosVigentes,
 } from '../../utils/estrategiasOrden';
 import { isNum } from '../../utils/format';
 
@@ -56,9 +56,10 @@ export function usePosicion({ simbolo, datos, config, version, estrategiaInicial
   const codigo = activa?.codigo;
 
   // La cadena se etiqueta con la estrategia que la pidió: al cambiar de estrategia o empresa no se arma nada con el vencimiento de la anterior.
-  const cargada = useAsync(() => (venc ? mercado.opcionesResumen(simbolo, { vencimiento: venc }) : cargarCadena(simbolo, { diasMin: config.diasMin, diasMax: config.diasMax, codigo })).then(d => ({ codigo, simbolo, d })),
+  const cargada = useAsync(() => (venc ? mercado.traerCadena(simbolo, venc) : cargarCadena(simbolo, { diasMin: config.diasMin, diasMax: config.diasMax, codigo })).then(d => ({ codigo, simbolo, d })),
     [simbolo, version, venc, codigo, config.diasMin, config.diasMax], { enabled: Boolean(activa) });
   const chain = cargada.data?.codigo === codigo && cargada.data?.simbolo === simbolo ? cargada.data.d : null;
+  const lista = useAsync(() => mercado.vencimientos(simbolo).catch(() => null), [simbolo], { enabled: Boolean(activa) });
   const confluencia = useAsync(() => cargarConfluencia(activa.confluenciaId, datos.seleccion?.ponderaciones), [activa?.confluenciaId], { enabled: Boolean(activa?.confluenciaId) });
   const detalle = confluencia.data?.conf._id === activa?.confluenciaId ? confluencia.data : null;
   // Efectivo de la cuenta simulada, para decir cuánto pesa la pérdida máxima. Si no está disponible, simplemente no se muestra.
@@ -96,6 +97,7 @@ export function usePosicion({ simbolo, datos, config, version, estrategiaInicial
   return {
     filas, activa, mejor: filas[0] || null, elegirEstrategia: setTab, irAMejor: () => setTab(null),
     chain, cargando: cargada.loading, error: chain ? null : cargada.error, recargar: cargada.reload, cambiarVencimiento: setVenc,
+    vencimientos: vencimientosVigentes([...(lista.data?.items || []), ...(chain?.vencimientos || [])]),
     detalle, roles, sel, elegir, restablecer, esRecomendada, aviso: actual.aviso, op,
     pctEfectivo: isNum(maxPerdida) && efectivo > 0 ? maxPerdida / efectivo : null,
   };

@@ -20,7 +20,13 @@ export const fundamentales = get('/fundamentales/:simbolo', 'Reportes financiero
 export const institucional = get('/institucional/:simbolo', 'Tenencias 13F guardadas.', porSimbolo);
 export const cadena = get('/opciones/cadena/:simbolo', 'Cadena de opciones del proveedor con IV y griegas.', { ...porSimbolo, ...opciones });
 export const resumenOpciones = get('/opciones/resumen/:simbolo', 'Contratos guardados de un vencimiento con cotización, IV, griegas e interés abierto.', { ...porSimbolo, query: z.looseObject({ vencimiento: dia.optional() }) });
-export const velasOpcion = get('/opciones/velas/:occ', 'Precio diario de un contrato (hasta 400 días).', { params: z.object({ occ: z.string().trim().toUpperCase().regex(/^[A-Z]{1,6}\d?\d{6}[CP]\d{8}$/, 'contrato inválido (formato OCC)') }) });
+const occ = z.string().trim().toUpperCase().regex(/^[A-Z]{1,6}\d?\d{6}[CP]\d{8}$/, 'contrato inválido (formato OCC)');
+export const vencimientos = get('/opciones/vencimientos/:simbolo', 'Todas las fechas de vencimiento que existen para una empresa (consulta directa).', porSimbolo);
+export const traerCadena = definir({ metodo: 'post', ruta: '/mercado/opciones/cadena/:simbolo', grupo, resumen: 'Trae del proveedor un vencimiento completo, lo guarda y lo devuelve.', ...porSimbolo,
+  body: z.object({ vencimiento: dia }), errores: { 404: 'Empresa no registrada o vencimiento sin contratos' } });
+export const cotizacionesOpciones = get('/opciones/cotizaciones', 'Cotización directa de hasta 100 contratos: ?contratos=OCC,OCC (no se guarda).', {
+  query: z.object({ contratos: z.string().transform(v => v.split(',')).pipe(z.array(occ).min(1).max(100)) }) });
+export const velasOpcion = get('/opciones/velas/:occ', 'Precio diario de un contrato (hasta 400 días).', { params: z.object({ occ }) });
 export const contratos = get('/opciones', 'Contratos guardados.');
 export const snapshot = get('/opciones/:contratoId/snapshot', 'Cotización guardada de un contrato.', { params: z.object({ contratoId: id }) });
 export const contrato = get('/opciones/:id', 'Un contrato guardado.', { params: z.object({ id }) });

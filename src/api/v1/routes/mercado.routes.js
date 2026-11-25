@@ -25,6 +25,9 @@ export default ({ factory, integraciones, universo, tasa, eventos } = {}) => {
   r(rutas.institucional, c.institutional);
   r(rutas.cadena, c.chain);
   r(rutas.resumenOpciones, c.resumenOpciones);
+  r(rutas.vencimientos, c.vencimientos);
+  r(rutas.traerCadena, c.traerCadena);
+  r(rutas.cotizacionesOpciones, c.cotizacionesOpciones);
   r(rutas.velasOpcion, c.velasOpcion);
   r(rutas.contratos, contratos(factory).list);
   r(rutas.snapshot, c.snapshot);

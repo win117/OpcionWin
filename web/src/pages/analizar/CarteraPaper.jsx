@@ -4,7 +4,9 @@ import { Badge } from '../../components/Badge';
 import { Field } from '../../components/Field';
 import { Modal } from '../../components/Modal';
 import { ErrorMessage, Spinner } from '../../components/States';
+import { MercadoCerrado } from '../../components/MercadoEstado';
 import { useAsync } from '../../hooks/useAsync';
+import { useEstadoMercado } from '../../hooks/useEstadoMercado';
 import { ESTADOS_TERMINALES, useSeguimientoOrden } from '../../hooks/useSeguimientoOrden';
 import { acciones, operacion } from '../../api/resources';
 import { fmtDate, fmtDateTime, fmtFixed, fmtMoney, fmtPct, isNum } from '../../utils/format';
@@ -54,6 +56,7 @@ const motivoNoCerrable = p => (!p.posicionId ? 'Posición no sincronizada: sincr
 /** Cierre de una posición o de una estructura completa (una sola orden). `cierre`: { posiciones, grupo }. */
 function CerrarModal({ cierre, broker, onClose, onDone }) {
   const { posiciones, grupo } = cierre;
+  const estado = useEstadoMercado(), cerrado = estado.data?.abierto === false;
   const esGrupo = posiciones.length > 1;
   const sinMercado = esGrupo && broker === 'webull'; // Webull solo admite estructuras a limite
   const unidades = posiciones.map(p => p.cantidad).reduce(mcd);
@@ -114,7 +117,7 @@ function CerrarModal({ cierre, broker, onClose, onDone }) {
       ) : (
         <>
           <button type="button" className="btn" onClick={onClose} disabled={busy}>Cancelar</button>
-          <button type="button" className="btn btn--danger" onClick={confirmar} disabled={busy || !listo}>{busy ? 'Enviando…' : 'Confirmar cierre simulado'}</button>
+          <button type="button" className="btn btn--danger" onClick={confirmar} disabled={busy || !listo || cerrado}>{cerrado ? 'Mercado cerrado' : busy ? 'Enviando…' : 'Confirmar cierre simulado'}</button>
         </>
       )}>
       <div className="stack">
@@ -135,6 +138,7 @@ function CerrarModal({ cierre, broker, onClose, onDone }) {
           </>
         ) : (
           <>
+            {cerrado && <MercadoCerrado estado={estado.data}>Puedes preparar el cierre; el envío se habilita solo al abrir.</MercadoCerrado>}
             {esGrupo && <p>Una sola orden cierra las {posiciones.length} patas:</p>}
             <ul className="list">
               {posiciones.map(p => <li key={p.posicionId}>{p.lado === 'short' ? 'Comprar' : 'Vender'} {p.cantidad} × <strong>{p.simbolo}</strong> para cerrar la posición {LADO[p.lado] || ''}.</li>)}

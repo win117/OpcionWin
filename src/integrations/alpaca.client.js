@@ -100,6 +100,8 @@ export const normalizarSnapshotOpcion = (simbolo, s = {}) => {
     ask: num(s.latestQuote?.ap),
     ultimo: num(s.latestTrade?.p),
     ultimoFecha: s.latestTrade?.t || null,
+    ...(num(s.prevDailyBar?.c) != null ? { cierreAnterior: num(s.prevDailyBar.c) } : {}),
+    ...(num(s.dailyBar?.v) != null ? { volumen: num(s.dailyBar.v) } : {}),
     volatilidadImplicita: num(s.impliedVolatility),
     griegas: { delta: num(g.delta), gamma: num(g.gamma), theta: num(g.theta), vega: num(g.vega), rho: num(g.rho) },
     fechaDato: s.latestQuote?.t || s.latestTrade?.t || null,

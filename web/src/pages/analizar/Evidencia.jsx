@@ -7,7 +7,7 @@ import NoticiasTab from '../mercado/NoticiasTab';
 import AnalisisTecnico from './AnalisisTecnico';
 import Desglose from './Desglose';
 import LecturaCores from './LecturaCores';
-import OpcionesGriegas from './OpcionesGriegas';
+import CadenaOpciones from './CadenaOpciones';
 import CompararStrikes from './TablaStrikes';
 
 export const TABS = [
@@ -34,7 +34,7 @@ export default function Evidencia({ tab, onTab, empresa, simbolo, mercado, vivo,
         {tab === 'cadena' && (empresa ? (
           <>
             <CompararStrikes pos={pos} />
-            <section className="card" aria-labelledby="cadena-titulo"><h2 id="cadena-titulo">Cadena de opciones</h2><OpcionesGriegas key={version + (pos.chain?.vencimiento || '')} vencimiento={pos.chain?.vencimiento || ''} simbolo={simbolo} empresa={empresa} /></section>
+            <section className="card" aria-labelledby="cadena-titulo"><h2 id="cadena-titulo">Cadena de opciones</h2><CadenaOpciones key={simbolo + version} vencimiento={pos.chain?.vencimiento || ''} simbolo={simbolo} empresa={empresa} vivo={vivo} /></section>
           </>
         ) : pendiente)}
         {tab === 'fundamentales' && (empresa ? (

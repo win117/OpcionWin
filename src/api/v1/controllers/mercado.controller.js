@@ -7,6 +7,7 @@ import { createMercadoEstado, createNombres, indicesReferencia } from '../servic
 import { diaNY } from '../services/mercado-reloj.service';
 import { createEventos } from '../services/eventos.service';
 import { createTasa } from '../services/tasa.service';
+import { createCadena } from '../services/cadena.service';
 
 const fecha = d => new Date(d).getTime();
 const limite = (valor, porDefecto, maximo) => {
@@ -37,6 +38,7 @@ async function panoramaSimbolo(alpaca, simbolo, nombreDe, ahora = Date.now()) {
 
 export default (factory, integraciones, universo, { tasa = createTasa({ integraciones }), eventos = createEventos({ integraciones }) } = {}) => {
   const crud = name => createCrudService(name, factory);
+  const cadena = createCadena({ integraciones, factory });
   const nombreDe = createNombres({ integraciones });
   const estadoMercado = createMercadoEstado({ integraciones, nombreDe });
   const forCompany = (name, extra = {}) => handle(async(req,res) => {
@@ -71,39 +73,11 @@ export default (factory, integraciones, universo, { tasa = createTasa({ integrac
     fundamentals: forCompany('fundamentales'),
     institutional: forCompany('institucional'),
     snapshot: handle(async(req,res)=>respond(res,await crud('datos-mercado').list(req.context,{...req.query,tipo:'snapshot_opcion',contratoId:req.params.contratoId}))),
-    // Contratos guardados + snapshot almacenado (IV y griegas) de un vencimiento vigente (fecha de Nueva York); no llama al proveedor.
-    resumenOpciones: handle(async (req, res) => {
-      const { vencimiento } = req.query;
-      const empresa = await empresaPorSimbolo(req.context, req.params.simbolo, factory).catch(() => { throw boom.notFound('Empresa no registrada.'); });
-      const dia = c => new Date(c.vencimiento).toISOString().slice(0, 10), hoy = diaNY(Date.now());
-      const contratos = (await todos('contratos', req.context, { empresaId: empresa._id }, factory)).filter(c => c.activo !== false && c.vencimiento && dia(c) >= hoy);
-      const vencimientos = [...new Set(contratos.map(dia))].sort();
-      const elegido = vencimiento || vencimientos[0] || null;
-      const snaps = new Map();
-      for (const s of await todos('datos-mercado', req.context, { empresaId: empresa._id, tipo: 'snapshot_opcion' }, factory)) {
-        const prev = snaps.get(s.contratoId);
-        if (!prev || fecha(s.fuente?.fechaDato) > fecha(prev.fuente?.fechaDato)) snaps.set(s.contratoId, s);
-      }
-      const items = contratos.filter(c => dia(c) === elegido).map(c => {
-        const s = snaps.get(c._id);
-        return { contratoId: c._id, simbolo: c.simbolo, tipo: c.tipo, strike: c.strike, vencimiento: dia(c),
-          bid: s?.bid ?? null, ask: s?.ask ?? null, ultimo: s?.ultimo ?? null, ultimoFecha: s?.ultimoFecha ?? null, volatilidadImplicita: s?.volatilidadImplicita ?? null,
-          interesAbierto: c.interesAbierto ?? null, interesAbiertoFecha: c.interesAbiertoFecha ? new Date(c.interesAbiertoFecha).toISOString().slice(0, 10) : null, griegas: s?.griegas ?? null, fechaDato: s?.fuente?.fechaDato ?? null };
-      }).sort((a, b) => a.strike - b.strike || String(a.tipo).localeCompare(String(b.tipo)));
-      // Cuánto se sabe de cada vencimiento: los recién listados existen, pero nadie los ha cotizado ni negociado todavía.
-      const detalle = new Map(vencimientos.map(v => [v, { vencimiento: v, contratos: 0, conPrecio: 0, conInteres: 0 }]));
-      for (const c of contratos) {
-        const d = detalle.get(dia(c)), s = snaps.get(c._id);
-        d.contratos += 1; d.conPrecio += s?.bid > 0 || s?.ultimo > 0 ? 1 : 0; d.conInteres += c.interesAbierto > 0 ? 1 : 0;
-      }
-      // Precio del subyacente: última cotización guardada; si no hay, cierre de la última vela.
-      const ultima = lista => lista.sort((a, b) => fecha(b.fuente.fechaDato) - fecha(a.fuente.fechaDato))[0];
-      const cot = ultima((await todos('datos-mercado', req.context, { empresaId: empresa._id, tipo: 'cotizacion' }, factory)).filter(q => q.ultimo != null && q.fuente?.fechaDato));
-      const vela = cot ? null : ultima((await todos('datos-mercado', req.context, { empresaId: empresa._id, tipo: 'vela' }, factory)).filter(v => v.cierre != null && v.fuente?.fechaDato));
-      respond(res, { empresa: { _id: empresa._id, simbolo: empresa.simbolo, nombre: empresa.nombre }, precioSubyacente: cot?.ultimo ?? vela?.cierre ?? null,
-        vencimientos, detalleVencimientos: [...detalle.values()], vencimiento: elegido, items, total: items.length,
-        fechaDato: items.reduce((max, i) => (i.fechaDato && (!max || fecha(i.fechaDato) > fecha(max)) ? i.fechaDato : max), null) });
-    }),
+    // Cadena guardada de un vencimiento (no llama al proveedor), todos los vencimientos que existen y cotización directa.
+    resumenOpciones: handle(async (req, res) => respond(res, await cadena.resumen(req.context, req.params.simbolo, req.query.vencimiento))),
+    vencimientos: handle(async (req, res) => respond(res, await cadena.vencimientos(req.datos.params.simbolo))),
+    traerCadena: handle(async (req, res) => respond(res, await cadena.traer(req.context, req.datos.params.simbolo, req.datos.body.vencimiento))),
+    cotizacionesOpciones: handle(async (req, res) => respond(res, await cadena.cotizaciones(req.datos.query.contratos))),
     // Consultas directas al proveedor (no se guardan; para guardar usar /sincronizaciones/ejecuciones).
     panorama: handle(async (req, res) => {
       const lista = req.query.simbolos ? String(req.query.simbolos).split(',').map(x => x.trim().toUpperCase()).filter(Boolean) : indicesReferencia();

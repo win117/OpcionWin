@@ -1,16 +1,19 @@
 // Ticket de orden SIMULADA: edición de patas → revisión → envío directo a la cuenta simulada del broker + seguimiento del estado.
 // `abridor`: elemento que abrió el ticket; recupera el foco al cerrarlo.
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Modal } from './Modal';
 import { Badge } from './Badge';
 import { Checkbox, Field } from './Field';
 import { Spinner } from './States';
 import { Termino } from './Termino';
-import SinPrecios from './SinPrecios';
+import SinPrecios, { etiquetaVencimiento } from './SinPrecios';
+import { MercadoCerrado as Cerrado, MercadoEstado } from './MercadoEstado';
 import { useBroker } from '../context/BrokerContext';
 import { acciones, mercado, operacion } from '../api/resources';
 import { useAsync } from '../hooks/useAsync';
+import { useEstadoMercado } from '../hooks/useEstadoMercado';
+import { fusionarCotizaciones } from '../utils/cadena';
 import { ESTADOS_TERMINALES, useSeguimientoOrden } from '../hooks/useSeguimientoOrden';
 import { NOTA_PUNTAJE, CORE_LABELS, ESTRATEGIA_LABELS } from '../utils/constants';
 import { fmtDate, fmtDateTime, fmtFixed, fmtMoney, fmtPct, isNum } from '../utils/format';
@@ -33,7 +36,11 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
   const [avisoVenc, setAvisoVenc] = useState(null); // qué pasó con los strikes al cambiar de vencimiento
   const [confirmado, setConfirmado] = useState(false); // confirmación explícita de spread amplio
   const items = useMemo(() => (chain?.items || []).filter(i => i.contratoId && isNum(i.strike)), [chain]);
-  const precioSub = chain?.precioSubyacente;
+  const ficha = useAsync(() => mercado.ficha(empresa.simbolo).catch(() => null), [empresa?.simbolo], { enabled: Boolean(open && empresa?.simbolo) });
+  const precioSub = ficha.data?.precio ?? chain?.precioSubyacente;
+  const estado = useEstadoMercado(open);
+  const abierto = estado.data?.abierto, cerrado = abierto === false;
+  const lista = useAsync(() => mercado.vencimientos(empresa.simbolo).catch(() => null), [empresa?.simbolo], { enabled: Boolean(open && empresa?.simbolo) });
   const [legs, setLegs] = useState(() => legsIniciales.map(nuevaPata));
   const [cantidad, setCantidad] = useState(1);
   const [tipo, setTipo] = useState('limit');
@@ -50,7 +57,7 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
   const abridorRef = useRef(abridor);
   useEffect(() => {
     const el = abridorRef.current || null;
-    document.querySelector('.ticket select')?.focus(); // el primer control, no un término del glosario
+    document.querySelector('.ticket .ticket__venc select, .ticket select')?.focus(); // el primer control, no un término del glosario
     // El diálogo se desmonta al cerrar: se espera un instante para que el resto de la página vuelva a admitir el foco.
     return () => { setTimeout(() => { if (el?.isConnected) el.focus(); }); };
   }, []);
@@ -67,8 +74,8 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
 
   const vencimientos = useMemo(() => {
     const l = chain?.vencimientos?.length ? chain.vencimientos : chain?.vencimiento ? [chain.vencimiento] : [];
-    return vencimientosVigentes(l);
-  }, [chain]);
+    return vencimientosVigentes([...(lista.data?.items || []), ...l]);
+  }, [chain, lista.data]);
   const bloqueado = paso === 'enviado' || enviando;
   const cambiarVencimiento = async v => {
     if (!v) return;
@@ -76,7 +83,7 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
     setVencSel(v);
     setCargaV({ loading: true, error: null });
     try {
-      const d = await mercado.opcionesResumen(empresa.simbolo, { vencimiento: v });
+      const d = await mercado.traerCadena(empresa.simbolo, v);
       if (req !== reqV.current) return;
       const nuevos = d.items || [];
       const previas = legs.map(l => ({ accion: l.accion, intencion: l.intencion, item: porId.get(l.contratoId) }));
@@ -95,6 +102,35 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
 
   const porId = useMemo(() => new Map(items.map(i => [i.contratoId, i])), [items]);
   const patas = legs.map(l => ({ ...l, item: porId.get(l.contratoId) }));
+  // Cotización directa de las patas: al abrir y, con el mercado abierto, cada 5 segundos mientras se edita.
+  const occs = patas.map(p => p.item?.simbolo).filter(Boolean).join();
+  const [cotizado, setCotizado] = useState({ hora: null, cargando: false });
+  const reqQ = useRef(0);
+  const refrescar = useCallback(async () => {
+    if (!occs) return;
+    const req = ++reqQ.current;
+    setCotizado(x => ({ ...x, cargando: true }));
+    try {
+      const r = await mercado.cotizacionesOpciones(occs.split(','));
+      if (req !== reqQ.current) return;
+      setChain(ch => ({ ...ch, items: fusionarCotizaciones(ch.items, r.items) }));
+      setCotizado({ hora: new Date(), cargando: false });
+    } catch { if (req === reqQ.current) setCotizado(x => ({ ...x, cargando: false })); }
+  }, [occs]);
+  const editando = open && paso === 'editar';
+  useEffect(() => {
+    if (!editando || !occs) return undefined;
+    refrescar();
+    if (!abierto) return undefined;
+    const t = setInterval(() => { if (!document.hidden) refrescar(); }, 5000);
+    return () => clearInterval(t);
+  }, [editando, occs, abierto, refrescar]);
+  const reloadFicha = ficha.reload;
+  useEffect(() => {
+    if (!editando || !abierto) return undefined;
+    const t = setInterval(() => { if (!document.hidden) reloadFicha(); }, 15000);
+    return () => clearInterval(t);
+  }, [editando, abierto, reloadFicha]);
   const neto = useMemo(() => netoMid(patas), [legs, porId]); // eslint-disable-line react-hooks/exhaustive-deps
   const signo = signoNeto(patas, neto);
   const credito = signo === 'credito'; // solo para mostrar; lo que se envía lo decide camposPrecio
@@ -171,6 +207,10 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
   };
   const quitar = id => { setLegs(ls => ls.filter(l => l.id !== id)); setLimiteTocado(false); };
 
+  // Al revisar se fija el precio que se ve: no cambia mientras se confirma.
+  const revisar = () => { if (tipo === 'limit' && !limiteTocado && isNum(limiteNum)) { setLimite(limiteNum.toFixed(2)); setLimiteTocado(true); } setPaso('revisar'); };
+  const fijar = v => { setLimite(Math.max(0.01, v).toFixed(2)); setLimiteTocado(true); };
+  const paso$ = isNum(limiteNum) && limiteNum >= 3 ? 0.05 : 0.01;
   const volver = () => { clave.current = null; setConfirmado(false); setError(null); setOrden(null); setPaso('editar'); };
 
   const enviar = async () => {
@@ -218,12 +258,12 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
   const footer = paso === 'editar' ? (
     <>
       <button type="button" className="btn" onClick={onClose}>Cancelar</button>
-      <button type="button" className="btn btn--primary" disabled={problemas.length > 0 || cuenta.loading || Boolean(cuenta.error) || brokerBloqueado} onClick={() => setPaso('revisar')}>Revisar</button>
+      <button type="button" className="btn btn--primary" disabled={problemas.length > 0 || cuenta.loading || Boolean(cuenta.error) || brokerBloqueado} onClick={revisar}>Revisar</button>
     </>
   ) : paso === 'revisar' ? (
     <>
       <button type="button" className="btn" onClick={volver} disabled={enviando}>Volver</button>
-      <button type="button" className="btn btn--primary" onClick={enviar} disabled={enviando || problemas.length > 0 || (liq.confirmar && !confirmado)}>{enviando ? 'Enviando…' : error ? 'Reintentar envío simulado' : 'Confirmar envío simulado'}</button>
+      <button type="button" className="btn btn--primary" onClick={enviar} disabled={enviando || cerrado || problemas.length > 0 || (liq.confirmar && !confirmado)}>{cerrado ? 'Mercado cerrado' : enviando ? 'Enviando…' : error ? 'Reintentar envío simulado' : 'Confirmar envío simulado'}</button>
     </>
   ) : (
     <>
@@ -240,7 +280,7 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
         <div className="banner-paper" role="note"><strong>Orden simulada.</strong> Se envía a tu cuenta de práctica de {brokerNombre}; no se usa dinero real.</div>
         {brokerBloqueado && <div className="alert alert--warning" role="alert"><div><strong>{brokerNombre} no está operativo.</strong> {brokerInfo?.mensaje || 'Elige otro broker en la cabecera (en el teléfono, en el menú de tu cuenta).'}</div></div>}
 
-        <div className="ticket__cuenta" aria-live="polite">
+        <div className={cuenta.loading || cuenta.error || paso !== 'editar' ? 'ticket__cuenta' : undefined} aria-live="polite">
           {cuenta.loading && <span className="muted small"><Spinner small /> Verificando la cuenta simulada de {brokerNombre}…</span>}
           {cuenta.error && (
             <div className="alert alert--danger" role="alert">
@@ -248,7 +288,7 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
               <button type="button" className="btn btn--sm" onClick={cargarCuenta}>Reintentar</button>
             </div>
           )}
-          {c && <span className="small">Cuenta simulada de {brokerNombre}. Poder de compra <strong>{fmtMoney(c.poderCompra)}</strong>, efectivo <strong>{fmtMoney(c.efectivo)}</strong>.</span>}
+          {c && paso !== 'editar' && <span className="small">Cuenta simulada de {brokerNombre}. Poder de compra <strong>{fmtMoney(c.poderCompra)}</strong>, efectivo <strong>{fmtMoney(c.efectivo)}</strong>.</span>}
         </div>
 
         {analisis && !analisis.sinAnalisis && (
@@ -260,15 +300,20 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
 
         {paso === 'editar' && (
           <>
-            <p className="muted small">{empresa?.simbolo} a {fmtMoney(precioSub)}. <Termino id="patas">Patas</Termino> con <Termino id="vencimiento">vencimiento</Termino> {chain?.vencimiento || '—'}{chain?.vencimiento ? ', ' + diasTxt(diasHasta(chain.vencimiento)) : ''}.</p>
+            <div className="tk__cab">
+              <div><strong className="tk__simbolo">{empresa?.simbolo}</strong> <span className="muted small">{empresa?.nombre}</span></div>
+              <div className="tk__precio"><strong>{fmtMoney(precioSub)}</strong> {isNum(ficha.data?.cambioPct) && <span className={ficha.data.cambioPct >= 0 ? 'up' : 'down'}>{ficha.data.cambioPct > 0 ? '+' : ''}{fmtPct(ficha.data.cambioPct, 2)}</span>}</div>
+              <MercadoEstado estado={estado} />
+            </div>
+            {cerrado && <Cerrado estado={estado.data} />}
             {vencimientos.length > 0 && (
               <div className="ticket__venc" aria-live="polite">
-                <Field label="Vencimiento">
+                <Field label={<Termino id="vencimiento">Vencimiento</Termino>}>
                   <select value={vencSel} onChange={e => cambiarVencimiento(e.target.value)} disabled={bloqueado || cargaV.loading}>
-                    {vencimientos.map(v => <option key={v} value={v}>{v}, {diasTxt(diasHasta(v))}{(chain?.detalleVencimientos || []).some(d => d.vencimiento === v && d.conPrecio === 0) ? ', sin precios' : ''}</option>)}
+                    {vencimientos.map(v => <option key={v} value={v}>{etiquetaVencimiento(v, chain?.detalleVencimientos)}</option>)}
                   </select>
                 </Field>
-                {cargaV.loading && <span className="muted small"><Spinner small /> Cargando cadena…</span>}
+                {cargaV.loading && <span className="muted small"><Spinner small /> Trayendo la cadena…</span>}
                 {cargaV.error && (
                   <div className="alert alert--danger" role="alert">
                     <div><strong>No se pudo cargar el vencimiento.</strong> {cargaV.error.message}</div>
@@ -281,61 +326,73 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
             {avisoVenc && <div className="alert alert--info" role="status">{avisoVenc}</div>}
             <ul className="ticket__patas" aria-label="Patas de la orden">
               {patas.map((l, i) => {
-                const it = l.item;
-                const strikes = items.filter(x => x.tipo === (it?.tipo || 'call')).sort((a, b) => a.strike - b.strike);
+                const it = l.item, t = it?.tipo || 'call';
+                const strikes = items.filter(x => x.tipo === t).sort((a, b) => a.strike - b.strike);
+                const dato = (et, v, clase) => <div><dt>{et}</dt><dd className={clase}>{v}</dd></div>;
                 return (
-                  <li key={l.id} className="ticket__pata">
-                    <div className="ticket__pata-campos">
-                      <Field label="Acción"><select value={l.accion} onChange={e => cambiarAccion(l.id, e.target.value)}><option value="buy">Comprar</option><option value="sell">Vender</option></select></Field>
-                      <Field label="Tipo"><select value={it?.tipo || 'call'} onChange={e => cambiarTipo(l, e.target.value)}><option value="call">Call</option><option value="put">Put</option></select></Field>
+                  <li key={l.id} className="tk__pata">
+                    <div className="tk__campos">
+                      <Seg etiqueta="Lado" valor={l.accion} onCambio={v => cambiarAccion(l.id, v)} opciones={[['buy', 'Comprar', 'compra'], ['sell', 'Vender', 'venta']]} />
+                      <Seg etiqueta="Tipo" valor={t} onCambio={v => cambiarTipo(l, v)} opciones={[['call', 'Call'], ['put', 'Put']]} />
                       <Field label="Strike">
                         <select value={l.contratoId} onChange={e => setPata(l.id, { contratoId: e.target.value })}>
                           {!it && <option value={l.contratoId}>—</option>}
-                          {strikes.map(s => <option key={s.contratoId} value={s.contratoId}>{fmtFixed(s.strike, 2)}{isNum(s.griegas?.delta) ? `, delta ${fmtFixed(s.griegas.delta, 2)}` : ''}{isNum(mid(s)) ? `, prima ${fmtFixed(mid(s), 2)}` : ''}</option>)}
+                          {strikes.map(x => <option key={x.contratoId} value={x.contratoId}>{fmtFixed(x.strike, 2)}{isNum(mid(x)) ? `, prima ${fmtFixed(mid(x), 2)}` : ''}</option>)}
                         </select>
                       </Field>
+                      {legs.length > 1 && <button type="button" className="btn btn--ghost btn--sm" onClick={() => quitar(l.id)} aria-label={`Quitar pata ${i + 1}`}>Quitar</button>}
                     </div>
-                    <dl className="ticket__pata-datos">
-                      <div><dt>Bid</dt><dd>{isNum(it?.bid) ? fmtFixed(it.bid) : '—'}</dd></div>
-                      <div><dt>Ask</dt><dd>{isNum(it?.ask) ? fmtFixed(it.ask) : '—'}</dd></div>
-                      <div><dt>Medio</dt><dd>{isNum(mid(it)) ? <>{fmtFixed(mid(it))}{!cotizacionFiable(it) && <abbr title="Último precio operado: no hay cotización bid/ask que se pueda usar">*</abbr>}</> : '—'}</dd></div>
-                      <div><dt>Último</dt><dd>{isNum(it?.ultimo) ? <>{fmtFixed(it.ultimo)}{it.ultimoFecha && <small className="muted"> {fmtDate(it.ultimoFecha)}</small>}</> : '—'}</dd></div>
-                      <div><dt><Termino id="spread">Spread</Termino></dt><dd className={(spreadPct(it) ?? 0) > SPREAD_AVISO ? 'aviso-texto' : undefined}>{isNum(spreadPct(it)) ? fmtPct(spreadPct(it), 0) : '—'}</dd></div>
-                      <div><dt><Termino id="interes_abierto">Interés abierto</Termino></dt><dd className={isNum(it?.interesAbierto) && it.interesAbierto < INTERES_MINIMO ? 'aviso-texto' : undefined}>{isNum(it?.interesAbierto) ? it.interesAbierto.toLocaleString('es-MX') : '—'}</dd></div>
-                      <div><dt><Termino id="iv">IV</Termino></dt><dd>{isNum(it?.volatilidadImplicita) ? fmtPct(it.volatilidadImplicita, 1) : '—'}</dd></div>
-                      <div><dt><Termino id="delta">Delta</Termino></dt><dd>{isNum(it?.griegas?.delta) ? fmtFixed(it.griegas.delta, 3) : '—'}</dd></div>
+                    <dl className="tk__datos">
+                      {dato('Bid', isNum(it?.bid) ? fmtFixed(it.bid) : '—', 'up')}
+                      {dato('Ask', isNum(it?.ask) ? fmtFixed(it.ask) : '—', 'down')}
+                      {dato('Medio', isNum(mid(it)) ? <>{fmtFixed(mid(it))}{!cotizacionFiable(it) && <abbr title="Último precio operado: no hay cotización bid/ask que se pueda usar">*</abbr>}</> : '—')}
+                      {dato(<Termino id="ultimo">Último</Termino>, isNum(it?.ultimo) ? <span title={it.ultimoFecha ? 'Operado el ' + fmtDate(it.ultimoFecha) : undefined}>{fmtFixed(it.ultimo)}</span> : '—')}
+                      {dato(<Termino id="spread">Spread</Termino>, isNum(spreadPct(it)) ? fmtPct(spreadPct(it), 0) : '—', (spreadPct(it) ?? 0) > SPREAD_AVISO ? 'aviso-texto' : undefined)}
+                      {dato(<Termino id="delta">Delta</Termino>, isNum(it?.griegas?.delta) ? fmtFixed(it.griegas.delta, 2) : '—')}
+                      {dato(<Termino id="iv">IV</Termino>, isNum(it?.volatilidadImplicita) ? fmtPct(it.volatilidadImplicita, 1) : '—')}
+                      {dato('Volumen', isNum(it?.volumen) ? it.volumen.toLocaleString('es-MX') : '—')}
+                      {dato(<Termino id="interes_abierto">Interés</Termino>, isNum(it?.interesAbierto) ? it.interesAbierto.toLocaleString('es-MX') : '—', isNum(it?.interesAbierto) && it.interesAbierto < INTERES_MINIMO ? 'aviso-texto' : undefined)}
                     </dl>
-                    {legs.length > 1 && <button type="button" className="btn btn--ghost btn--sm ticket__pata-quitar" onClick={() => quitar(l.id)} aria-label={`Quitar pata ${i + 1}`}>Quitar</button>}
                   </li>
                 );
               })}
             </ul>
-            {!sinPrecios(items) && <p className="muted small">Cotización {edad ? `${edad.texto} (${fmtDateTime(edad.fecha)})` : 'de fecha desconocida'}. Cruzar el <Termino id="spread">spread</Termino> cuesta {isNum(costo) ? `${fmtMoney(costo)} al entrar (y otro tanto, aproximadamente, al salir)` : '—'}.</p>}
-            {legs.length < 4 && <div><button type="button" className="btn btn--sm" onClick={agregar}>+ Añadir pata</button></div>}
+            <div className="tk__linea small muted">
+              <span>{sinPrecios(items) ? 'Sin cotización.' : <>Cotización {edad ? `${edad.texto} (${fmtDateTime(edad.fecha)})` : 'de fecha desconocida'}.{abierto ? ' Se actualiza cada 5 segundos.' : ''}</>}</span>
+              <button type="button" className="enlace" onClick={refrescar} disabled={cotizado.cargando || !occs}>{cotizado.cargando ? 'Actualizando…' : 'Actualizar'}</button>
+              {legs.length < 4 && <button type="button" className="enlace" onClick={agregar}>Añadir pata</button>}
+            </div>
 
-            <div className="ticket__form">
+            <div className="tk__orden">
+              <Seg etiqueta="Tipo de orden" valor={tipo} onCambio={setTipo} opciones={[['limit', 'Límite'], ['market', 'Mercado', '', sinMercado]]} />
               <Field label="Cantidad (contratos)" error={cantOk ? null : 'Entero de 1 a 100'}>
-                <input type="number" min="1" max="100" step="1" value={cantidad} onChange={e => setCantidad(e.target.value)} inputMode="numeric" />
-              </Field>
-              <Field label="Tipo de orden">
-                <select value={tipo} onChange={e => setTipo(e.target.value)}><option value="limit">Límite</option><option value="market" disabled={sinMercado}>Mercado{sinMercado ? ' (no disponible en Webull)' : ''}</option></select>
+                <Pasos valor={cantidad} onCambio={setCantidad} paso={1} min={1} max={100} nombre="cantidad" />
               </Field>
               {tipo === 'limit' && (
-                <Field label={credito ? 'Precio por acción (×100 = lo que cobras por contrato)' : 'Precio por acción (×100 = costo por contrato)'} help={credito ? 'Lo mínimo que aceptas cobrar. Por defecto, el punto medio.' : 'Lo máximo que aceptas pagar. Por defecto, el punto medio.'}>
-                  <input type="number" min="0.01" step="0.01" value={limiteTocado ? limite : isNum(limiteDefecto) ? limiteDefecto.toFixed(2) : ''} onChange={e => { setLimite(e.target.value); setLimiteTocado(true); }} inputMode="decimal" />
+                <Field label={credito ? 'Precio límite (cobras por acción)' : 'Precio límite (pagas por acción)'}>
+                  <Pasos valor={limiteTocado ? limite : isNum(limiteDefecto) ? limiteDefecto.toFixed(2) : ''} onCambio={v => { setLimite(v); setLimiteTocado(true); }} paso={paso$} min={0.01} decimales={2} nombre="precio" />
                 </Field>
               )}
-              <Field label="Vigencia">
-                <select value={vigencia} onChange={e => setVigencia(e.target.value)}><option value="day">Día</option><option value="gtc">GTC (hasta cancelar)</option></select>
-              </Field>
+              <Seg etiqueta={<Termino id="gtc">Vigencia</Termino>} valor={vigencia} onCambio={setVigencia} opciones={[['day', 'Día'], ['gtc', 'GTC']]} />
             </div>
             {tipo === 'limit' && isNum(limiteDefecto) && (
-              <div className="ticket__precios small" role="group" aria-label="Atajos de precio">
-                <button type="button" className="btn btn--sm" onClick={() => setLimiteTocado(false)}>Medio {limiteDefecto.toFixed(2)}</button>
-                {isNum(inmediato) && Math.abs(inmediato - limiteDefecto) >= 0.005 && <button type="button" className="btn btn--sm" onClick={() => { setLimite(inmediato.toFixed(2)); setLimiteTocado(true); }}>Inmediato {inmediato.toFixed(2)}</button>}
-                <span className="muted">El medio es mejor precio, pero puede no ejecutarse. El inmediato {credito ? 'vende al bid' : 'compra al ask'} según la última cotización: es más fácil que se ejecute, pero no está garantizado.</span>
+              <div className="tk__bma" role="group" aria-label="Atajos de precio">
+                {patas.length === 1 && cotizacionFiable(patas[0].item) ? (
+                  <>
+                    <button type="button" onClick={() => fijar(patas[0].item.bid)}><span>Bid</span><strong className="up">{fmtFixed(patas[0].item.bid)}</strong></button>
+                    <button type="button" onClick={() => setLimiteTocado(false)}><span>Medio</span><strong>{limiteDefecto.toFixed(2)}</strong></button>
+                    <button type="button" onClick={() => fijar(patas[0].item.ask)}><span>Ask</span><strong className="down">{fmtFixed(patas[0].item.ask)}</strong></button>
+                  </>
+                ) : (
+                  <>
+                    <button type="button" onClick={() => setLimiteTocado(false)}><span>Medio</span><strong>{limiteDefecto.toFixed(2)}</strong></button>
+                    {isNum(inmediato) && Math.abs(inmediato - limiteDefecto) >= 0.005 && <button type="button" onClick={() => fijar(inmediato)}><span>Inmediato</span><strong>{inmediato.toFixed(2)}</strong></button>}
+                  </>
+                )}
+                <p className="muted small">{credito ? 'Vender al bid' : 'Comprar al ask'} facilita que se ejecute; el medio es mejor precio, pero puede no ejecutarse.{isNum(costo) ? ` Cruzar el spread cuesta ${fmtMoney(costo)}.` : ''}</p>
               </div>
             )}
+            {isNum(poder) && <dl className="tk__poder small"><div><dt>Poder de compra</dt><dd>{fmtMoney(poder)}</dd></div>{isNum(requerido) && <><div><dt>Usa esta orden</dt><dd>{fmtMoney(requerido)}</dd></div><div><dt>Te quedaría</dt><dd className={poder - requerido < 0 ? 'down' : undefined}>{fmtMoney(poder - requerido)}</dd></div></>}</dl>}
             <Resumen credito={credito} total={total} perfil={perfil} />
             {ilimitada && <PerdidaIlimitada />}
             {advertencias.map(a => <div key={a} className="alert alert--warning" role="note">{a}</div>)}
@@ -346,6 +403,7 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
         {paso === 'revisar' && (
           <>
             <h3>Revisa tu orden</h3>
+            {cerrado && <Cerrado estado={estado.data} />}
             <ul className="list">
               {patas.map(p => <li key={p.id}><strong>{p.accion === 'sell' ? 'Vender' : 'Comprar'}</strong> {cant} × {empresa?.simbolo} {fmtFixed(p.item?.strike, 2)} {p.item?.tipo === 'put' ? 'Put' : 'Call'}, vence {chain?.vencimiento} <span className="muted small">({p.item?.simbolo})</span></li>)}
             </ul>
@@ -394,11 +452,33 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
   );
 }
 
-const diasTxt = d => (d === 1 ? '1 día' : d + ' días');
-
 const PerdidaIlimitada = () => (
   <div className="alert alert--danger ticket__ilimitada" role="alert"><div><strong>Pérdida ilimitada.</strong> Vendes una opción sin otra que la cubra: si el precio sube mucho, la pérdida no tiene tope y puede superar el dinero de la cuenta. Añade una pata comprada que la limite.</div></div>
 );
+
+/** Botones excluyentes con su etiqueta, como en una pantalla de órdenes. */
+function Seg({ etiqueta, opciones, valor, onCambio }) {
+  return (
+    <div className="field">
+      <span className="field__label">{etiqueta}</span>
+      <div className="seg tk__seg" role="group" aria-label={typeof etiqueta === 'string' ? etiqueta : undefined}>
+        {opciones.map(([v, texto, tono, deshabilitado]) => <button key={v} type="button" className={'seg__btn' + (v === valor ? ' is-active' : '') + (tono ? ' tk__seg--' + tono : '')} aria-pressed={v === valor} disabled={deshabilitado} title={deshabilitado ? 'No disponible en Webull con varias patas' : undefined} onClick={() => onCambio(v)}>{texto}</button>)}
+      </div>
+    </div>
+  );
+}
+
+/** Número con botones de menos y más. Field le pasa el id y los atributos de accesibilidad. */
+function Pasos({ valor, onCambio, paso, min, max = Infinity, decimales = 0, nombre, ...rest }) {
+  const mover = d => { const n = Number(valor); onCambio(Math.min(max, Math.max(min, (Number.isFinite(n) ? n : 0) + d * paso)).toFixed(decimales)); };
+  return (
+    <span className="tk__pasos">
+      <button type="button" onClick={() => mover(-1)} aria-label={`Bajar ${nombre}`}>−</button>
+      <input {...rest} type="number" min={min} max={Number.isFinite(max) ? max : undefined} step={decimales ? 0.01 : 1} value={valor} onChange={e => onCambio(e.target.value)} inputMode={decimales ? 'decimal' : 'numeric'} />
+      <button type="button" onClick={() => mover(1)} aria-label={`Subir ${nombre}`}>+</button>
+    </span>
+  );
+}
 
 const monto = v => (v == null ? 'Ilimitada' : fmtMoney(v));
 

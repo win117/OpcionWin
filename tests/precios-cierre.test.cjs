@@ -59,3 +59,39 @@ test('sincronizar fuera de horario conserva la cotización de la última sesión
   const g = (await todos('datos-mercado', ctx, { tipo: 'snapshot_opcion' }, factory)).find(x => x._id === id);
   assert.deepEqual([g.bid, g.ask, g.ultimo, g.volatilidadImplicita, g.griegas.delta, new Date(g.fuente.fechaDato).toISOString()], [2, 2.2, 2.4, 0.3, 0.5, dentro]);
 });
+
+test('cadena en pantalla: strikes alrededor del precio, cambio, mensual y mezcla de cotizaciones', async () => {
+  const c = await import(pathToFileURL(join(__dirname, '../web/src/utils/cadena.js')).href);
+  const filas = c.porStrike([90, 95, 100, 105, 110].flatMap(strike => [{ strike, tipo: 'call' }, { strike, tipo: 'put' }]));
+  assert.equal(filas.length, 5); assert.deepEqual([filas[0].call.tipo, filas[0].put.tipo], ['call', 'put']);
+  const ver = (p, n) => c.cercanas(filas, p, n).map(x => x.strike);
+  assert.deepEqual(ver(101, 2), [100, 105]); assert.deepEqual(ver(80, 2), [90, 95]); assert.deepEqual(ver(200, 2), [105, 110]); assert.equal(ver(101, 0).length, 5); assert.equal(ver(null, 2).length, 5);
+  assert.ok(Math.abs(c.cambioPct({ ultimo: 1.1, cierreAnterior: 1, ultimoFecha: hace(1) }) - 0.1) < 1e-9);
+  assert.equal(c.cambioPct({ ultimo: 1.1, cierreAnterior: 1, ultimoFecha: hace(30) }), null); assert.equal(c.cambioPct({ ultimo: 1 }), null);
+  assert.equal(c.esMensual('2027-01-15'), true); assert.equal(c.esMensual('2027-01-08'), false);
+  assert.equal(c.esMensual('2027-06-17', ['2027-06-17', '2027-09-17']), true, 'viernes feriado'); assert.equal(c.esMensual('2026-12-17', ['2026-12-17', '2026-12-18']), false);
+  const item = { simbolo: 'A', bid: 2, ask: 2.2, ultimo: 2.1, fechaDato: '2026-11-24T20:00:00Z', griegas: { delta: 0.5 } };
+  const q = { contratoExternoId: 'A', bid: 0.1, ask: 9, ultimo: 2.4, ultimoFecha: 'x', fechaDato: '2026-11-25T13:00:00Z', griegas: { delta: 0.1 } };
+  assert.deepEqual(c.fusionarCotizaciones([item], [q])[0], { ...item, ultimo: 2.4, ultimoFecha: 'x' }, 'fuera de horario conserva la sesión');
+  const viva = c.fusionarCotizaciones([item], [{ ...q, bid: 2.3, ask: 2.5, fechaDato: '2026-11-25T15:00:00Z' }])[0];
+  assert.deepEqual([viva.bid, viva.ask, viva.griegas.delta], [2.3, 2.5, 0.1]); assert.equal(c.fusionarCotizaciones([item], [])[0], item);
+});
+
+test('cadena del servidor: todos los vencimientos, uno bajo demanda con sus strikes cercanos y caché', async () => {
+  const { memoryFactory } = require('./helpers/memory.cjs');
+  const { crear } = require('../dist/api/v1/services/registros');
+  const { createCadena } = require('../dist/api/v1/services/cadena.service');
+  const factory = memoryFactory(), ctx = { userId: 'u', database: 'mongodb' }, pedidos = [], lejos = '2029-01-19';
+  const strikes = Array.from({ length: 80 }, (_, i) => 61 + i);
+  const alpaca = { cotizacion: async () => ({ ultimo: 100 }),
+    contratos: async f => { pedidos.push(f); return f.vencimientoDesde === f.vencimientoHasta ? strikes.map(k => ({ contratoExternoId: 'TEST290119C' + String(k * 1000).padStart(8, '0'), tipo: 'call', strike: k, vencimiento: lejos })) : ['2027-01-15', lejos, '2027-01-15'].map(v => ({ vencimiento: v })); },
+    snapshotsOpciones: async () => [] };
+  await crear('empresas', ctx, { simbolo: 'TEST', nombre: 'Test', mercado: 'NASDAQ', activo: true }, factory);
+  const c = createCadena({ integraciones: { alpaca, sec: {} }, factory, ahora: () => Date.parse('2026-11-25T15:00:00Z') });
+  assert.deepEqual((await c.vencimientos('TEST')).items, ['2027-01-15', lejos]); await c.vencimientos('TEST');
+  assert.equal(pedidos.length, 1, 'la lista se guarda unos minutos'); assert.deepEqual([pedidos[0].strikeMin, pedidos[0].strikeMax, pedidos[0].tipo], [85, 115, 'call']);
+  const d = await c.traer(ctx, 'TEST', lejos);
+  assert.equal(d.vencimiento, lejos); assert.equal(d.items.length, 60); assert.ok(d.items.every(i => i.contratoId && i.strike >= 70 && i.strike <= 130));
+  await c.traer(ctx, 'TEST', lejos); assert.equal(pedidos.length, 2, 'no repite la descarga en segundos');
+  await assert.rejects(c.traer(ctx, 'TEST', '2026-11-20'), /ya pasó/); await assert.rejects(c.traer(ctx, 'OTRA', lejos), /no registrada/);
+});

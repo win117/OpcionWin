@@ -984,3 +984,45 @@ a.mov__fila:hover { background: var(--surface-2); }
 .tv p { margin: .5rem 0 0; }
 @media (max-width: 640px) { .tv iframe { max-height: 70vh; } }
 @media (max-width: 640px) { .candle-chart__leyenda { right: 0; gap: 0 .45rem; padding: 2px 4px; } .candle-chart__sup { display: none; } } /* en el teléfono los valores de las medias taparían las velas */
+
+/* ---- Cadena de opciones por vencimiento ---- */
+.cad__barra { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 6px; }
+.cad__venc { border-top: 1px solid var(--border); } .cad__venc:last-of-type { border-bottom: 1px solid var(--border); }
+.cad__cab { margin: 0; }
+.cad__cab button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 6px 10px; border: 0; background: transparent; color: var(--text); font: inherit; font-size: var(--t-14); font-weight: 600; text-align: left; cursor: pointer; }
+.cad__cab button:hover { background: var(--surface-3); } .cad__cab button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.cad__cab button[aria-expanded="true"] { background: var(--surface-3); }
+.cad__cab .muted { font-weight: 400; } .cad__dias { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--text-muted); font-weight: 400; }
+.cad__flecha { width: 1em; text-align: center; transition: transform .15s; } [aria-expanded="true"] > .cad__flecha { transform: rotate(90deg); }
+.cad__cuerpo { padding: 8px 0 14px; } .cad__pie { margin: 8px 0 0; }
+.cad__caja { max-height: 620px; overflow: auto; }
+.cad__tabla td, .cad__tabla th { vertical-align: middle; }
+.cad__tabla .num { text-align: right; font-variant-numeric: tabular-nums; } .cad__tabla td.itm { background: var(--accent-soft); }
+.cad__tabla .cad__strike { background: var(--surface-3); text-align: center; font-weight: 700; }
+.cad__precio td { text-align: center; background: var(--surface-2); border-block: 1px solid var(--accent); padding-block: 4px; }
+.cad__px { display: inline-block; margin: -2px 0; border: 1px solid transparent; border-radius: 4px; background: transparent; font: inherit; font-weight: 600; font-variant-numeric: tabular-nums; padding: 3px 6px; min-width: 48px; text-align: right; cursor: pointer; }
+.cad__px--buy { color: var(--down); } .cad__px--sell { color: var(--up); } .cad__px.is-dudoso { color: var(--text-muted); font-weight: 400; }
+.cad__px:hover, .cad__px:focus-visible { border-color: currentColor; background: var(--surface); } .cad__px:focus-visible { outline: 2px solid var(--focus); }
+/* ---- Ticket de orden ---- */
+.tk__cab { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 18px; } .tk__cab > :first-child { margin-right: auto; }
+.tk__simbolo, .tk__precio strong { font-size: var(--t-20); font-variant-numeric: tabular-nums; }
+.tk__pata { border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); padding: 12px; display: grid; gap: 12px; }
+.tk__campos { display: grid; grid-template-columns: minmax(170px, 1fr) minmax(130px, .7fr) minmax(0, 1.4fr) auto; gap: 12px; align-items: end; } .tk__campos .field { gap: 6px; }
+.tk__orden { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 175px), 1fr)); gap: 12px; align-items: start; }
+.tk__seg { display: flex; } .tk__seg .seg__btn { flex: 1; min-height: 40px; } .tk__seg .seg__btn:disabled { opacity: .5; cursor: not-allowed; }
+.tk__seg .tk__seg--compra.is-active { background: var(--mapa-sube); color: #fff; } .tk__seg .tk__seg--venta.is-active { background: var(--danger-solid); color: #fff; }
+.tk__datos { display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 6px 10px; margin: 0; }
+.tk__datos dt { font-size: var(--t-12); color: var(--text-muted); } .tk__datos dd { margin: 0; font-weight: 600; font-size: var(--t-14); font-variant-numeric: tabular-nums; }
+.tk__linea { display: flex; flex-wrap: wrap; gap: 4px 16px; } .tk__linea > :first-child { margin-right: auto; }
+.tk__pasos { display: flex; border: 1px solid var(--control-border); border-radius: var(--radius-sm); overflow: hidden; background: var(--surface); }
+.tk__pasos button { flex: 0 0 40px; border: 0; background: var(--surface-3); color: var(--text); font: inherit; font-size: var(--t-20); min-height: 40px; cursor: pointer; } .tk__pasos button:hover { background: var(--accent-soft); } .tk__pasos button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.tk__pasos input { flex: 1; min-width: 0; border: 0; border-radius: 0; text-align: center; font-weight: 600; font-variant-numeric: tabular-nums; appearance: textfield; } .tk__pasos input::-webkit-inner-spin-button { appearance: none; margin: 0; }
+.tk__bma { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; } .tk__bma p { flex: 1 1 260px; margin: 0; }
+.tk__bma button { display: flex; gap: 8px; align-items: baseline; border: 1px solid var(--control-border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: inherit; font-size: var(--t-14); padding: 8px 12px; min-height: 40px; cursor: pointer; font-variant-numeric: tabular-nums; } .tk__bma button:hover { background: var(--surface-3); } .tk__bma button:focus-visible { outline: 2px solid var(--focus); }
+.tk__poder { display: flex; flex-wrap: wrap; gap: 4px 24px; margin: 4px 0; padding: 8px 12px; border-radius: var(--radius-sm); background: var(--surface-3); } .tk__poder div { display: flex; gap: 6px; } .tk__poder dt { color: var(--text-muted); } .tk__poder dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+@media (max-width: 700px) {
+  .tk__campos { grid-template-columns: repeat(2, minmax(0, 1fr)); } .tk__campos > :nth-child(n+3) { grid-column: 1 / -1; }
+  .tk__datos { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (pointer: coarse) { .cad__cab button, .cad__px, .tk__seg .seg__btn, .tk__pasos button, .tk__bma button { min-height: var(--touch); } }
+@media (prefers-reduced-motion: reduce) { .cad__flecha { transition: none; } }

@@ -70,6 +70,8 @@ export const GLOSARIO_GRUPOS = ['Opciones', 'Griegas y volatilidad', 'Estrategia
 export const GLOSARIO = {
   strike: { grupo: 'Opciones', nombre: 'Strike', texto: 'Precio al que la opción permite comprar (call) o vender (put) la acción.' },
   vencimiento: { grupo: 'Opciones', nombre: 'Vencimiento', texto: 'Último día de vida de la opción. Después deja de existir, valga o no valga algo.' },
+  bid: { grupo: 'Opciones', nombre: 'Bid', texto: 'Lo más que alguien ofrece pagar ahora. Si vendes de inmediato, cobras cerca de este precio.' },
+  ask: { grupo: 'Opciones', nombre: 'Ask', texto: 'Lo menos que alguien acepta cobrar ahora. Si compras de inmediato, pagas cerca de este precio.' },
   prima: { grupo: 'Opciones', nombre: 'Prima', texto: 'Precio de la opción por acción. Un contrato cubre 100 acciones: una prima de 2.50 cuesta 250 dólares.' },
   patas: { grupo: 'Opciones', nombre: 'Patas', texto: 'Cada una de las opciones que forman una estrategia. Un Long Call tiene una pata; un Iron Condor, cuatro.' },
   itm: { grupo: 'Opciones', nombre: 'ITM (dentro del dinero)', texto: 'La opción ya tiene valor si se ejerciera hoy: un call con strike menor al precio, o un put con strike mayor.' },

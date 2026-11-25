@@ -30,6 +30,10 @@ export async function cargarConfluencia(confluenciaId, ponderaciones = []) {
  */
 export async function cargarCadena(simbolo, { diasMin = 7, diasMax = null, codigo = null } = {}) {
   const d = await mercado.opcionesResumen(simbolo, {});
+  if (!d.vencimientos?.length) { // nada guardado: se elige entre los que existen y se trae
+    const v = elegirVencimiento((await mercado.vencimientos(simbolo).catch(() => null))?.items || [], new Date(), diasMin, diasMax, codigo);
+    if (v) return mercado.traerCadena(simbolo, v);
+  }
   const venc = elegirVencimiento(d.vencimientos || (d.vencimiento ? [d.vencimiento] : []), new Date(), diasMin, diasMax, codigo, d.detalleVencimientos);
   if (!venc) return { ...d, vencimiento: null, items: [], total: 0 };
   return venc === d.vencimiento ? d : mercado.opcionesResumen(simbolo, { vencimiento: venc });

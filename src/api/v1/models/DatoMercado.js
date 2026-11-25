@@ -7,7 +7,7 @@ export const schema = entitySchema({
   fuente: { type: fuenteSchema, required: true }, intervalo: text(false),
   apertura: number(false, 0), maximo: number(false, 0), minimo: number(false, 0),
   cierre: number(false, 0), volumen: number(false, 0),
-  bid: number(false, 0), ask: number(false, 0), ultimo: number(false, 0), ultimoFecha: Date,
+  bid: number(false, 0), ask: number(false, 0), ultimo: number(false, 0), ultimoFecha: Date, cierreAnterior: number(false, 0),
   volatilidadImplicita: number(false, 0),
   griegas: { type: griegasSchema }
 });

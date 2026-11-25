@@ -22,3 +22,8 @@ export function MercadoEstado({ estado }) {
     </span>
   );
 }
+
+/** Aviso de mercado cerrado para las pantallas que envían órdenes. */
+export const MercadoCerrado = ({ estado, children }) => (
+  <div className="alert alert--warning" role="status"><div><strong>El mercado está cerrado.</strong> {estado?.proximaApertura ? `Abre ${fmtHoraCorta(estado.proximaApertura)} (tu hora). ` : ''}{children || 'Ves los últimos precios disponibles: puedes preparar y revisar la orden, y el envío se habilita solo al abrir.'}</div></div>
+);
