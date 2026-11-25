@@ -2,7 +2,7 @@
 const P = process.cwd(); require(P + '/node_modules/dotenv').config({ quiet: true });
 const fs = require('fs'); const { createIntegrations } = require(P + '/dist/integrations'); const { cores } = require(P + '/dist/cores');
 const { repository } = require(P + '/dist/repositories'); const { closeMongo } = require(P + '/dist/config/database.config');
-const DIR = process.argv[2], H = 25, DIA = 864e5; // 25 sesiones ≈ 36 días
+const DIR = process.argv[2], H = 25; // 25 sesiones ≈ 36 días
 (async () => {
   const { alpaca, sec } = createIntegrations(process.env);
   const filas = (await repository('screener', { userId: 'sistema-universo', database: 'mongodb' }).list({ offset: 0, limit: 500 })).map(x => x.document); await closeMongo();

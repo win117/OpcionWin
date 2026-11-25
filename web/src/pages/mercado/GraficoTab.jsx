@@ -27,7 +27,7 @@ export default function GraficoTab({ simbolo }) {
   // El endpoint devuelve las últimas N velas ordenadas por fecha (máx. 1000).
   const state = useAsync(() => mercado.historicos(simbolo, { limit: 300 }), [simbolo]);
   const [intervalo, setIntervalo] = useState('');
-  const rows = state.data?.items || [];
+  const rows = useMemo(() => state.data?.items || [], [state.data]);
   const intervalos = useMemo(() => [...new Set(rows.map(r => r.intervalo).filter(Boolean))], [rows]);
   const activo = intervalo || intervalos[0] || '';
   const velas = useMemo(() => {

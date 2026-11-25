@@ -1,5 +1,5 @@
 // Resumen de un sector elegido en el mapa: variación ponderada, cuántas suben y la lista completa de la selección.
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { fmtCompact, fmtFixed, fmtMoney, isNum } from '../../utils/format';
 
 const signo = v => (isNum(v) ? (v > 0 ? '+' : '') + fmtFixed(v * 100, 2) + '%' : '—');
@@ -11,8 +11,8 @@ export default function ResumenSector({ sector, items, modo, onElegir, onCerrar 
     const cap = con.reduce((s, i) => s + i.capitalizacion, 0);
     return { cap, cambio: cap ? con.reduce((s, i) => s + i.cambioPct * i.capitalizacion, 0) / cap : null, suben: con.filter(i => i.cambioPct > 0).length, bajan: con.filter(i => i.cambioPct < 0).length };
   }, [items]);
-  const valor = i => (modo.puntaje ? i.puntajes?.[modo.id] : i[modo.id]) ?? null;
-  const lista = useMemo(() => [...items].sort((a, b) => (valor(b) ?? -Infinity) - (valor(a) ?? -Infinity)), [items, modo]);
+  const valor = useCallback(i => (modo.puntaje ? i.puntajes?.[modo.id] : i[modo.id]) ?? null, [modo]);
+  const lista = useMemo(() => [...items].sort((a, b) => (valor(b) ?? -Infinity) - (valor(a) ?? -Infinity)), [items, valor]);
   const texto = v => (!isNum(v) ? '—' : modo.puntaje ? fmtFixed(v, 0) : signo(v));
   return (
     <div className="ficha">

@@ -172,7 +172,7 @@ export async function sincronizarDatos(simbolo, { recursos = [], diasMin, diasMa
 
 /** Canalización completa según la configuración resuelta. Devuelve el trabajo de la selección (null si falló). */
 export async function ejecutarFlujo(simbolo, { sincronizar, recursos, cores, indicadores, ponderaciones, diasMin, diasMax }, setPasos, cancelado) {
-  const { set, paso } = crearPaso(setPasos, cancelado);
+  const { paso } = crearPaso(setPasos, cancelado);
   if (sincronizar) await sincronizarDatos(simbolo, { recursos, diasMin, diasMax, saltarRecientes: true }, setPasos, cancelado);
 
   const empresa = (await empresas.list({ simbolo, limit: 1 })).items[0];

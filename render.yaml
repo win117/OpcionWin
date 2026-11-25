@@ -10,7 +10,7 @@ services:
     buildCommand: npm ci --include=dev && npm run build && npm --prefix web ci --include=dev && npm --prefix web run build
     startCommand: npm start
     healthCheckPath: /health
-    autoDeploy: true
+    autoDeployTrigger: checksPass # publica solo si GitHub Actions pasa
     envVars:
       - key: NODE_VERSION
         value: "22"

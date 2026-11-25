@@ -13,7 +13,7 @@ import { createOperacion } from '../services/operacion.service';
 import { createBusquedaActivos } from '../services/activos.service';
 import { cores as modulosCores } from '../../../cores';
 
-const SIMBOLO = /^[A-Z][A-Z0-9.\-]{0,9}$/;
+const SIMBOLO = /^[A-Z][A-Z0-9.-]{0,9}$/;
 const PROVEEDOR = { fundamentales: 'sec', institucional: 'sec' };
 
 export default ({ factory, integraciones, cola, ahora, cacheActivos, universo }) => {

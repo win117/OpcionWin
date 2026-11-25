@@ -53,7 +53,7 @@ const DB = process.argv[2] || 'mongodb', S = 'AAPL', sleep = ms => new Promise(r
     const remoto = await createIntegrations(process.env).alpaca.consultarOrden(ordenExterna);
     console.log('Alpaca confirma', remoto.estado, remoto.estadoProveedor || '');
     await sync({ recurso: 'posiciones', conexionId: conexion._id });
-    const live = await call('POST', '/conexiones-broker/' + conexion._id + '/verificacion').catch(() => null);
+    await call('POST', '/conexiones-broker/' + conexion._id + '/verificacion').catch(() => null);
     console.log('eventos:', (await call('GET', '/ordenes/' + orden._id)).eventos.map(e => e.tipo).join(' → '));
   } catch (e) {
     console.error('FALLO', e.message);

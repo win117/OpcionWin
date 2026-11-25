@@ -177,7 +177,7 @@ export default function MapaMercado() {
     if (!ancho) return { sectores: [], industrias: [], cuadros: [] };
     const conValor = visiblesRef.current.map(i => ({ simbolo: i.simbolo, sector: i.sector, industria: i.industria, valor: tamano === 'dinero' ? (i.precio || 0) * (i.volumen || 0) : i.capitalizacion || 0 }));
     return disponerMapa(conValor, ancho, alto, { maximoPorSector: movil && !sector ? MAX_MOVIL : Infinity });
-  }, [firma, ancho, alto, tamano, movil, sector]);
+  }, [firma, ancho, alto, tamano, movil, sector]); // eslint-disable-line react-hooks/exhaustive-deps -- firma decide cuándo cambia el conjunto
   const focoVigente = useMemo(() => {
     const claves = new Set([...disposicion.cuadros.map(c => (c.resto ? 'r:' + c.sector : 's:' + c.simbolo)), ...disposicion.sectores.map(s => 'c:' + s.nombre)]);
     const primero = disposicion.cuadros.find(c => !c.resto);

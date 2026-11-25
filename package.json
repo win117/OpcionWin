@@ -10,7 +10,9 @@
     "start": "node dist/index.js",
     "check:structure": "npm run build && node scripts/check-structure.cjs",
     "check:models": "npm run build && node --test scripts/check-models.cjs",
-    "test": "npm run build && node --test scripts/check-models.cjs tests/services.test.cjs tests/http.test.cjs tests/start.test.cjs tests/cores.test.cjs tests/integrations.test.cjs tests/webull.test.cjs tests/acciones.test.cjs tests/senales-activos.test.cjs tests/operacion.test.cjs tests/trabajos-auditoria.test.cjs tests/screener.test.cjs tests/universo-vivo.test.cjs tests/estrategias-orden.test.cjs tests/repositorios.test.cjs tests/plataforma.test.cjs tests/analisis-pagina.test.cjs tests/cinco-cores.test.cjs tests/graficas-busqueda.test.cjs",
+    "test": "npm run build && node --test scripts/check-models.cjs \"tests/*.test.cjs\"",
+    "lint": "eslint .",
+    "verificar": "npm run lint && npm test && npm --prefix web run build",
     "test:databases": "npm run build && node scripts/check-databases.cjs",
     "setup:mongodb": "npm run build && node scripts/setup-mongodb.cjs",
     "dev:web": "npm --prefix web run dev",
@@ -34,7 +36,6 @@
     "express": "^5.3.0",
     "mongoose": "^9.12.1",
     "morgan": "^1.12.1",
-    "swagger-jsdoc": "^6.3.0",
     "swagger-ui-express": "^5.0.1"
   },
   "devDependencies": {
@@ -43,6 +44,10 @@
     "@babel/node": "^8.1.2",
     "@babel/plugin-transform-runtime": "^8.1.2",
     "@babel/preset-env": "^8.0.7",
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.15.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.14.0",
     "nodemon": "^3.1.14"
   },
   "nodemonConfig": {
@@ -52,6 +57,6 @@
     "ext": "js,json"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   }
 }

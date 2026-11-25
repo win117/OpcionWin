@@ -139,7 +139,7 @@ const metricasBlackScholes = ({ estrategia, componentes, S, fechaReferencia, r, 
   // Probabilidad de ganancia al vencimiento (P[S_T en la zona de ganancia]).
   if (!componentes.every(c => esNumero(c.precio))) return;
   const sobre = (X, sigma) => (sigma == null ? null : probabilidadSobre({ S, X, T, r, sigma }));
-  let pop = null;
+  let pop;
   if (estrategia === 'LONG_CALL') pop = sobre(componentes[0].strike + componentes[0].precio, ivs[0]);
   else if (estrategia === 'LONG_PUT') {
     const p = sobre(componentes[0].strike - componentes[0].precio, ivs[0]);
