@@ -58,3 +58,11 @@ test('los paneles y la tendencia dan los mismos números que los cores del servi
   cerca(ind.rsiSerie(c).at(-1), met('rsi_14'), 'rsi'); cerca(ind.macdSerie(c).hist.at(-1), met('macd_hist'), 'macd'); cerca(ind.estocasticoSerie(v).k.at(-1), met('estocastico_k'), 'estocástico'); cerca(ind.bollingerSerie(c).pctB.at(-1), met('bollinger_pctb'), 'bollinger');
   const recta = rectaTendencia(v), medio = c.slice(-20).reduce((a, b) => a + b, 0) / 20; assert.equal(recta.length, 20); cerca((recta[1].value - recta[0].value) / medio * 100, met('pendiente_20'), 'pendiente'); assert.deepEqual(rectaTendencia(v.slice(0, 5)), []);
 });
+
+test('soportes: un doble piso reciente no se pierde frente a niveles viejos con más toques', async () => {
+  const { soportesResistencias } = await web('senales.js');
+  const bajos = { 20: 100, 40: 100.2, 60: 100.1, 80: 110, 100: 110.2, 120: 110.1, 200: 120, 230: 120.3 }; // dos niveles viejos ×3 y uno reciente ×2
+  const v = Array.from({ length: 260 }, (_, i) => { const low = bajos[i] ?? 135 + (i % 7) * 0.1 + i * 0.001; return { time: T0 + i * DIA, open: 137, high: 138 + i * 0.01, low, close: 137, volume: 1 }; });
+  const s = soportesResistencias(v).filter(n => n.tipo === 'soporte' && !n.extremo);
+  assert.ok(s.some(n => Math.abs(n.precio - 120.15) < 0.2 && n.toques === 2), JSON.stringify(s)); assert.ok(s.every(n => !('fuerza' in n)));
+});

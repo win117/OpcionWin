@@ -10,7 +10,8 @@ const esNum = v => typeof v === 'number' && Number.isFinite(v);
  *    el nivel es la media del grupo y `toques` el número de pivotes.
  *    Dos pivotes a menos de `ventana` velas son la misma visita: cuentan un toque.
  * 3) Se conservan los niveles con ≥ `minToques`; por encima del último cierre son resistencias, por debajo soportes.
- *    De cada lado: siempre el más cercano al precio y después los más tocados, hasta `maxPorLado`.
+ *    De cada lado: siempre el más cercano al precio y después los de más fuerza, hasta `maxPorLado`.
+ *    Fuerza: suma de sus toques, donde uno reciente vale más que uno viejo (pierde peso con un tercio del periodo como escala).
  * 4) Los extremos del periodo también frenan el precio aunque se hayan tocado una vez: si el máximo (o el mínimo) queda más allá
  *    de todos los niveles de su lado, se agrega con `extremo: true`.
  * Devuelve [{ precio, toques, tipo: 'resistencia'|'soporte', ultimoToque, extremo? }] de mayor a menor precio.
@@ -31,24 +32,25 @@ export function soportesResistencias(velas, { ventana = 5, tolerancia = 0.015, m
     if (g && Math.abs(p.precio - g.suma / g.items.length) / (g.suma / g.items.length) <= tolerancia) { g.items.push(p); g.suma += p.precio; }
     else grupos.push({ items: [p], suma: p.precio });
   }
-  const visitas = items => [...items].sort((a, b) => a.i - b.i).reduce((r, p) => (r.ultima == null || p.i - r.ultima >= ventana ? { n: r.n + 1, ultima: p.i } : { ...r, ultima: p.i }), { n: 0, ultima: null }).n;
+  const escala = v.length / 3, peso = i => Math.exp(-(v.length - 1 - i) / escala);
+  const visitas = items => [...items].sort((a, b) => a.i - b.i).reduce((r, p) => (r.ultima == null || p.i - r.ultima >= ventana ? { n: r.n + 1, fuerza: r.fuerza + peso(p.i), ultima: p.i } : { ...r, ultima: p.i }), { n: 0, fuerza: 0, ultima: null });
   const cierre = v.at(-1).close;
   const niveles = grupos
-    .map(g => ({ precio: g.suma / g.items.length, toques: visitas(g.items), ultimoToque: Math.max(...g.items.map(p => p.time)) }))
+    .map(g => { const t = visitas(g.items); return { precio: g.suma / g.items.length, toques: t.n, fuerza: t.fuerza, ultimoToque: Math.max(...g.items.map(p => p.time)) }; })
     .filter(n => n.toques >= minToques)
     .map(n => ({ ...n, tipo: n.precio >= cierre ? 'resistencia' : 'soporte' }));
   const lado = tipo => {
     const alza = tipo === 'resistencia';
     const lista = niveles.filter(n => n.tipo === tipo).sort((a, b) => Math.abs(a.precio - cierre) - Math.abs(b.precio - cierre));
     const [cercano, ...resto] = lista;
-    const elegidos = cercano ? [cercano, ...resto.sort((a, b) => b.toques - a.toques || Math.abs(a.precio - cierre) - Math.abs(b.precio - cierre)).slice(0, maxPorLado - 1)] : [];
+    const elegidos = cercano ? [cercano, ...resto.sort((a, b) => b.fuerza - a.fuerza || Math.abs(a.precio - cierre) - Math.abs(b.precio - cierre)).slice(0, maxPorLado - 1)] : [];
     const vela = v.reduce((m, x) => ((alza ? x.high > m.high : x.low < m.low) ? x : m));
     const precio = alza ? vela.high : vela.low;
     const masAlla = alza ? precio > Math.max(cierre, ...lista.map(n => n.precio * (1 + tolerancia))) : precio < Math.min(cierre, ...lista.map(n => n.precio * (1 - tolerancia)));
     if (masAlla) elegidos.push({ precio, toques: 1, tipo, ultimoToque: vela.time, extremo: true });
     return elegidos;
   };
-  return [...lado('resistencia'), ...lado('soporte')].sort((a, b) => b.precio - a.precio);
+  return [...lado('resistencia'), ...lado('soporte')].map(({ fuerza: _f, ...n }) => n).sort((a, b) => b.precio - a.precio);
 }
 
 // +2 si `a` cruza hacia arriba de `b`, −2 si cruza hacia abajo, 0 si no (signos estrictos; los empates no cuentan).
