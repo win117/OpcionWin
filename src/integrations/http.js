@@ -77,7 +77,6 @@ export const createHttp = ({
         controlador.abort();
         rechazar(Object.assign(new Error('agotado'), { name: 'TimeoutError' }));
       }, ms);
-      temporizador.unref?.();
     });
     try {
       return await Promise.race([tarea(), vencido]);
