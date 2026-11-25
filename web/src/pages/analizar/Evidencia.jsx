@@ -18,13 +18,13 @@ export const TABS = [
   { value: 'noticias', label: 'Noticias' },
 ];
 
-export default function Evidencia({ tab, onTab, empresa, simbolo, velas, datos, pos, config, coresActivos, version, onCambio }) {
+export default function Evidencia({ tab, onTab, empresa, simbolo, mercado, velas, datos, pos, config, coresActivos, version, onCambio }) {
   const pendiente = <section className="card"><Empty title="Aún no disponible">Aparece cuando terminen de llegar los datos de {simbolo}.</Empty></section>;
   return (
     <div className="evidencia">
       <Tabs tabs={TABS} value={tab} onChange={onTab} label="Evidencia del análisis" />
       <div role="tabpanel" aria-label={TABS.find(t => t.value === tab).label} className="evidencia__panel stack">
-        {tab === 'grafica' && <AnalisisTecnico simbolo={simbolo} registrada={Boolean(empresa)} velas={velas} coresActivos={coresActivos} evalIndicadores={datos?.evaluaciones?.indicadores} onCambio={onCambio} />}
+        {tab === 'grafica' && <AnalisisTecnico simbolo={simbolo} mercado={mercado} registrada={Boolean(empresa)} velas={velas} coresActivos={coresActivos} evalIndicadores={datos?.evaluaciones?.indicadores} onCambio={onCambio} />}
         {tab === 'factores' && (datos ? (
           <>
             <LecturaCores evaluaciones={datos.evaluaciones} coresActivos={coresActivos} analizados={datos.seleccion?.coresSeleccionados} />

@@ -88,7 +88,7 @@ function Indicadores({ estado, resumen, evalIndicadores }) {
   );
 }
 
-export default function AnalisisTecnico({ simbolo, registrada = true, velas, coresActivos, evalIndicadores, onCambio }) {
+export default function AnalisisTecnico({ simbolo, mercado, registrada = true, velas, coresActivos, evalIndicadores, onCambio }) {
   const { diarias } = velas;
   const calc = useMemo(() => ({
     niveles: soportesResistencias(diarias),
@@ -103,7 +103,7 @@ export default function AnalisisTecnico({ simbolo, registrada = true, velas, cor
     <div className="stack">
       <section className="card" aria-labelledby="graf-titulo">
         <div className="card__header"><h2 id="graf-titulo">Precio y señales</h2></div>
-        <GraficoPanel simbolo={simbolo} registrada={registrada} diarias={diarias} loading={velas.loading} error={velas.error} onReload={velas.reload} onCambio={onCambio} niveles={calc.niveles} eventos={eventosGrafica} />
+        <GraficoPanel simbolo={simbolo} mercado={mercado} registrada={registrada} diarias={diarias} loading={velas.loading} error={velas.error} onReload={velas.reload} onCambio={onCambio} niveles={calc.niveles} eventos={eventosGrafica} />
       </section>
       {diarias.length >= 20 && (
         <div className="grid grid--2">

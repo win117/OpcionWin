@@ -223,7 +223,7 @@ export default function CarteraPaper({ nombre = 'el broker', broker, vista = 'to
               <div className="alert alert--warning" role="note">No hay datos de la cuenta simulada de {nombre}{d.error ? ': ' + d.error : '.'} Revisa las credenciales del broker en el servidor.</div>
             )}
 
-            {vista !== 'ordenes' && cuenta && <HistorialCartera broker={broker} nombre={nombre} />}
+            {vista !== 'ordenes' && cuenta && <HistorialCartera broker={broker} nombre={nombre} actual={cuenta.patrimonio} />}
             {vista !== 'ordenes' && <h3>Posiciones abiertas</h3>}
             {vista !== 'ordenes' && (posiciones.length === 0 ? <p className="muted small">{d.posicionesDisponibles === false ? 'Posiciones no disponibles por ahora.' : 'Sin posiciones abiertas.'}</p> : (
               <div className="table-wrap">

@@ -1,8 +1,9 @@
 // Cabeceras de seguridad. style-src 'unsafe-inline': estilos en línea de React, lightweight-charts y swagger-ui.
+// frame-src: gráfica de TradingView, aislada en su propio marco (no se carga ningún script suyo en esta página).
 // img/font data: icono de index.html y recursos de swagger-ui.
 const CSP = [
   "default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline'", "img-src 'self' data:", "font-src 'self' data:",
-  "connect-src 'self'", "object-src 'none'", "base-uri 'self'", "form-action 'self'", "frame-ancestors 'none'",
+  "connect-src 'self'", 'frame-src https://www.tradingview-widget.com https://s.tradingview.com', "object-src 'none'", "base-uri 'self'", "form-action 'self'", "frame-ancestors 'none'",
 ].join('; ');
 export function cabecerasSeguridad(req, res, next) {
   res.set({ 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY', 'Content-Security-Policy': CSP });

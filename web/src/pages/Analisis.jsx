@@ -216,7 +216,7 @@ export default function Analisis() {
         <aside className="panel" aria-label="Veredicto y contratos">
           <PanelEstrategias empresa={empresa} datos={misDatos} cargando={!listo} error={datos.error} onReload={datos.reload} pos={pos} config={config} trabajo={corriendo ? proceso?.tipo : null} onComparar={compararStrikes} />
         </aside>
-        {listo && <Evidencia tab={tab} onTab={setTab} empresa={empresa} simbolo={simbolo} velas={velas} datos={misDatos} pos={pos} config={config} coresActivos={resuelto.cores} version={version} onCambio={() => setVersion(v => v + 1)} />}
+        {listo && <Evidencia tab={tab} onTab={setTab} empresa={empresa} simbolo={simbolo} mercado={empresa?.mercado || ficha?.mercado} velas={velas} datos={misDatos} pos={pos} config={config} coresActivos={resuelto.cores} version={version} onCambio={() => setVersion(v => v + 1)} />}
       </div>
       <p className="disclaimer">{DISCLAIMER}</p>
     </div>

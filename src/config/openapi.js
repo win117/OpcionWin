@@ -54,5 +54,5 @@ export function openapi() {
     paths[path] = { ...paths[path], [d.metodo]: documentar(d) };
   }
   return { openapi: '3.0.3', info: { title: 'Plataforma de análisis de opciones', version: '2.1.0', description: 'CRUD dual MongoDB/PostgreSQL, datos de Alpaca, SEC y Tesoro de EE. UU., cinco cores, confluencia, selección y órdenes en paper (Alpaca y Webull).' },
-    servers: [{ url: config.API_URL }], components: { securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer', description: 'Token opaco devuelto por POST /sesiones' } } }, paths };
+    servers: [{ url: config.API_URL }], tags: [...new Set(rutas.map(d => d.grupo))].map(name => ({ name })), components: { securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer', description: 'Token opaco devuelto por POST /sesiones' } } }, paths };
 }

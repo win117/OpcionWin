@@ -1,6 +1,6 @@
 // Gráfica técnica: velas/línea + SMA, soportes/resistencias (líneas con nº de toques) y marcadores de compra/venta.
 // Recibe las velas diarias ya cargadas (hooks/useVelas) y los niveles/eventos calculados en utils/senales.
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { CandleChart } from '../../components/CandleChart';
 import { ChartToolbar } from '../../components/ChartToolbar';
 import { Empty, ErrorMessage, Loading } from '../../components/States';
@@ -9,6 +9,10 @@ import { agregar, haceAnios, rangoVisible, sma } from '../../utils/velas';
 import { etiquetaEvento } from '../../utils/senales';
 import { esperar } from './flujo';
 import { fmtDate, fmtMoney } from '../../utils/format';
+
+const TradingView = lazy(() => import('../../components/TradingView'));
+const VISTA = 'opciones.grafica'; // preferencia de este navegador
+const leerVista = () => { try { return localStorage.getItem(VISTA) === 'tradingview' ? 'tradingview' : 'app'; } catch { return 'app'; } };
 
 const ALTO = 420;
 const CON_TEXTO = new Set(['1M', '3M', '6M']);
@@ -19,7 +23,7 @@ const SMAS = [
   { n: 200, color: '--warning-fg' },
 ];
 
-export default function GraficoPanel({ simbolo, registrada = true, diarias, loading, error, onReload, onCambio, niveles = [], eventos = [] }) {
+function GraficoApp({ simbolo, registrada = true, diarias, loading, error, onReload, onCambio, niveles = [], eventos = [] }) {
   const [opts, setOpts] = useState({ rango: '6M', intervalo: 'D', tipo: 'velas', sma: { 20: true, 50: true, 200: false }, volumen: false });
   const [verNiveles, setVerNiveles] = useState(true);
   const [verSenales, setVerSenales] = useState(true);
@@ -115,6 +119,24 @@ export default function GraficoPanel({ simbolo, registrada = true, diarias, load
       </div>
       {cargando && <Loading text={opts.rango === 'MAX' ? 'Trayendo todo el histórico…' : `Trayendo ${anios} ${anios === 1 ? 'año' : 'años'} de precios…`} />}
       <ErrorMessage error={errorCarga} title="No se pudo cargar el histórico" />
+    </div>
+  );
+}
+
+/** Dos vistas: la de la app (niveles y señales propias) y la de TradingView, que solo se carga si se elige. */
+export default function GraficoPanel({ mercado, ...props }) {
+  const [vista, setVista] = useState(leerVista);
+  const elegir = v => { setVista(v); try { localStorage.setItem(VISTA, v); } catch { /* sin almacenamiento */ } };
+  return (
+    <div className="stack">
+      <div className="seg" role="group" aria-label="Gráfica">
+        {[['app', 'Señales de la app'], ['tradingview', 'TradingView']].map(([id, t]) => (
+          <button key={id} type="button" className={'seg__btn seg__btn--solo' + (vista === id ? ' is-active' : '')} aria-pressed={vista === id} onClick={() => elegir(id)}>{t}</button>
+        ))}
+      </div>
+      {vista === 'tradingview'
+        ? <Suspense fallback={<Loading text="Cargando TradingView…" />}><TradingView simbolo={props.simbolo} mercado={mercado} /></Suspense>
+        : <GraficoApp {...props} />}
     </div>
   );
 }

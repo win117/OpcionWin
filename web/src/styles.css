@@ -972,3 +972,8 @@ a.mov__fila:hover { background: var(--surface-2); }
 .detalle .eventos { padding: .5rem 0; border-top: 1px solid var(--border-subtle); }
 .linea { margin: 0; }
 .linea figcaption { min-height: 1.5em; }
+
+/* TradingView */
+.tv iframe { display: block; width: 100%; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
+.tv p { margin: .5rem 0 0; }
+@media (max-width: 640px) { .tv iframe { max-height: 70vh; } }

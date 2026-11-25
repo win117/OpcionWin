@@ -218,3 +218,11 @@ test('Cliente HTTP: el límite cubre el cuerpo y sus fallos son RED',async()=>{
   await assert.rejects(caido.request({url:'http://x'}),e=>e.codigo==='NO_ENCONTRADO');
   assert.equal(await createHttp({proveedor:'x',fetch:async()=>respuesta(async()=>'',204)}).request({url:'http://x'}),null);
 });
+
+test('CSP: solo se permite el marco de TradingView y ningún script ajeno',()=>{
+  const {cabecerasSeguridad}=require('../dist/middlewares/cabeceras.handler');
+  let h; cabecerasSeguridad({secure:false},{set:x=>{h=x;}},()=>{});
+  const csp=Object.fromEntries(h['Content-Security-Policy'].split('; ').map(d=>[d.split(' ')[0],d.split(' ').slice(1).join(' ')]));
+  assert.equal(csp['script-src'],"'self'"); assert.equal(csp['connect-src'],"'self'"); assert.equal(csp['frame-ancestors'],"'none'");
+  assert.ok(csp['frame-src'].split(' ').every(x=>/^https:\/\/(www\.tradingview-widget|s\.tradingview)\.com$/.test(x)));
+});

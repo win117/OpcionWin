@@ -204,7 +204,7 @@ export function createUniversoVivo({ integraciones, factory, catalogo, tamano = 
       if (fechaOperacion && ahora() - Date.parse(fechaOperacion) > MAX_DIAS_SIN_OPERAR * DIA) continue;
       const q = combinarCotizacion(iex[s], sip[s], { abierto, hoy });
       if (q?.precio == null) continue;
-      items.push({ simbolo: s, nombre: e.nombre, sector: e.sector, industria: e.industria, ...q, capitalizacion: e.acciones ? Math.round(e.acciones * q.precio) : e.capitalizacion });
+      items.push({ simbolo: s, nombre: e.nombre, sector: e.sector, industria: e.industria, mercado: e.mercado ?? null, ...q, capitalizacion: e.acciones ? Math.round(e.acciones * q.precio) : e.capitalizacion });
       const p = puntajes.get(s);
       if (p) { p.precio = q.precio; p.cambioPct = q.cambioPct; }
     }

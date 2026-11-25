@@ -236,3 +236,9 @@ test('órdenes abiertas: patas a OCC aunque no repitan el subyacente; formato ir
   cuerpo = { data: [] }; assert.deepEqual(await w.ordenesAbiertas(), []);
   cuerpo = {}; await assert.rejects(w.ordenesAbiertas(), e => e.codigo === 'PROVEEDOR');
 });
+
+test('fuera de horario: la orden se explica en español y no queda en duda', async () => {
+  const w = createWebullClient({ appKey: 'K', appSecret: 'S', accountId: 'ID', esperar: async () => {}, fetch: async u => (String(u).includes('/accounts/list') ? new Response('[{"account_id":"ID"}]', { status: 200 })
+    : new Response(JSON.stringify({ message: 'You cannot place orders at this moment. Available trading hours are: 9:30 a.m.- 4:00 p.m. ET.' }), { status: 417 })) });
+  await assert.rejects(w.enviarOrden({ clientOrderId: 'abcdefghij1', tipo: 'limit', precioLimite: 1, cantidad: 1, componentes: [{ simbolo: 'KO261218C00100000', accion: 'buy' }] }), e => e.codigo === 'VALIDACION' && /9:30 a 16:00/.test(e.mensaje));
+});

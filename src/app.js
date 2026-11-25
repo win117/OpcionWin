@@ -33,7 +33,7 @@ export function createApp(options = {}) {
   app.get('/health',(_req,res)=>res.json({status:'ok'}));
   app.get(config.API_URL,(_req,res)=>res.json({success:true,message:'RESTful API de opciones',docs:config.API_URL+'/api-docs'}));
   app.get(config.API_URL+'/openapi.json',(_req,res)=>res.json(openapi()));
-  app.use(config.API_URL+'/api-docs',swaggerUi.serve,swaggerUi.setup(openapi()));
+  app.use(config.API_URL+'/api-docs',swaggerUi.serve,swaggerUi.setup(openapi(),{swaggerOptions:{docExpansion:'none'}}));
   routeAPI(app,options);
   // Frontend compilado (ADR-007): web/dist en la raíz del proyecto, con respaldo SPA.
   const web = options.webDir ?? path.resolve(__dirname, '..', 'web', 'dist');

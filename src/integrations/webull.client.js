@@ -331,7 +331,11 @@ export const createWebullClient = ({
   const enviarOrden = async orden => {
     exigir();
     const cuerpo = construirCuerpoOrden(orden, await idCuenta());
-    const r = await trading('/trading/orders/place', { method: 'POST', body: cuerpo });
+    const r = await trading('/trading/orders/place', { method: 'POST', body: cuerpo }).catch(e => {
+      // Fuera de horario la orden no entra (no es un envío en duda): se explica y se puede repetir después.
+      if (/trading hours/i.test(e?.mensaje || '')) throw validacion('Webull solo recibe órdenes de opciones con el mercado abierto (9:30 a 16:00, hora de Nueva York). La orden no se envió.');
+      throw e;
+    });
     const clientOrderId = cuerpo.new_orders[0].client_order_id;
     // La respuesta solo trae identificadores: el estado inicial es "enviada" (se refresca con consultarOrden / sincronización).
     return { ordenExternaId: r?.client_order_id || clientOrderId, clientOrderId, ordenInternaId: r?.order_id ?? null, estado: 'enviada', estadoProveedor: 'SUBMITTED_REQUEST',
