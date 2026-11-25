@@ -25,7 +25,7 @@ function BrokersTab() {
       api={brokers}
       createLabel="Nuevo broker"
       fields={[
-        { name: 'codigo', label: 'Código', type: 'select', required: true, options: [{ value: 'alpaca', label: 'Alpaca' }, { value: 'webull', label: 'Webull' }, { value: 'ibkr', label: 'Interactive Brokers' }] },
+        { name: 'codigo', label: 'Código', type: 'select', required: true, options: [{ value: 'alpaca', label: 'Alpaca' }, { value: 'webull', label: 'Webull' }] },
         { name: 'nombre', label: 'Nombre', required: true },
         { name: 'entornos', label: 'Entornos', type: 'checkboxes', options: PAPER_ONLY, default: ['paper'] },
         { name: 'activo', label: 'Activo', type: 'checkbox', default: true },

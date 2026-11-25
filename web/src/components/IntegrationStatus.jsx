@@ -5,7 +5,6 @@ const PROVEEDORES = [
   { key: 'alpaca', label: 'Alpaca' },
   { key: 'sec', label: 'SEC' },
   { key: 'webull', label: 'Webull' },
-  { key: 'ibkr', label: 'Interactive Brokers' },
 ];
 
 /** Estado de integraciones (GET /integraciones/estado). Tolera 404 mientras el backend no lo exponga. */

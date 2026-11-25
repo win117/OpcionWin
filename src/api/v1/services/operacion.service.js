@@ -32,7 +32,6 @@ const mensajeError = e => String(e?.mensaje || e?.output?.payload?.message || e?
 const SIN_CONFIGURAR = {
   alpaca: 'Faltan ALPACA_KEY_ID / ALPACA_SECRET_KEY en el servidor.',
   webull: 'Faltan WEBULL_APP_KEY / WEBULL_APP_SECRET en el servidor (o WEBULL_ENTORNO/WEBULL_BASE_URL no permitidos: solo paper).',
-  ibkr: 'Falta IBKR_GATEWAY_URL: Interactive Brokers se usa con su Client Portal Gateway en tu computadora (ver docs/interactive-brokers.md).',
 };
 
 export function parsearOcc(simbolo) {
@@ -201,7 +200,8 @@ export function createOperacion({ integraciones, factory = repository, cola, aho
 
     // 0) GET /brokers/disponibles
     async disponibles() {
-      return { items: Object.values(BROKERS).map(m => {
+      // Interactive Brokers solo aparece si está configurado.
+      return { items: Object.values(BROKERS).filter(m => m.codigo !== 'ibkr' || integraciones.ibkr?.configurado).map(m => {
         const a = integraciones[m.codigo];
         const configurado = Boolean(a?.configurado);
         return { codigo: m.codigo, nombre: m.nombre, configurado, operativo: configurado, entornos: ['paper'],
