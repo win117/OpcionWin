@@ -1,6 +1,6 @@
 // Una sola serie en el tiempo, con lectura al pasar el puntero. `puntos`: [{ fecha (ISO), valor }].
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { createChart, CrosshairMode } from 'lightweight-charts';
+import { createChart, CrosshairMode, LineSeries } from 'lightweight-charts';
 import { fmtDate, fmtMoney, isNum } from '../utils/format';
 
 const cssVar = nombre => getComputedStyle(document.documentElement).getPropertyValue(nombre).trim();
@@ -22,7 +22,7 @@ export default function GraficaLinea({ puntos, height = 200, etiqueta }) {
   useEffect(() => {
     const el = caja.current;
     const chart = createChart(el, { ...tema(), height, width: el.clientWidth, autoSize: true, crosshair: { mode: CrosshairMode.Magnet }, localization: { locale: 'es-MX' }, handleScroll: false, handleScale: false });
-    const serie = chart.addLineSeries({ color: cssVar('--accent'), lineWidth: 2, priceLineVisible: false });
+    const serie = chart.addSeries(LineSeries, { color: cssVar('--accent'), lineWidth: 2, priceLineVisible: false });
     chart.subscribeCrosshairMove(e => { const v = e.seriesData?.get(serie)?.value; setFoco(isNum(v) ? { fecha: String(e.time), valor: v } : null); });
     refs.current = { chart, serie };
     const alCambiar = () => { chart.applyOptions(tema()); serie.applyOptions({ color: cssVar('--accent') }); };

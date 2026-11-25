@@ -10,24 +10,29 @@ function Grupo({ label, opciones, value, onChange }) {
   );
 }
 
-function Toggle({ label, activo, onChange }) {
-  return (
-    <button type="button" className={'seg__btn seg__btn--solo' + (activo ? ' is-active' : '')} aria-pressed={activo} onClick={() => onChange(!activo)}>{label}</button>
-  );
-}
+const SOBRE_PRECIO = [['sma20', 'SMA 20'], ['sma50', 'SMA 50'], ['sma200', 'SMA 200'], ['bollinger', 'Bollinger'], ['tendencia', 'Tendencia 20'], ['volumen', 'Volumen']];
+const CAPAS = [['niveles', 'Soportes y resistencias'], ['senales', 'Compra/venta'], ['patrones', 'Patrones de velas']];
+const PANELES = [['rsi', 'RSI'], ['macd', 'MACD'], ['estocastico', 'Estocástico']];
 
-/** Opciones de visualización del gráfico. `opts`: { rango, intervalo, tipo, sma:{20,50,200}, volumen }. */
-export function ChartToolbar({ opts, onChange }) {
+/** Opciones de visualización. `opts`: { rango, intervalo, tipo, capas: { id: bool } }. `bloqueadas`: capas que no aplican ahora y por qué. */
+export function ChartToolbar({ opts, onChange, bloqueadas = {} }) {
   const set = cambios => onChange({ ...opts, ...cambios });
+  const grupo = (label, lista) => (
+    <div className="seg" role="group" aria-label={label}>
+      {lista.map(([id, texto]) => {
+        const activo = Boolean(opts.capas[id]) && !bloqueadas[id];
+        return <button key={id} type="button" className={'seg__btn seg__btn--solo' + (activo ? ' is-active' : '')} aria-pressed={activo} disabled={Boolean(bloqueadas[id])} title={bloqueadas[id]} onClick={() => set({ capas: { ...opts.capas, [id]: !opts.capas[id] } })}>{texto}</button>;
+      })}
+    </div>
+  );
   return (
     <div className="chart-toolbar">
       <Grupo label="Rango" opciones={RANGOS} value={opts.rango} onChange={rango => set({ rango })} />
       <Grupo label="Intervalo" opciones={INTERVALOS} value={opts.intervalo} onChange={intervalo => set({ intervalo })} />
       <Grupo label="Tipo de gráfico" opciones={[{ value: 'velas', label: 'Velas' }, { value: 'linea', label: 'Línea' }]} value={opts.tipo} onChange={tipo => set({ tipo })} />
-      <div className="seg" role="group" aria-label="Indicadores">
-        {[20, 50, 200].map(n => <Toggle key={n} label={'SMA ' + n} activo={!!opts.sma[n]} onChange={v => set({ sma: { ...opts.sma, [n]: v } })} />)}
-        <Toggle label="Volumen" activo={opts.volumen} onChange={volumen => set({ volumen })} />
-      </div>
+      {grupo('Sobre el precio', SOBRE_PRECIO)}
+      {grupo('Señales', CAPAS)}
+      {grupo('Paneles', PANELES)}
     </div>
   );
 }

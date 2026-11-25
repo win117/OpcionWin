@@ -20,6 +20,7 @@ async function trading(ruta) { // contratos vencidos (el adaptador de la app sol
     await z(2000 * (n + 1));
   }
 }
+const reintentar = async (fn, veces = 5) => { for (let n = 0; ; n++) { try { return await fn(); } catch (e) { if (n >= veces) throw e; await z(3000 * (n + 1)); } } };
 const terceros = () => { const l = []; for (let y = 2024; y <= 2026; y++) for (let m = 0; m < 12; m++) { const d = new Date(Date.UTC(y, m, 1)); l.push(dia(Date.UTC(y, m, 1 + ((5 - d.getUTCDay() + 7) % 7) + 14))); } return l.filter(v => v >= '2024-03-28' && v < dia(Date.now() - DIA)); };
 const media = l => l.reduce((a, b) => a + b, 0) / l.length;
 
@@ -48,7 +49,10 @@ const media = l => l.reduce((a, b) => a + b, 0) / l.length;
     }
     // Solo se usan contratos que se negociaron ese día: de ahí se eligen los strikes.
     const barras = {};
-    for (const hoy of new Set(casos.map(c => c.hoy))) Object.assign(barras, await alpaca.velasOpciones(casos.filter(c => c.hoy === hoy).flatMap(c => c.l.map(x => x.symbol)), { desde: hoy + 'T00:00:00Z', hasta: hoy + 'T23:59:59Z' }));
+    for (const hoy of new Set(casos.map(c => c.hoy))) {
+      const lista = casos.filter(c => c.hoy === hoy).flatMap(c => c.l.map(x => x.symbol));
+      for (let i = 0; i < lista.length; i += 100) Object.assign(barras, await reintentar(() => alpaca.velasOpciones(lista.slice(i, i + 100), { desde: hoy + 'T00:00:00Z', hasta: hoy + 'T23:59:59Z' })));
+    }
     for (const c of casos) {
       const px0 = tp => new Map(c.l.filter(x => x.type === tp && barras[x.symbol]?.[0]?.cierre > 0).map(x => [Number(x.strike_price), barras[x.symbol][0].cierre]));
       const C = px0('call'), Q = px0('put'), S = c.S, cerca = (ls, x) => ls.reduce((a, b) => (Math.abs(b - x) < Math.abs(a - x) ? b : a), ls[0]);

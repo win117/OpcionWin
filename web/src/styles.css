@@ -450,7 +450,13 @@ input:disabled, select:disabled { opacity: .65; }
 .result-card .scorebar { max-width: 420px; }
 
 /* ===== Charts ===== */
-.candle-chart { width: 100%; min-width: 0; }
+.candle-chart { position: relative; width: 100%; min-width: 0; }
+.candle-chart__lienzo { position: absolute; inset: 0; }
+.candle-chart__leyenda { position: absolute; z-index: 3; top: 0; left: 0; right: 70px; display: flex; flex-wrap: wrap; gap: 0 .6rem; padding: 4px 8px; font-size: var(--t-12); color: var(--text-muted); pointer-events: none; font-variant-numeric: tabular-nums; }
+.candle-chart__leyenda b { font-weight: 600; color: var(--text); } .candle-chart__leyenda b.up { color: var(--up); } .candle-chart__leyenda b.down { color: var(--down); }
+.candle-chart__leyenda i { display: inline-block; width: 8px; height: 3px; margin-right: 4px; vertical-align: middle; border-radius: 2px; }
+.candle-chart__vivo { color: var(--up); font-weight: 600; }
+.patrones h3 { margin: .5rem 0; }
 .payoff { margin: 0; }
 .chart__grid { stroke: var(--border-subtle); stroke-width: 1; }
 .chart__zero { stroke: var(--text-muted); stroke-width: 1.2; }
@@ -977,3 +983,4 @@ a.mov__fila:hover { background: var(--surface-2); }
 .tv iframe { display: block; width: 100%; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
 .tv p { margin: .5rem 0 0; }
 @media (max-width: 640px) { .tv iframe { max-height: 70vh; } }
+@media (max-width: 640px) { .candle-chart__leyenda { right: 0; gap: 0 .45rem; padding: 2px 4px; } .candle-chart__sup { display: none; } } /* en el teléfono los valores de las medias taparían las velas */

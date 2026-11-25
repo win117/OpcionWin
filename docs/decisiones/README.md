@@ -145,3 +145,30 @@ instituciones × 2 cortes sirven para todas las empresas. Mientras falte algo, e
 un factor sin datos se declara («Parcial: opinan 4 de 5»).
 **Consecuencias.** El puntaje de una empresa cambia conforme llegan sus factores. La combinación usa la confluencia vigente (ADR-012) con pesos iguales:
 no se recalibró (ADR-014 sigue como propuesta). El ranking usa velas SIP y Análisis IEX: puede haber diferencias pequeñas.
+
+## ADR-016 · Tasa, dividendos, resultados e interés abierto se obtienen de su fuente
+**Contexto.** El 4 % de tasa estaba escrito dos veces en el código, los cálculos suponían dividendos en cero y no se avisaba de resultados ni de contratos poco negociados.
+**Decisión.** Tasa: letras del Tesoro de EE. UU. por plazo (interpolación lineal, tasa continua), 12 h en memoria. Dividendos y divisiones: Alpaca, solo los anunciados; el
+rendimiento usa lo pagado en el último año. Resultados: 8-K punto 2.02 de la SEC; la próxima fecha se **estima** (mismo trimestre + 364 días) con un margen propio de cada
+empresa entre 4 y 14 días. Interés abierto: el de Alpaca, guardado con el contrato. Son avisos y entradas del cálculo de probabilidad: **no cambian los puntajes**.
+**Evidencia.** En 186 reportes reales de empresas grandes la estimación falló 0 días de mediana, 4 en el 80 % y 8 en el 95 %.
+**Consecuencias.** Sin dato se usa 0 y se dice. Alpaca puede no conocer aún un dividendo futuro. Emisores extranjeros (20-F/6-K): sin fecha.
+
+## ADR-017 · Una sola definición por ruta (Zod) y capas vigiladas por pruebas
+**Contexto.** Las acciones se validaban a mano y OpenAPI se escribía aparte: faltaban rutas en la documentación.
+**Decisión.** `api/v1/schemas` describe cada ruta que no es CRUD; de ahí salen la validación (`validar.handler.js`) y OpenAPI. `acciones.routes.js` se dividió en análisis,
+integraciones y operación, con controlador. Cada módulo CRUD usa de verdad su servicio. `contrato-broker.js` fija qué debe tener un broker y el servidor no arranca si falta algo.
+`tests/estructura.test.cjs` comprueba todo lo anterior. ESLint y GitHub Actions corren en cada subida y Render publica solo si pasan (`autoDeployTrigger: checksPass`).
+**Consecuencias.** Los esquemas validan forma y tipos; las reglas de negocio siguen en los servicios. Se conservan los archivos por módulo que piden los incisos D a H.
+
+## ADR-018 · Seguimiento de órdenes en vivo
+**Contexto.** La página preguntaba cada 3 s durante un minuto.
+**Decisión.** `GET /ordenes/:id/seguimiento` (Server-Sent Events). Con Alpaca el servidor escucha `trade_updates` por WebSocket (una conexión, abierta solo mientras alguien sigue una
+orden) y consulta cada 15 s por seguridad; con Webull consulta cada 3 s. El estado que se guarda siempre sale de consultar la orden, nunca del aviso. Se usa `fetch` en
+streaming y no `EventSource`, porque el token va en una cabecera. Si no hay SSE, la página vuelve a preguntar.
+**Consecuencias.** Tope de 6 seguimientos por usuario y 10 minutos. Vive en la memoria del proceso.
+
+## ADR-019 · TradingView como vista, no como fuente
+**Decisión.** Se ofrece su gráfica avanzada en Análisis, a elección del usuario, en un `iframe` aislado (`frame-src`): no se carga ningún script suyo en nuestra página, donde vive el
+token. Se conserva la atribución que exigen sus términos. No alimenta cálculos: es de solo visualización y con retraso (15 min).
+**Consecuencias.** Al abrirla, TradingView recibe el símbolo y la IP; se avisa y solo se carga si se elige. El uso comercial requeriría licencia.

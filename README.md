@@ -1,64 +1,59 @@
-# APIs REST del proyecto de opciones
+# AppRESTOpciones
 
-Backend Express para los CRUD del proyecto Long Call, Long Put e Iron Condor.
+Plataforma para analizar opciones (Long Call, Long Put e Iron Condor): API REST en Express, cinco cores de análisis, frontend en React y operación simulada en Alpaca y Webull. **Solo paper**: el entorno real está bloqueado en el código.
 
-## Implementado
+## Cómo está hecho
 
-- Modelos con validación completa y subdocumentos.
-- Persistencia intercambiable por sesión: MongoDB o Supabase/PostgreSQL.
-- Sesiones opacas revocables, contraseñas con hash scrypt y datos separados por usuario.
-- GET/POST/PUT/DELETE individuales, lotes y subdocumentos.
-- Control de revisión para evitar actualizaciones perdidas del mismo registro.
-- OpenAPI, Swagger UI, límites de body y errores JSON.
+```
+web/            React: pantallas, componentes y una sola puerta a la API (web/src/api)
+src/app.js      Express: middlewares, rutas, página compilada y errores
+src/api/v1/
+  routes/       verbo + dirección → controlador (CRUD común o registrar())
+  schemas/      cada ruta que no es CRUD, descrita una vez con Zod: valida y documenta
+  controllers/  HTTP ↔ servicio
+  services/     reglas
+  models/       qué datos son válidos (Mongoose, sin guardar)
+src/repositories/  MongoDB o Supabase, con las mismas funciones; siempre por propietario
+src/cores/         cálculos puros: técnico, fundamental, institucional, indicadores, noticias, confluencia
+src/integrations/  Alpaca, SEC, Tesoro de EE. UU. y Webull; contrato-broker.js define qué debe tener un broker
+src/jobs/          cola de trabajos (respuestas 202)
+```
 
-**Alcance de esta entrega:** administración de registros. No se han implementado los algoritmos de los cinco cores ni el envío, modificación o cancelación de operaciones reales en brokers. POST /ordenes crea un registro local. POST /evaluaciones y /sincronizaciones guarda registros; no ejecuta trabajos. Los GET de mercado consultan datos almacenados. Los adaptadores externos del tema 3 siguen pendientes.
+`tests/estructura.test.cjs` vigila estas reglas: si una ruta no está documentada, un servicio usa HTTP o un core usa internet, la prueba falla.
 
-## Preparación
+## Puesta en marcha
 
-1. Conservar .env existente. Consultar .env.example para variables nuevas.
-2. Configurar SUPABASE_URL y SUPABASE_SECRET_KEY en el servidor.
-3. database/schema.sql prepara las 19 tablas PostgreSQL api_* con JSONB, control de versión y acceso exclusivo del servidor. Ya se aplicó en el proyecto Opciones indicado por el usuario.
-4. Ejecutar npm.cmd run setup:mongodb para índices de las colecciones api_*.
-5. Crear un usuario local:
-   powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/create-user.ps1
-   El correo y contraseña se solicitan interactivamente; solo se guarda el hash.
-6. Ejecutar npm.cmd run dev, o npm.cmd run build seguido de npm.cmd start.
+1. Node 22 o superior. `npm ci` y `npm --prefix web ci`.
+2. Copiar `.env.example` a `.env` y llenar las claves (paper).
+3. Supabase: ejecutar `database/schema.sql`. MongoDB: `npm run setup:mongodb` (índices).
+4. Crear un usuario: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/create-user.ps1`.
+5. `npm run build:all` y `npm start`.
 
-El esquema SQL conserva los subdocumentos como JSONB, no como tablas hijas normalizadas. Las reglas del modelo y las referencias se validan en Express. La clave de Supabase solo se usa en el servidor; no hay acceso directo de clientes a las tablas.
+Documentación de la API: `/api/v1/api-docs` (Swagger) y `/api/v1/openapi.json`. Estado del proceso: `/health`.
 
-## Uso
+## Comprobaciones
 
-POST /api/v1/sesiones:
-{"email":"tu-correo","password":"tu-contrasena","baseDatos":"mongodb"}
+- `npm run verificar`: ESLint, pruebas y compilación de la página. Es lo mismo que ejecuta GitHub Actions en cada subida.
+- `npm run test:databases`: prueba real en ambas bases con datos temporales.
+- `scripts/smoke-*.cjs`: pruebas reales en paper, con el mercado abierto. No se cortan a la mitad.
+- `scripts/backtest/`: comprobaciones históricas, solo lectura.
 
-También acepta baseDatos: "supabase". Utilizar el token recibido como Authorization: Bearer <token>.
-GET /sesiones/actual consulta la base elegida; DELETE /sesiones/actual revoca el token.
-Para cambiar de base iniciar otra sesión. Los datos no se copian automáticamente entre bases.
+## De dónde salen los datos
 
-Swagger: /api/v1/api-docs
-OpenAPI: /api/v1/openapi.json
-Disponibilidad del proceso: /health
+Nada de empresas está escrito en el código.
 
-Ver request/proyecto-final.http y request/flujo-crud.http.
+- **Alpaca:** precios, opciones, noticias, dividendos anunciados, divisiones, interés abierto y precios históricos de contratos.
+- **SEC:** universo, fundamentales, 13F y fechas de reportes de resultados (la próxima es una estimación).
+- **Tesoro de EE. UU.:** tasa libre de riesgo, a diario.
+- **TradingView:** solo una gráfica para mirar, en un marco aislado; no alimenta ningún cálculo.
 
-## Pruebas
+## Límites
 
-- npm.cmd test: modelos, servicios y HTTP con repositorios simulados.
-- npm.cmd run check:structure: flujo HTTP aislado.
-- npm.cmd run test:databases: prueba real en ambas bases. Crea un usuario temporal en memoria y registros de prueba con propietario UUID exclusivo; los elimina al terminar. No hace operaciones con brokers.
+- El puntaje mide qué tan alineados están los factores; no es la probabilidad de ganar (ver ADR-014 y ADR-020).
+- Webull acepta órdenes de opciones de 9:30 a 16:00 de Nueva York, y las de varias patas solo con límite.
+- Los avisos de órdenes en vivo son de Alpaca; con Webull el servidor pregunta cada 3 segundos.
+- La cola, el universo y los seguimientos viven en la memoria del proceso: un solo servidor.
+- Los lotes devuelven resultado por elemento y no son una transacción.
+- Usuarios creados por consola; no hay registro público.
 
-## Límites actuales
-
-- Usuarios aprovisionados por CLI; no registro público, recuperación de contraseña ni integración con Supabase Auth.
-- Control de acceso por propietario; no roles de equipo ni catálogo compartido.
-- Búsqueda local paginada con tope de 10,000 registros por recurso/usuario; optimizar consultas en base antes de escalar.
-- Lotes con resultados por elemento, sin transacción de todo el lote.
-- Las comprobaciones de referencias entre documentos no son transacciones distribuidas.
-- Tokens expirados se rechazan siempre. MongoDB puede limpiarlos por TTL una vez instalado su índice; en SQL debe programarse limpieza posterior.
-- Configurar CORS_ORIGINS y HTTPS para clientes externos.
-
-## Evidencia
-
-docs/inciso-b.md y docs/inciso-c.md conservan la descripción de esas etapas.
-docs/inciso-d.md a docs/inciso-h.md describen la implementación actual.
-backups/ contiene una copia del código/configuración anterior a cada inciso. Incluyen secretos locales: no compartirlos ni subirlos a Git.
+Las decisiones están en [docs/decisiones](docs/decisiones/README.md) y el avance en [docs/version-funcional/plan.md](docs/version-funcional/plan.md). `backups/` y `private/` contienen secretos locales: no se suben a Git.

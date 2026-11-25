@@ -209,3 +209,10 @@ La propuesta no mejora la predicción frente a la fórmula vigente y no se aplic
 - Vencimientos: se prefiere la liquidez (mensual, luego viernes). Precios «medio» e «inmediato» (no garantiza ejecución) y ceder 5/10/20 % al cerrar.
 - Nota fija junto al puntaje: no es la probabilidad de ganar.
 - Sin probar en Webull: verticales, straddles, calendarios y mariposas (la app genera Long Call, Long Put e Iron Condor).
+
+### 2026-11-24 · Integraciones y estructura (fases 1 a 5)
+- Fase 1: ESLint, GitHub Actions, dependencias al día (se quitó `swagger-jsdoc`, sin uso y con aviso de seguridad).
+- Fase 2 (ADR-016): tasa del Tesoro, dividendos, resultados estimados, interés abierto e historial de precios de contratos.
+- Fase 3 (ADR-017): esquemas Zod, rutas por tema, servicios por módulo en uso, contrato de brokers y pruebas de estructura.
+- Fase 4 (ADR-018): seguimiento en vivo. Probado en Alpaca paper: una cancelación hecha en el broker llegó a la app en 1.5 s. Gráfica del valor de la cuenta.
+- Fase 5 (ADR-019): TradingView; Webull explica en español que está fuera de horario.
