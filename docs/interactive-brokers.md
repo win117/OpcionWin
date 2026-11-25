@@ -3,7 +3,8 @@
 Interactive Brokers no da una clave como Alpaca: se usa un programa suyo, el **Client Portal Gateway**, que corre en tu computadora. Tú inicias sesión en él y la
 aplicación solo le habla a ese programa; nunca ve tu usuario ni tu contraseña.
 
-1. En tu cuenta de IBKR activa la cuenta simulada (*Settings → Paper Trading Account*). Su número empieza con `DU`. Necesitas tener aprobada una cuenta normal.
+1. En tu cuenta de IBKR activa la cuenta simulada (*Settings → Paper Trading Account*). Su número empieza con `DU` y tiene su propio usuario. IBKR exige
+   que tu cuenta normal sea **IBKR Pro**, esté abierta y tenga fondos, aunque solo uses la simulada.
 2. Instala Java 8 o superior y descarga el Client Portal Gateway desde la página de IBKR (Web API / Client Portal API).
 3. En la carpeta del gateway ejecuta `bin\\run.bat root\\conf.yaml` y deja la ventana abierta.
 4. Abre `https://localhost:5000` (el aviso de certificado es normal: es tu propia computadora) e inicia sesión con tu usuario **de paper**.
