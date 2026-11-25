@@ -1,5 +1,4 @@
-import service from '../services/contratos.service';
-import { createCrudService } from '../services/crud.service';
+import { forRepository as servicio } from '../services/contratos.service';
 import { crudController } from './crud.controller';
-export const forRepository = factory => crudController(createCrudService('contratos', factory));
-export default crudController(service);
+
+export const forRepository = factory => crudController(servicio(factory));

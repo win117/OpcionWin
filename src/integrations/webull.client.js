@@ -34,8 +34,6 @@ const num = v => {
   return Number.isFinite(n) ? n : null;
 };
 const validacion = mensaje => new IntegrationError({ proveedor: PROVEEDOR, codigo: 'VALIDACION', mensaje });
-const noImplementado = metodo => new IntegrationError({ proveedor: PROVEEDOR, codigo: 'NO_IMPLEMENTADO',
-  mensaje: `Webull solo opera trading: ${metodo} no está disponible (los datos de mercado vienen de Alpaca).` });
 
 // --- Firma (https://developer.webull.com/apis/docs/authentication/signature) ---
 const SEP_FIRMA = '&';
@@ -388,7 +386,5 @@ export const createWebullClient = ({
     return lista.flatMap(normalizarPosiciones);
   };
 
-  const cliente = { proveedor: PROVEEDOR, configurado, entorno: 'paper', cuenta, enviarOrden, consultarOrden, consultarPorClientOrderId, cancelarOrden, ordenesAbiertas, posiciones };
-  for (const m of ['buscarActivo', 'listarActivos', 'velas', 'cotizacion', 'contratos', 'snapshotsOpciones', 'noticias']) cliente[m] = async () => { throw noImplementado(m); };
-  return cliente;
+  return { proveedor: PROVEEDOR, configurado, entorno: 'paper', cuenta, enviarOrden, consultarOrden, consultarPorClientOrderId, cancelarOrden, ordenesAbiertas, posiciones };
 };

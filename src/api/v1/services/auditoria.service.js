@@ -3,7 +3,7 @@ import { repository } from '../../../repositories';
 import { createCrudService } from './crud.service';
 import { crear } from './registros';
 
-export default createCrudService('auditoria');
+export const forRepository = factory => createCrudService('auditoria', factory);
 
 // a***@d***.com: suficiente para reconocer el intento sin guardar el correo completo.
 export function enmascararEmail(email) {

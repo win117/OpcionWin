@@ -496,7 +496,7 @@ test('13F: nombres de emisor, cortes y ningún CIK escrito en el código', () =>
 test('Webull: sin credenciales y datos de mercado no implementados, sin red', async () => {
   const webull = createWebullClient();
   await assert.rejects(webull.enviarOrden({}), e => e.codigo === 'SIN_CREDENCIALES' && e.proveedor === 'webull');
-  await assert.rejects(webull.velas('AAPL'), e => e.codigo === 'NO_IMPLEMENTADO');
+  assert.equal(webull.velas, undefined, 'los datos de mercado son de Alpaca');
 });
 
 test('Integraciones: estado sin revelar valores', () => {

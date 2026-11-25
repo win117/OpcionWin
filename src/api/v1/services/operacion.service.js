@@ -248,6 +248,13 @@ export function createOperacion({ integraciones, factory = repository, cola, aho
       return { conexionId: conexion._id, broker: codigo, cuenta, ...(error ? { error } : {}), ...(avisoSincronizacion ? { avisoSincronizacion } : {}), posicionesDisponibles, posiciones, ordenes, ordenesExternas };
     },
 
+    // GET /broker/paper/historial: valor diario de la cuenta; no todos los brokers lo ofrecen.
+    async historial(ctx, { broker: codigo, periodo = '1M' } = {}) {
+      const c = codigoBroker(codigo), adaptador = adaptadorDe(integraciones, c);
+      if (!adaptador.historialCartera) return { broker: c, periodo, disponible: false, items: [] };
+      return { broker: c, periodo, disponible: true, items: await adaptador.historialCartera({ periodo }) };
+    },
+
     // 3) POST /ordenes/ticket
     async ticket(ctx, body, idempotencyKey) {
       const key = claveIdempotencia(idempotencyKey);

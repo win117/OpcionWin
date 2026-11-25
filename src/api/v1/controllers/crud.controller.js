@@ -1,10 +1,18 @@
 import boom from '@hapi/boom';
+import { registrarEvento } from '../services/auditoria.service';
 import { batch, object } from '../services/crud.service';
 export const handle = action => async (req, res, next) => { try { await action(req, res); } catch (error) { next(error); } };
 export function respond(res, data, status = 200, message = 'Operación completada.') {
   if (data?._revision) res.set('ETag', '"' + data._revision + '"');
   return res.status(status).json({ success: data?.success !== false, message, data });
 }
+export const aceptar = (res, data) => respond(res, data, 202, 'Trabajo en proceso. Consulta el registro hasta completada o fallida.');
+// Creación de trabajos: se audita el registro creado (el resultado final queda en el propio trabajo).
+export const trabajoAuditado = factory => async (req, recurso, accion, fn) => {
+  const r = await fn();
+  await registrarEvento(req.context, { accion, recurso, recursoId: r?._id }, factory);
+  return r;
+};
 function revision(req) {
   const value = req.get('If-Match');
   if (!value) return undefined;

@@ -1,64 +1,58 @@
+// OpenAPI sin escribir nada dos veces: las rutas CRUD salen de los modelos y las demás de api/v1/schemas (los mismos esquemas que validan).
+import * as z from 'zod';
 import { resources } from '../repositories/resources';
+import { rutas } from '../api/v1/schemas';
 import config from './config';
-const ok={description:'Respuesta JSON',content:{'application/json':{schema:{type:'object',properties:{success:{type:'boolean'},message:{type:'string'},data:{}}}}}};
-const body={required:true,content:{'application/json':{schema:{type:'object'}}}};
-const id=name=>({name,in:'path',required:true,schema:{type:'string'}});
-const operation=(summary,params=[],hasBody=false)=>({summary,security:[{bearerAuth:[]}],parameters:params,...(hasBody?{requestBody:body}:{}),responses:{200:ok,201:ok,400:{description:'Datos inválidos'},401:{description:'Sesión inválida'},404:{description:'No encontrado'},409:{description:'Conflicto'}}});
+
+const SIN_CRUD = ['sesiones', 'screener'];
+const SOLO_LECTURA = ['auditoria', 'posiciones'];
+const ok = { description: 'Respuesta JSON', content: { 'application/json': { schema: { type: 'object', properties: { success: { type: 'boolean' }, message: { type: 'string' }, data: {} } } } } };
+const cuerpoLibre = { required: true, content: { 'application/json': { schema: { type: 'object' } } } };
+const pathId = name => ({ name, in: 'path', required: true, schema: { type: 'string' } });
+const operation = (summary, tag, params = [], hasBody = false) => ({ summary, tags: [tag], security: [{ bearerAuth: [] }], parameters: params, ...(hasBody ? { requestBody: cuerpoLibre } : {}),
+  responses: { 200: ok, 201: ok, 400: { description: 'Datos inválidos' }, 401: { description: 'Sesión inválida' }, 404: { description: 'No encontrado' }, 409: { description: 'Conflicto' } } });
+
+const esquemaJson = s => { const { $schema: _s, ...resto } = z.toJSONSchema(s, { io: 'input', unrepresentable: 'any', target: 'openapi-3.0' }); return resto; };
+const parametros = (esquema, donde) => {
+  if (!esquema) return [];
+  const { properties = {}, required = [] } = esquemaJson(esquema);
+  return Object.entries(properties).map(([name, { description, ...schema }]) => ({ name: name === 'idempotency-key' ? 'Idempotency-Key' : name, in: donde, required: donde === 'path' || required.includes(name), ...(description ? { description } : {}), schema }));
+};
+function documentar(d) {
+  const params = parametros(d.params, 'path'), conocidos = new Set(params.map(p => p.name));
+  for (const [, n] of d.ruta.matchAll(/:(\w+)/g)) if (!conocidos.has(n)) params.push(pathId(n));
+  return { summary: d.resumen, tags: [d.grupo], security: d.publica ? [] : [{ bearerAuth: [] }],
+    parameters: [...params, ...parametros(d.query, 'query'), ...parametros(d.headers, 'header')],
+    ...(d.body ? { requestBody: { required: !d.body.safeParse(undefined).success, content: { 'application/json': { schema: esquemaJson(d.body) } } } } : {}),
+    responses: { [d.exito]: d.exito === 204 ? { description: 'Hecho' } : ok, 400: { description: 'Datos inválidos' }, ...(d.publica ? {} : { 401: { description: 'Sesión inválida' } }),
+      ...Object.fromEntries(Object.entries(d.errores).map(([codigo, description]) => [codigo, { description }])) } };
+}
+
 export function openapi() {
-  const paths={
-    '/sesiones':{post:{...operation('Iniciar sesión seleccionando la base',[],true),security:[],requestBody:{required:true,content:{'application/json':{schema:{type:'object',required:['email','password','baseDatos'],properties:{email:{type:'string'},password:{type:'string',format:'password'},baseDatos:{type:'string',enum:['mongodb','supabase']}}}}}}}},
-    '/sesiones/actual':{get:operation('Consultar sesión'),delete:{...operation('Cerrar sesión'),responses:{204:{description:'Sesión revocada'},401:{description:'Sesión inválida'}}}},
+  const paths = {};
+  const crud = (base, tag, params, child, escritura) => {
+    const key = child ? 'childId' : 'id', item = base + '/{' + key + '}', p = [...params, pathId(key)];
+    paths[base] = { get: operation('Listar', tag, params), ...(escritura ? { post: operation('Crear', tag, params, true) } : {}) };
+    paths[item] = { get: operation('Consultar', tag, p), ...(escritura ? { put: operation('Reemplazar campos editables', tag, p, true), delete: operation('Eliminar', tag, p) } : {}) };
+    if (!escritura) return;
+    paths[base + '/lote'] = { post: operation('Crear varios: {items:[]}', tag, params, true), put: operation('Reemplazar varios: {items:[{id,datos}]}', tag, params, true) };
+    paths[base + '/eliminacion-lote'] = { post: operation('Eliminar varios: {ids:[]}', tag, params, true) };
   };
-  const crud=(base,params=[],child=false)=>{
-    paths[base]={get:operation('Consultar registros locales',params),post:operation('Crear registro local (no ejecuta brokers ni cores)',params,true)};
-    paths[base+'/lote']={post:operation('Crear varios registros: {items:[]}',params,true),put:operation('Reemplazar varios: {items:[{id,datos}]}',params,true)};
-    paths[base+'/eliminacion-lote']={post:operation('Eliminar varios: {ids:[]}',params,true)};
-    const key=child?'childId':'id', item=base+'/{'+key+'}', p=[...params,id(key)];
-    paths[item]={get:operation('Consultar registro',p),put:operation('Reemplazar campos editables',p,true),delete:operation('Eliminar registro local',p)};
-  };
-  for(const [name,{Model}] of Object.entries(resources)){
-    if(name==='sesiones'||name==='screener') continue;
-    crud('/'+name);
-    for(const [field,type] of Object.entries(Model.schema.paths)){
-      if(!type.schema) continue;
-      const base='/'+name+'/{id}/'+field, params=[id('id')];
-      if(type.$isMongooseDocumentArray) crud(base,params,true);
-      else paths[base]={get:operation('Consultar subdocumento',params),post:operation('Crear subdocumento',params,true),put:operation('Reemplazar subdocumento',params,true),delete:operation('Eliminar si el modelo lo permite',params)};
+  for (const [name, { Model }] of Object.entries(resources)) {
+    if (SIN_CRUD.includes(name)) continue;
+    const escritura = !SOLO_LECTURA.includes(name);
+    crud('/' + name, name, [], false, escritura);
+    for (const [field, type] of Object.entries(Model.schema.paths)) {
+      if (!type.schema) continue;
+      const base = '/' + name + '/{id}/' + field, params = [pathId('id')], editable = escritura && !(name === 'ordenes' && ['eventos', 'componentes'].includes(field));
+      if (type.$isMongooseDocumentArray) crud(base, name, params, true, editable);
+      else paths[base] = { get: operation('Consultar subdocumento', name, params), ...(editable ? { post: operation('Crear subdocumento', name, params, true), put: operation('Reemplazar subdocumento', name, params, true), delete: operation('Eliminar si el modelo lo permite', name, params) } : {}) };
     }
   }
-  for(const route of ['/mercado/empresas','/mercado/opciones','/mercado/noticias']) paths[route]={get:operation('Consultar datos almacenados')};
-  for(const category of ['cotizaciones','historicos','fundamentales','institucional']) paths['/mercado/'+category+'/{simbolo}']={get:operation('Consultar datos almacenados por empresa',[id('simbolo')])};
-  paths['/mercado/opciones/{id}']={get:operation('Consultar contrato almacenado',[id('id')])};
-  paths['/mercado/opciones/{contratoId}/snapshot']={get:operation('Consultar snapshot almacenado',[id('contratoId')])};
-  paths['/cores/{core}/evaluaciones']={get:operation('Consultar evaluaciones guardadas',[id('core')])};
-  paths['/cores/{core}/evaluaciones/{id}']={get:operation('Consultar evaluación guardada',[id('core'),id('id')])};
-  // Acciones de la versión funcional (docs/version-funcional/contratos.md §5).
-  const job=(summary,params=[])=>({...operation(summary,params,true),responses:{202:{description:'Trabajo aceptado: consultar el registro hasta completada|fallida'},400:{description:'Datos inválidos'},401:{description:'Sesión inválida'}}});
-  paths['/cores/{core}/evaluaciones'].post=job('Ejecutar el core sobre datos sincronizados: {empresaId, perfilId?, parametros?}',[id('core')]);
-  paths['/integraciones/estado']={get:operation('Estado de configuración de proveedores (sin revelar claves)')};
-  paths['/sincronizaciones/ejecuciones']={post:job('Sincronizar desde proveedor: {recurso, simbolos[], desde?, hasta?, conexionId?}')};
-  paths['/selecciones/ejecuciones']={post:job('Ejecutar selección (empresa | estrategia | empresa_estrategia)')};
-  paths['/confluencias/ejecuciones']={post:job('Combinar evaluaciones completadas para una estrategia')};
-  paths['/configuraciones/{id}/evaluaciones']={post:job('Validar estructura y calcular payoff de la configuración',[id('id')])};
-  paths['/estrategias/catalogo-base']={post:operation('Crear el catálogo LONG_CALL, LONG_PUT, IRON_CONDOR si falta')};
-  paths['/mercado/cotizaciones/{simbolo}/en-vivo']={get:operation('Cotización directa del proveedor (no se guarda)',[id('simbolo')])};
-  paths['/cores/catalogo']={get:operation('Catálogo de cores: {items:[{core,version,requiere[],senales:[{nombre,etiqueta,descripcion,pesoBase}]}]}; las señales se eligen con parametros.indicadores')};
-  paths['/activos/busqueda']={get:operation('Busca activos negociables de Alpaca (?q=1-20 caracteres&limit=1-50, def. 20): {items:[{simbolo,nombre,mercado,opciones,registrada,empresaId?}],total}; lista en caché 12 h',[{name:'q',in:'query',required:true,schema:{type:'string',minLength:1,maxLength:20}},{name:'limit',in:'query',schema:{type:'integer',minimum:1,maximum:50}}])};
-  paths['/mercado/opciones/resumen/{simbolo}']={get:operation('Contratos guardados con snapshot almacenado (IV y griegas) de un vencimiento (?vencimiento=AAAA-MM-DD, def. el vigente más cercano; los vencidos se excluyen); fechaDato es la del snapshot más reciente; no llama al proveedor',[id('simbolo'),{name:'vencimiento',in:'query',schema:{type:'string',format:'date'}}])};
-  paths['/selecciones/ejecuciones'].post=job('Ejecutar selección (empresa | estrategia | empresa_estrategia); admite ponderaciones:[{core,peso>=0}] y filtros.indicadores (señales por core)');
-  paths['/mercado/opciones/cadena/{simbolo}']={get:operation('Cadena de opciones con IV y griegas del proveedor (?vencimiento&tipo)',[id('simbolo')])};
-  paths['/screener/ranking']={get:operation('Mejores empresas guardadas por estrategia (?estrategia=LONG_CALL|LONG_PUT|IRON_CONDOR&limite=1-50, def. 5): {items:[{simbolo,nombre,precio,cambioPct,puntaje,factores:[{nombre,valor,puntaje}],resumen,actualizadoEn}],universo:{total,actualizadoEn}}; sin estrategia: {estrategias:{LONG_CALL:[],LONG_PUT:[],IRON_CONDOR:[]},universo}. Lee datos guardados, no llama al proveedor',[{name:'estrategia',in:'query',required:false,schema:{type:'string',enum:['LONG_CALL','LONG_PUT','IRON_CONDOR']}},{name:'limite',in:'query',required:false,schema:{type:'integer'}}])};
-  paths['/mercado/mapa']={get:operation('Mapa del mercado en vivo: {abierto, actualizadoEn, items:[{simbolo,nombre,sector,industria,precio,cambioPct,volumen,capitalizacion,cambio5d,cambio21d,ivPromedio,hv20,puntajes}], fuente}. Precio IEX en sesión; cierre y volumen del consolidado con 15 min de retraso.')};
-  paths['/mercado/mapa/{simbolo}']={get:operation('Ficha en vivo de una empresa, sin guardar nada: cotización, rango del día y de 52 semanas, velas de un año y puntajes por estrategia.',[id('simbolo')])};
-  paths['/mercado/estado']={get:operation('Estado del mercado (caché 15 s abierto, 60 s cerrado): {abierto, proximaApertura, proximoCierre, actualizadoEn, indices:[{simbolo, nombre, precio, cambioPct (fracción)}], fuente}. Los ETF de referencia son configuración (variable INDICES_REFERENCIA); nombre y precio vienen de Alpaca.')};
-  paths['/mercado/movimientos']={get:operation('Movimientos del día en el universo, sin llamar a proveedores: {abierto, actualizadoEn, desactualizado, total, alzas, bajas, volumenInusual}; hasta 10 por lista con {simbolo,nombre,precio,cambioPct,volumenRelativo (volumen del día ÷ promedio de 20 sesiones),capitalizacion}.')};
-  const key={name:'Idempotency-Key',in:'header',required:true,schema:{type:'string'}};
-  paths['/ordenes/{id}/envio']={post:{...operation('Enviar orden a Alpaca PAPER (idempotente)',[id('id'),key]),responses:{200:ok,400:{description:'Falta Idempotency-Key'},403:{description:'Entorno no paper'},409:{description:'Key distinta o estado inválido'}}}};
-  paths['/ordenes/{id}/cancelacion']={post:operation('Cancelar orden (local o en Alpaca paper)',[id('id')])};
-  paths['/conexiones-broker/{id}/verificacion']={post:operation('Verificar cuenta paper y activar conexión',[id('id')])};
-  paths['/broker/paper/conexion']={post:{...operation('Asegura (idempotente) broker alpaca + conexión paper env:ALPACA y la verifica: {conexion:{_id,alias,estado}, cuenta:{estado,efectivo,poderCompra,patrimonio,nivelOpciones,...}}'),responses:{200:ok,503:{description:'Sin credenciales Alpaca en el servidor'}}}};
-  paths['/broker/paper/resumen']={get:operation('Resumen paper en vivo: {conexionId, cuenta|null, error?, posiciones:[{posicionId|null,contratoId|null,simbolo,subyacente,tipo,strike,vencimiento,lado,cantidad,precioPromedio,precioActual,valorMercado,pl,plPct(%)}], ordenes:[últimas 15]}')};
-  paths['/ordenes/ticket']={post:{...operation('Ticket en un paso (paper): crea Configuracion + Orden y la envía. Body {empresaId, estrategiaCodigo?, nombre?, tipo, precioLimite? (positivo), credito? (crédito neto multi-pata; Alpaca recibe limit_price negativo), vigencia?, cantidad 1-100, componentes[1-4]:[{contratoId, accion, intencion?, proporcion?}]}. Respuesta {orden, configuracion}',[key],true),responses:{201:{description:'Creada y enviada'},200:{description:'Idempotency-Key ya usada: devuelve la orden existente'},400:{description:'Datos inválidos'},503:{description:'Sin credenciales Alpaca'}}}};
-  paths['/posiciones/{id}/cierre']={post:{...operation('Cierra una posición abierta paper con orden de cierre: body {tipo, precioLimite?}. long→sell_to_close, short→buy_to_close. Respuesta {orden}',[id('id'),key],true),responses:{201:{description:'Orden de cierre enviada'},200:{description:'Idempotency-Key ya usada'},409:{description:'Posición no abierta'}}}};
-  return {openapi:'3.0.3',info:{title:'Plataforma de análisis de opciones',version:'2.0.0',description:'CRUD dual MongoDB/PostgreSQL + sincronización con Alpaca/SEC, cinco cores, confluencia, selección y órdenes en Alpaca paper.'},servers:[{url:config.API_URL}],components:{securitySchemes:{bearerAuth:{type:'http',scheme:'bearer',description:'Token opaco devuelto por POST /sesiones'}}},paths};
+  for (const d of rutas) {
+    const path = d.ruta.replace(/:(\w+)/g, '{$1}');
+    paths[path] = { ...paths[path], [d.metodo]: documentar(d) };
+  }
+  return { openapi: '3.0.3', info: { title: 'Plataforma de análisis de opciones', version: '2.1.0', description: 'CRUD dual MongoDB/PostgreSQL, datos de Alpaca, SEC y Tesoro de EE. UU., cinco cores, confluencia, selección y órdenes en paper (Alpaca y Webull).' },
+    servers: [{ url: config.API_URL }], components: { securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer', description: 'Token opaco devuelto por POST /sesiones' } } }, paths };
 }

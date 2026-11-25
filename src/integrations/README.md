@@ -12,8 +12,10 @@ eliminar datos locales no cancela órdenes.
 | `alpaca.client.js` | Market Data + Trading **paper** (URL fija; live se rechaza con `NO_PERMITIDO`) |
 | `sec.client.js` | `company_tickers`, `companyfacts`, `submissions` y tablas 13F |
 | `institucionales.js` | Descubre en la SEC qué instituciones reportan un valor en 13F (ninguna está escrita en el código) |
-| `webull.client.js` | Pendiente: todos los métodos lanzan `NO_IMPLEMENTADO` |
-| `index.js` | `createIntegrations(env, fetch)` → `{ alpaca, sec, webull, estado() }` |
+| `webull.client.js` | Trading en el entorno de pruebas (solo paper): cuenta, órdenes, posiciones. No da datos de mercado |
+| `tesoro.client.js` | Tasa libre de riesgo: letras del Tesoro de EE. UU. (público, sin clave) |
+| `contrato-broker.js` | Métodos que todo broker debe tener; si falta uno el servidor no arranca |
+| `index.js` | `createIntegrations(env, fetch)` → `{ alpaca, sec, webull, tesoro, estado() }` |
 
 Variables: `ALPACA_KEY_ID`, `ALPACA_SECRET_KEY`, `ALPACA_DATA_FEED` (`iex` por defecto), `SEC_USER_AGENT`,
 `INDICES_REFERENCIA` (opcional: ETF de la franja de índices, por defecto `SPY,QQQ,IWM,DIA`; es configuración, sus nombres y precios vienen de Alpaca).
@@ -25,7 +27,7 @@ minuto) y atiende primero órdenes, posiciones y cuenta.
 `SIN_CREDENCIALES` (faltan claves o 401), `LIMITE` (429 tras reintentos), `NO_ENCONTRADO` (404),
 `PROVEEDOR` (otros 4xx/5xx, 403, JSON inválido), `RED` (fallo de red o tiempo agotado).
 Extensiones: `VALIDACION` (parámetros inválidos antes de llamar), `NO_PERMITIDO` (trading live),
-`NO_IMPLEMENTADO` (Webull). Los mensajes se redactan: nunca contienen claves.
+`NO_IMPLEMENTADO` (broker sin adaptador). Los mensajes se redactan: nunca contienen claves.
 Un POST (orden) solo se reintenta ante 429; ante 5xx no, para no duplicar (además `client_order_id` es idempotente en Alpaca).
 
 ## Endpoints usados (documentación verificada 2026-11-16)
@@ -38,6 +40,7 @@ Alpaca (encabezados `APCA-API-KEY-ID` / `APCA-API-SECRET-KEY`; paginación `next
 - `GET paper /v2/options/contracts` — https://docs.alpaca.markets/reference/get-options-contracts
 - `POST paper /v2/orders` (simple y `order_class: mleg` con `legs[{symbol, ratio_qty, side, position_intent}]`), `GET/DELETE /v2/orders/{id}` — https://docs.alpaca.markets/reference/postorder
 - `GET paper /v2/positions` — https://docs.alpaca.markets/reference/getallopenpositions
+- `GET data /v1/corporate-actions` (dividendos y divisiones), `GET data /v1beta1/options/bars`, `GET paper /v2/account/portfolio/history`
 - `GET paper /v2/account`, `GET paper /v2/assets/{simbolo}` — https://docs.alpaca.markets/reference
 
 SEC EDGAR (User-Agent declarado obligatorio; ≤10 req/s, aquí ≥120 ms entre solicitudes):

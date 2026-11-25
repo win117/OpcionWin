@@ -56,7 +56,7 @@ test('sin credenciales: configurado false y errores claros sin red', async () =>
   assert.equal(w.configurado, false);
   for (const m of ['cuenta', 'posiciones']) await assert.rejects(w[m](), e => e.codigo === 'SIN_CREDENCIALES' && e.proveedor === 'webull');
   await assert.rejects(w.enviarOrden({}), e => e.codigo === 'SIN_CREDENCIALES');
-  await assert.rejects(w.velas('AAPL'), e => e.codigo === 'NO_IMPLEMENTADO');
+  assert.equal(w.velas, undefined, 'Webull solo opera: los datos de mercado son de Alpaca');
   assert.equal(llamadas, 0);
   const live = createWebullClient({ appKey: 'kkkkkkkk', appSecret: 'ssssssss', entorno: 'live', fetch });
   assert.equal(live.configurado, false);

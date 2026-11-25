@@ -1,8 +1,12 @@
 import { Router } from 'express';
+import { analisis as rutas } from '../schemas';
 import controller from '../controllers/cores.controller';
-export default ({factory}={})=>{
-  const router=Router(), c=controller(factory);
-  router.get('/:core/evaluaciones',c.list);
-  router.get('/:core/evaluaciones/:id',c.get);
+import { registrar } from './registrar';
+
+export default ({ factory } = {}) => {
+  const router = Router(), c = controller(factory);
+  router.base = '/cores';
+  registrar(router, rutas.listarEvaluaciones, c.list);
+  registrar(router, rutas.verEvaluacion, c.get);
   return router;
 };

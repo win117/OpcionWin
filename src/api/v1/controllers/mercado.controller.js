@@ -39,11 +39,6 @@ export default (factory, integraciones, universo, { tasa = createTasa({ integrac
   const crud = name => createCrudService(name, factory);
   const nombreDe = createNombres({ integraciones });
   const estadoMercado = createMercadoEstado({ integraciones, nombreDe });
-  const simboloDe = req => {
-    const s = String(req.params.simbolo).toUpperCase();
-    if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(s)) throw boom.badRequest('Símbolo inválido.');
-    return s;
-  };
   const forCompany = (name, extra = {}) => handle(async(req,res) => {
     const empresa = await empresaPorSimbolo(req.context, req.params.simbolo, factory).catch(() => { throw boom.notFound('Empresa no registrada.'); });
     respond(res,await crud(name).list(req.context,{...req.query,...extra,empresaId:empresa._id}));
@@ -60,12 +55,11 @@ export default (factory, integraciones, universo, { tasa = createTasa({ integrac
   });
   return {
     estado: handle(async (_req, res) => respond(res, await estadoMercado())),
-    eventos: handle(async (req, res) => respond(res, await eventos(simboloDe(req)))),
+    eventos: handle(async (req, res) => respond(res, await eventos(req.datos.params.simbolo))),
     tasa: handle(async (_req, res) => respond(res, await tasa.curva() || { fecha: null, puntos: [], fuente: { proveedor: 'tesoro' } })),
     // Precio diario de un contrato desde que cotiza (máximo 400 días); consulta directa, no se guarda.
     velasOpcion: handle(async (req, res) => {
-      const occ = String(req.params.occ).toUpperCase();
-      if (!/^[A-Z]{1,6}\d?\d{6}[CP]\d{8}$/.test(occ)) throw boom.badRequest('Contrato inválido (formato OCC).');
+      const { occ } = req.datos.params;
       const items = (await integraciones.alpaca.velasOpciones([occ], { desde: new Date(Date.now() - 400 * 86400000).toISOString().slice(0, 10) }))[occ] || [];
       respond(res, { simbolo: occ, items, total: items.length, fuente: { proveedor: 'alpaca', referencia: 'precios operados del contrato' } });
     }),
@@ -80,7 +74,6 @@ export default (factory, integraciones, universo, { tasa = createTasa({ integrac
     // Contratos guardados + snapshot almacenado (IV y griegas) de un vencimiento vigente (fecha de Nueva York); no llama al proveedor.
     resumenOpciones: handle(async (req, res) => {
       const { vencimiento } = req.query;
-      if (vencimiento !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(vencimiento)) throw boom.badRequest('vencimiento: AAAA-MM-DD.');
       const empresa = await empresaPorSimbolo(req.context, req.params.simbolo, factory).catch(() => { throw boom.notFound('Empresa no registrada.'); });
       const dia = c => new Date(c.vencimiento).toISOString().slice(0, 10), hoy = diaNY(Date.now());
       const contratos = (await todos('contratos', req.context, { empresaId: empresa._id }, factory)).filter(c => c.activo !== false && c.vencimiento && dia(c) >= hoy);
@@ -116,8 +109,6 @@ export default (factory, integraciones, universo, { tasa = createTasa({ integrac
     chain: handle(async (req, res) => {
       const simbolo = req.params.simbolo.toUpperCase();
       const { vencimiento, tipo } = req.query;
-      if (tipo && !['call', 'put'].includes(tipo)) throw boom.badRequest('tipo: call o put.');
-      if (vencimiento && !/^\d{4}-\d{2}-\d{2}$/.test(vencimiento)) throw boom.badRequest('vencimiento: AAAA-MM-DD.');
       const filtro = { vencimientoDesde: vencimiento || diaNY(Date.now()), vencimientoHasta: vencimiento || diaNY(Date.now() + 60 * 86400000), ...(tipo ? { tipo } : {}) };
       const contratos = await integraciones.alpaca.contratos({ subyacente: simbolo, ...filtro });
       const snaps = new Map((contratos.length ? await integraciones.alpaca.snapshotsOpciones(simbolo, filtro) : []).map(s => [s.contratoExternoId, s]));

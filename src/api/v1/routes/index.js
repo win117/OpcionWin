@@ -24,7 +24,9 @@ import ordenes from './ordenes.routes';
 import posiciones from './posiciones.routes';
 import sincronizaciones from './sincronizaciones.routes';
 import auditoria from './auditoria.routes';
-import acciones from './acciones.routes';
+import analisis from './analisis.routes';
+import datosProveedores from './integraciones.routes';
+import operacion from './operacion.routes';
 import screener from './screener.routes';
 import { createIntegrations } from '../../../integrations';
 import { createUniversoVivo } from '../services/universo-vivo.service';
@@ -38,7 +40,11 @@ export default function routeAPI(app, { factory = repository, auth = createSessi
   router.use('/sesiones',sesiones({auth}));
   const secured=Router();
   secured.use(authenticate(auth));
-  secured.use(acciones({factory,integraciones,cola,ahora,cacheActivos,universo,tasa,eventos}));
+  const deps={factory,integraciones,cola,ahora,cacheActivos,universo,tasa,eventos};
+  // Acciones: antes de los CRUD para que /ejecuciones, /ticket o /catalogo no se confundan con /:id.
+  secured.use(analisis(deps));
+  secured.use(datosProveedores(deps));
+  secured.use(operacion(deps));
   secured.use('/empresas',empresas({factory}));
   secured.use('/estrategias',estrategias({factory}));
   secured.use('/configuraciones',configuraciones({factory}));
@@ -57,8 +63,8 @@ export default function routeAPI(app, { factory = repository, auth = createSessi
   secured.use('/posiciones',posiciones({factory}));
   secured.use('/sincronizaciones',sincronizaciones({factory}));
   secured.use('/auditoria',auditoria({factory}));
-  secured.use('/mercado',mercado({factory,integraciones,universo,tasa,eventos}));
-  secured.use('/screener',screener({factory,universo}));
+  secured.use('/mercado',mercado(deps));
+  secured.use('/screener',screener(deps));
   secured.use('/cores',cores({factory}));
   router.use(secured);
   app.use(config.API_URL,router);

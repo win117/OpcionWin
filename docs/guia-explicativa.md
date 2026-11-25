@@ -466,7 +466,7 @@ mes después. Los cores reciben `fechaReferencia` ("hoy") y descartan todo lo po
 ┌───────────────┴──────────────────────────────────────────────▼────────────────┐
 │ Express 5 (src/app.js) · /health · /api/v1 · Swagger /api/v1/api-docs · web/dist │
 │  routes/index.js → /sesiones (pública) │ resto protegido por authenticate()     │
-│  routes/acciones.routes.js: sincronizar, evaluar cores, selección, ticket…      │
+│  routes/{integraciones,analisis,operacion}.routes.js + schemas/ (Zod)            │
 │  services/: sesiones · sincronizacion · analisis · operacion · broker · crud    │
 │  jobs/cola.js: cola en memoria, concurrencia 2  (POST → 202 → sondeo GET)       │
 │  cores/: funciones puras (sin red, sin base, sin reloj)                         │
@@ -544,7 +544,7 @@ Puntos finos para defender:
 
 ```
 flujo.js / SyncButton      POST /sincronizaciones/ejecuciones            trabajos.service.iniciarTrabajo        cola.js
-  {recurso, simbolos[],  ─► acciones.routes.js: valida recurso,       ─► crea registro "pendiente" ─────────► encolar(id, tarea)
+  {recurso, simbolos[],  ─► integraciones.routes.js + schema,         ─► crea registro "pendiente" ─────────► encolar(id, tarea)
    desde?, hasta?,           ≤ 25 símbolos, regex de símbolo             responde 202 con el registro          (concurrencia 2)
    diasVencimientoMin/Max?}                                                                                      │
   ◄─── 202 {_id, estado:'pendiente'}                                                                             ▼
@@ -623,7 +623,7 @@ TicketOrden.jsx  editar → revisar → enviado
   netoMid, redondearPrecio, perfilRiesgo, advertencias; clave.current = uuid() (se reutiliza en reintentos)
   POST /api/v1/ordenes/ticket  + header Idempotency-Key
      ▼
-acciones.routes.js → operacion.service.ticket(ctx, body, key)
+operacion.routes.js → operacion.controller → operacion.service.ticket(ctx, body, key)
   claveIdempotencia(key)  ─ /^[\w-]{8,128}$/
   existente(ctx, key)?  ── sí → devuelve la orden previa (200, repetida) sin reenviar
   validarOrdenBase: tipo, vigencia, credito, precioLimite, cantidad 1–100, 1–4 patas

@@ -158,6 +158,7 @@ export const sesiones = {
 export const operacion = {
   asegurarConexion: broker => api.post('/broker/paper/conexion', broker ? { broker } : undefined),
   resumen: broker => api.get('/broker/paper/resumen' + qs({ broker })),
+  historial: (broker, periodo) => api.get('/broker/paper/historial' + qs({ broker, periodo })),
   ticket: (body, key) => api.post('/ordenes/ticket', body, { headers: { 'Idempotency-Key': key } }),
   cerrarPosicion: (id, body, key) => api.post(`/posiciones/${enc(id)}/cierre`, body, { headers: { 'Idempotency-Key': key } }),
   cerrarGrupo: (body, key) => api.post('/posiciones/cierre-grupo', body, { headers: { 'Idempotency-Key': key } }),

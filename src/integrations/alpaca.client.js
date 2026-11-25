@@ -522,6 +522,7 @@ export const createAlpacaClient = ({
 
   return {
     proveedor: PROVEEDOR,
+    entorno: 'paper',
     feed,
     opcionesFeed,
     configurado,
