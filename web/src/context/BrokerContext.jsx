@@ -44,7 +44,7 @@ export function BrokerProvider({ children }) {
     return {
       broker: info?.codigo || broker,
       info,
-      nombre: info?.nombre || (broker === 'webull' ? 'Webull' : 'Alpaca'),
+      nombre: info?.nombre || ({ webull: 'Webull', ibkr: 'Interactive Brokers' }[broker] || 'Alpaca'),
       entorno,
       disponibles: estado.items,
       cargando: estado.cargando,

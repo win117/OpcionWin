@@ -503,8 +503,8 @@ test('Integraciones: estado sin revelar valores', () => {
   const fetch = fakeFetch(() => ({ json: {} }));
   const completo = createIntegrations({ ALPACA_KEY_ID: KEY, ALPACA_SECRET_KEY: SECRET, ALPACA_DATA_FEED: 'sip', SEC_USER_AGENT: UA }, fetch);
   const estado = completo.estado();
-  assert.deepEqual(estado, { alpaca: { configurado: true, feed: 'sip', opcionesFeed: 'indicative', entorno: 'paper' }, sec: { configurado: true }, webull: { configurado: false }, tesoro: { configurado: true } });
+  assert.deepEqual(estado, { alpaca: { configurado: true, feed: 'sip', opcionesFeed: 'indicative', entorno: 'paper' }, sec: { configurado: true }, webull: { configurado: false }, ibkr: { configurado: false }, tesoro: { configurado: true } });
   assert.ok(!JSON.stringify(estado).includes(SECRET) && !JSON.stringify(estado).includes(KEY) && !JSON.stringify(estado).includes('example.com'));
   const vacio = createIntegrations({}, fetch).estado();
-  assert.deepEqual(vacio, { alpaca: { configurado: false, feed: 'iex', opcionesFeed: 'indicative', entorno: 'paper' }, sec: { configurado: false }, webull: { configurado: false }, tesoro: { configurado: true } });
+  assert.deepEqual(vacio, { alpaca: { configurado: false, feed: 'iex', opcionesFeed: 'indicative', entorno: 'paper' }, sec: { configurado: false }, webull: { configurado: false }, ibkr: { configurado: false }, tesoro: { configurado: true } });
 });

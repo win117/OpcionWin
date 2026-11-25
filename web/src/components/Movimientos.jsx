@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ErrorMessage } from './States';
+import { Termino } from './Termino';
 import { useSondeo } from '../hooks/useSondeo';
 import { mercado } from '../api/resources';
 import { fmtFixed, fmtHoraCorta, fmtInt, fmtMoney, fmtPct, isNum } from '../utils/format';
@@ -53,6 +54,7 @@ export default function Movimientos() {
         <h2 id="mov-titulo">Movimientos de hoy</h2>
         <span className="muted small">{nota}</span>
       </div>
+      <p className="muted small"><Termino id="volumen_inusual">Volumen inusual</Termino>: se negocian muchas más acciones que un día normal. Suele indicar que pasa algo (resultados, una noticia); avisa dónde mirar, no en qué dirección.</p>
       {error && !d && <ErrorMessage error={error} title="No se pudieron cargar los movimientos; se reintenta solo" />}
       <div className="card mov">
         <div className="seg mov__selector" role="group" aria-label="Lista de movimientos">

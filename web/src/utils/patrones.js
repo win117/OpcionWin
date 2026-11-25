@@ -88,3 +88,10 @@ export function conVelaEnVivo(velas, vivo) {
   if (hoy < diaUltima) return velas;
   return [...velas, { ...nueva, time: Date.parse(hoy + 'T00:00:00Z') / 1000 + (ultima.time % 86400) }];
 }
+
+/** Valor final de esa misma regresión en cada vela: la tendencia de 20 sesiones a lo largo de todo el histórico. */
+export function curvaRegresion(velas, n = 20) {
+  const out = [];
+  for (let i = n - 1; i < velas.length; i++) out.push({ time: velas[i].time, value: rectaTendencia(velas.slice(i - n + 1, i + 1), n).at(-1).value });
+  return out;
+}

@@ -56,16 +56,16 @@ export function combinarCores(evaluaciones, { ivActual, hv20 } = {}) {
     const condor = estrategia === 'IRON_CONDOR', dirigido = estrategia === 'LONG_PUT' ? -1 : 1;
     const favor = sesgo => redondear(condor ? (1 - Math.abs(sesgo)) * 100 : acotar(50 + 50 * sesgo * dirigido), 2);
     const f = [condor
-      ? { nombre: 'Neutralidad media de los factores', valor: redondear(neutralidad), puntaje: redondear(acotar((neutralidad ?? 0) * 100), 2) }
+      ? { nombre: 'Neutralidad media de los cores', valor: redondear(neutralidad), puntaje: redondear(acotar((neutralidad ?? 0) * 100), 2) }
       : { nombre: 'Sesgo combinado', valor: redondear(s), puntaje: favor(s) }];
     for (const { core, sesgo } of lista) if (Number.isFinite(sesgo)) f.push({ nombre: (condor ? 'Neutralidad: ' : '') + ETIQUETAS[core], valor: redondear(sesgo), puntaje: favor(sesgo) });
     if (condor && ivActual && hv20) f.push({ nombre: 'IV / volatilidad histórica 20d', valor: redondear(ivActual / hv20), puntaje: redondear(acotar(50 + ((ivActual / hv20 - 1) / confluencia.SENSIBILIDAD_IV_HV) * 50), 2) });
-    f.push({ nombre: 'Acuerdo entre factores', valor: redondear(acuerdo), puntaje: redondear(acotar(acuerdo * 100), 2) });
+    f.push({ nombre: 'Acuerdo entre cores', valor: redondear(acuerdo), puntaje: redondear(acotar(acuerdo * 100), 2) });
     f.push({ nombre: 'Confianza', valor: redondear(r.confianza), puntaje: redondear(acotar(r.confianza * 100), 2) });
     factores[estrategia] = f;
     resumenes[estrategia] = condor
-      ? `Neutralidad ${Math.round((neutralidad ?? 0) * 100)}/100${ivActual && hv20 ? `, IV/HV20 ${(ivActual / hv20).toFixed(2)}` : ''}, acuerdo entre factores ${pct(acuerdo)}.`
-      : `Sesgo ${direccion(s)} (${s.toFixed(2)}), acuerdo entre factores ${pct(acuerdo)}, confianza ${pct(r.confianza)}.`;
+      ? `Neutralidad ${Math.round((neutralidad ?? 0) * 100)}/100${ivActual && hv20 ? `, IV/HV20 ${(ivActual / hv20).toFixed(2)}` : ''}, acuerdo entre cores ${pct(acuerdo)}.`
+      : `Sesgo ${direccion(s)} (${s.toFixed(2)}), acuerdo entre cores ${pct(acuerdo)}, confianza ${pct(r.confianza)}.`;
   }
   return { puntajes, factores, resumenes };
 }

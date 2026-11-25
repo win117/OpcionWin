@@ -36,7 +36,8 @@ export async function cargarCadena(simbolo, { diasMin = 7, diasMax = null, codig
   }
   const venc = elegirVencimiento(d.vencimientos || (d.vencimiento ? [d.vencimiento] : []), new Date(), diasMin, diasMax, codigo, d.detalleVencimientos);
   if (!venc) return { ...d, vencimiento: null, items: [], total: 0 };
-  return venc === d.vencimiento ? d : mercado.opcionesResumen(simbolo, { vencimiento: venc });
+  // Precios del momento; si el proveedor falla, lo guardado.
+  return mercado.traerCadena(simbolo, venc).catch(() => (venc === d.vencimiento ? d : mercado.opcionesResumen(simbolo, { vencimiento: venc })));
 }
 
 /**

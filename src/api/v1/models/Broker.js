@@ -2,7 +2,7 @@ import { text, choice, entitySchema, register } from './shared';
 
 
 export const schema = entitySchema({
-  codigo: choice(['alpaca', 'webull']), nombre: text(),
+  codigo: choice(['alpaca', 'webull', 'ibkr']), nombre: text(),
   activo: { type: Boolean, default: false },
   entornos: { type: [String], enum: ['paper', 'live'], default: [] }
 });

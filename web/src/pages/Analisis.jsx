@@ -114,7 +114,7 @@ export default function Analisis() {
     else setError(e);
   };
 
-  // Actualizar datos / empresa nueva: registra la empresa y trae velas + cotización (para la gráfica) y lo que piden los factores activos.
+  // Actualizar datos / empresa nueva: registra la empresa y trae velas + cotización (para la gráfica) y lo que piden los cores activos.
   const traerDatos = useCallback(async (sym, nueva = false) => {
     const cfg = configRef.current;
     const r = resolverConfig(cfg, catalogoRef.current);
@@ -207,9 +207,9 @@ export default function Analisis() {
       <DetalleEmpresa key={simbolo} empresa={empresa} simbolo={simbolo} velas={velas.diarias} ficha={ficha} version={version} corriendo={corriendo} proceso={proceso} acciones={acciones} />
       {error && <ErrorMessage error={error} title="No se pudo completar" />}
       {registro.error && !resuelta && <ErrorMessage error={registro.error} onRetry={registro.reload} title={'No se pudo cargar ' + simbolo} />}
-      {(!hayCores || errDias) && <p className="field__error" role="alert">{errDias ? errDias + ' Corrígelo en «Configurar».' : 'Elige en «Configurar» al menos un factor con peso mayor que 0.'}</p>}
+      {(!hayCores || errDias) && <p className="field__error" role="alert">{errDias ? errDias + ' Corrígelo en «Configurar».' : 'Elige en «Configurar» al menos un core con peso mayor que 0.'}</p>}
       <section id="cfg-detalle" className="card" hidden={!cfgAbierta} aria-label="Configuración del análisis">
-        <p className="muted small">Se usan {resuelto.cores.length} <Termino id="core">factores</Termino>: {resuelto.cores.map(c => CORE_LABELS[c]).join(', ') || 'ninguno'}.</p>
+        <p className="muted small">Se usan {resuelto.cores.length} <Termino id="core">cores</Termino>: {resuelto.cores.map(c => CORE_LABELS[c]).join(', ') || 'ninguno'}.</p>
         <ConfigAnalisis embebido config={config} onChange={setConfig} catalogo={catalogo} corriendo={corriendo} onAnalizar={analizar} />
       </section>
       <div className="analisis__cols">

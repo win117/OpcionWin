@@ -37,7 +37,7 @@ export function recursosNecesarios(coresActivos, catalogo, { institucional = fal
     const requiere = catalogo?.find(x => x.core === core)?.requiere || REQUIERE_RESPALDO[core] || [];
     for (const req of requiere) for (const r of REQUISITO_A_RECURSOS[req] || []) set.add(r);
   }
-  if (contratos) set.add('contratos');
+  if (contratos && base) set.add('contratos'); // al analizar solo si un core los pide: el panel trae los suyos al momento
   if (!institucional) set.delete('institucional');
   return [...RECURSOS, 'institucional'].filter(r => set.has(r));
 }
@@ -48,7 +48,7 @@ const pausa = ms => new Promise(r => setTimeout(r, ms));
 export const configPorDefecto = () => ({
   cores: Object.fromEntries(CORES.map(c => [c, { on: true, peso: 1 }])),
   excluidas: {}, // core → nombres de señales desmarcadas (lo nuevo queda marcado por defecto)
-  institucional: true, // 13F: forma parte de los cinco factores que deciden
+  institucional: true, // 13F: forma parte de los cinco cores que deciden
   contratos: true, // traer contratos de opciones (strikes, vencimientos y griegas de las estrategias sugeridas)
   sincronizar: true,
   diasMin: 7,
@@ -124,7 +124,7 @@ export function pasosDatos(recursos) {
 export function pasosIniciales({ sincronizar, recursos, cores }) {
   return [
     ...(sincronizar ? pasosDatos(recursos) : []),
-    ...cores.map(c => ({ id: 'core:' + c, grupo: 'Factores', label: CORE_LABELS[c], estado: 'pendiente' })),
+    ...cores.map(c => ({ id: 'core:' + c, grupo: 'Cores', label: CORE_LABELS[c], estado: 'pendiente' })),
     { id: 'seleccion', grupo: 'Selección', label: 'Compatibilidad por estrategia', estado: 'pendiente' },
   ];
 }
@@ -177,9 +177,9 @@ export async function ejecutarFlujo(simbolo, { sincronizar, recursos, cores, ind
 
   const empresa = (await empresas.list({ simbolo, limit: 1 })).items[0];
   if (!empresa) throw new Error('Empresa no encontrada. Trae sus datos primero.');
-  // Un factor activo sin datos también se envía: así la cobertura dice la verdad (4 de 5) en vez de ocultar que falta.
+  // Un core activo sin datos también se envía: así la cobertura dice la verdad (4 de 5) en vez de ocultar que falta.
   const activos = cores;
-  if (!activos.length) throw new Error('Activa al menos un factor para analizar.');
+  if (!activos.length) throw new Error('Activa al menos un core para analizar.');
 
   // El rango de días del usuario limita los contratos que entran en iv_promedio (evaluaciones y selección).
   const parametros = { ...(indicadores ? { indicadores } : {}), ...(isNum(diasMin) && isNum(diasMax) ? { diasVencimientoMin: diasMin, diasVencimientoMax: diasMax } : {}) };

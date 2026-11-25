@@ -8,7 +8,8 @@ import { acciones, jobPaths } from '../../api/resources';
 import { agregar, haceAnios, rangoVisible, sma } from '../../utils/velas';
 import { etiquetaEvento } from '../../utils/senales';
 import { bollingerSerie, estocasticoSerie, macdSerie, rsiSerie } from '../../utils/indicadores';
-import { conVelaEnVivo, detectarPatrones, historialPatrones, PATRONES, rectaTendencia } from '../../utils/patrones';
+import { soportesResistencias } from '../../utils/senales';
+import { conVelaEnVivo, detectarPatrones, historialPatrones, PATRONES, curvaRegresion, rectaTendencia } from '../../utils/patrones';
 import { esperar } from './flujo';
 import { fmtDate, fmtMoney, fmtPct } from '../../utils/format';
 
@@ -16,6 +17,7 @@ const TradingView = lazy(() => import('../../components/TradingView'));
 const VISTA = 'opciones.grafica'; // preferencia de este navegador
 const leerVista = () => { try { return localStorage.getItem(VISTA) === 'tradingview' ? 'tradingview' : 'app'; } catch { return 'app'; } };
 
+const SESIONES_LARGAS = { '3A': 756, '5A': 1260, MAX: 100000 };
 const ALTO = 440;
 const CON_TEXTO = new Set(['1M', '3M', '6M']);
 const ANIOS_MAX = 12; // «Máx»: lo que el proveedor tenga (consolidado desde 2016)
@@ -59,7 +61,7 @@ function Niveles({ niveles }) {
     <ul className="niveles" aria-label="Niveles de soporte y resistencia">
       {niveles.map(n => (
         <li key={n.tipo + n.precio} className={n.tipo === 'resistencia' ? 'down' : 'up'}>
-          <strong>{n.tipo === 'resistencia' ? 'Resistencia' : 'Soporte'}</strong> {fmtMoney(n.precio)} <span className="muted">{n.extremo ? `${n.tipo === 'resistencia' ? 'máximo' : 'mínimo'} del último año, ${fmtDate(n.ultimoToque * 1000)}` : `${n.toques} toques, último ${fmtDate(n.ultimoToque * 1000)}`}</span>
+          <strong>{n.tipo === 'resistencia' ? 'Resistencia' : 'Soporte'}</strong> {fmtMoney(n.precio)} <span className="muted">{n.extremo ? `${n.tipo === 'resistencia' ? 'máximo' : 'mínimo'} del periodo, ${fmtDate(n.ultimoToque * 1000)}` : `${n.toques} toques, último ${fmtDate(n.ultimoToque * 1000)}`}</span>
         </li>
       ))}
     </ul>
@@ -88,7 +90,7 @@ function PatronesRecientes({ velas, patrones }) {
   );
 }
 
-function GraficoApp({ simbolo, registrada = true, diarias, vivo: fichaViva, loading, error, onReload, onCambio, niveles = [], eventos = [] }) {
+function GraficoApp({ simbolo, registrada = true, diarias, vivo: fichaViva, loading, error, onReload, onCambio, niveles: nivelesAnio = [], eventos = [] }) {
   const [opts, setOpts] = useState(opcionesIniciales);
   const cambiar = o => { setOpts(o); try { localStorage.setItem(OPCIONES, JSON.stringify(o.capas)); } catch { /* sin almacenamiento */ } };
   const { capas } = opts;
@@ -105,29 +107,33 @@ function GraficoApp({ simbolo, registrada = true, diarias, vivo: fichaViva, load
       const b = bollingerSerie(velas.map(v => v.close));
       o.push({ id: 'bb-sup', label: 'Bollinger sup.', color: '--flat', estilo: 'puntos', grosor: 1, data: serie(velas, b.sup) }, { id: 'bb-inf', label: 'inf.', color: '--flat', estilo: 'puntos', grosor: 1, data: serie(velas, b.inf) });
     }
-    if (capas.tendencia) o.push({ id: 'tendencia', label: 'Tendencia 20', color: '--text', estilo: 'puntos', data: rectaTendencia(velas) });
+    if (capas.tendencia) o.push({ id: 'tendencia', label: 'Tendencia 20', color: '--text', estilo: 'puntos', data: rectaTendencia(velas) }, { id: 'regresion', label: 'Regresión 20', color: '--text-muted', grosor: 1, data: curvaRegresion(velas) });
     return o.filter(x => x.data.length);
   }, [velas, capas]);
   const paneles = useMemo(() => construirPaneles(velas, capas), [velas, capas]);
   const patrones = useMemo(() => detectarPatrones(velas), [velas]);
 
+  // En rangos largos, soportes y resistencias se buscan en todo lo que se ve; hasta un año, en el último año.
+  const largo = SESIONES_LARGAS[opts.rango];
+  const niveles = useMemo(() => (largo ? soportesResistencias(diarias, { ultimas: largo, minToques: 3 }) : nivelesAnio), [largo, diarias, nivelesAnio]);
+  const periodo = largo ? 'periodo' : 'año';
   const lineas = useMemo(() => (capas.niveles ? niveles.map(n => ({
     precio: n.precio,
     color: n.tipo === 'resistencia' ? '--down' : '--up',
-    titulo: n.extremo ? (n.tipo === 'resistencia' ? 'Máximo del año' : 'Mínimo del año') : `${n.tipo === 'resistencia' ? 'Resistencia' : 'Soporte'} ×${n.toques}`,
-  })) : []), [niveles, capas.niveles]);
+    titulo: n.extremo ? (n.tipo === 'resistencia' ? `Máximo del ${periodo}` : `Mínimo del ${periodo}`) : `${n.tipo === 'resistencia' ? 'Resistencia' : 'Soporte'} ×${n.toques}`,
+  })) : []), [niveles, capas.niveles, periodo]);
 
   // Señales solo en vista diaria (se calculan sobre velas diarias); patrones, sobre las velas que se ven. Todo dentro del rango visible.
   const marcadores = useMemo(() => {
     const r = rangoVisible(opts.rango, velas), dentro = x => !r || x.time >= r.from, out = [];
     if (capas.senales && opts.intervalo === 'D') {
-      out.push(...eventos.filter(dentro).slice(-40).map(e => ({
+      out.push(...eventos.filter(dentro).map(e => ({
         time: e.time, position: e.lado === 'compra' ? 'belowBar' : 'aboveBar', shape: e.lado === 'compra' ? 'arrowUp' : 'arrowDown', color: e.lado === 'compra' ? '--up' : '--down',
         text: CON_TEXTO.has(opts.rango) ? etiquetaEvento(e) : '', // en rangos largos los textos se enciman: solo flechas
       })));
     }
     if (capas.patrones) {
-      out.push(...patrones.filter(x => x.lado !== 'info' && dentro(x)).slice(-30).map(x => ({
+      out.push(...patrones.filter(x => x.lado !== 'info' && dentro(x)).map(x => ({
         time: x.time, position: x.lado === 'alcista' ? 'belowBar' : 'aboveBar', shape: 'circle', size: 0.6, color: x.lado === 'alcista' ? '--up' : '--down', text: opts.rango === '1M' || opts.rango === '3M' ? PATRONES[x.tipo].corto : '',
       })));
     }

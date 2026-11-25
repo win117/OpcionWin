@@ -29,6 +29,12 @@ const esConflicto = e => boom.isBoom(e) && e.output.statusCode === 409;
 const mensajeError = e => String(e?.mensaje || e?.output?.payload?.message || e?.message || 'error').slice(0, 300);
 
 // Interpreta un símbolo OCC (AAPL261125C00200000) cuando no hay contrato guardado.
+const SIN_CONFIGURAR = {
+  alpaca: 'Faltan ALPACA_KEY_ID / ALPACA_SECRET_KEY en el servidor.',
+  webull: 'Faltan WEBULL_APP_KEY / WEBULL_APP_SECRET en el servidor (o WEBULL_ENTORNO/WEBULL_BASE_URL no permitidos: solo paper).',
+  ibkr: 'Falta IBKR_GATEWAY_URL: Interactive Brokers se usa con su Client Portal Gateway en tu computadora (ver docs/interactive-brokers.md).',
+};
+
 export function parsearOcc(simbolo) {
   const m = OCC.exec(String(simbolo));
   if (!m) return null;
@@ -199,9 +205,7 @@ export function createOperacion({ integraciones, factory = repository, cola, aho
         const a = integraciones[m.codigo];
         const configurado = Boolean(a?.configurado);
         return { codigo: m.codigo, nombre: m.nombre, configurado, operativo: configurado, entornos: ['paper'],
-          ...(configurado ? {} : { mensaje: m.codigo === 'webull'
-            ? 'Faltan WEBULL_APP_KEY / WEBULL_APP_SECRET en el servidor (o WEBULL_ENTORNO/WEBULL_BASE_URL no permitidos: solo paper).'
-            : 'Faltan ALPACA_KEY_ID / ALPACA_SECRET_KEY en el servidor.' }) };
+          ...(configurado ? {} : { mensaje: SIN_CONFIGURAR[m.codigo] }) };
       }) };
     },
 

@@ -7,6 +7,7 @@ import { cargarEstadoMercado } from '../api/resources';
 import { IntegrationStatus, useIntegraciones } from './IntegrationStatus';
 import { BrokerSelector } from './BrokerSelector';
 import { BuscadorTicker } from './BuscadorTicker';
+import Logo from './Logo';
 import { MenuCuenta } from './MenuCuenta';
 import { MercadoEstado } from './MercadoEstado';
 import { tituloDeRuta } from '../utils/constants';
@@ -28,7 +29,7 @@ function useNavegacion() {
   const tipo = useNavigationType();
   const anterior = useRef(pathname);
   useEffect(() => {
-    document.title = `${tituloDeRuta(pathname)} | Opciones`;
+    document.title = `${tituloDeRuta(pathname)} | WinOpciones`;
     if (anterior.current === pathname) return undefined;
     anterior.current = pathname;
     if (tipo !== 'POP') window.scrollTo(0, 0);
@@ -82,11 +83,9 @@ export function Layout() {
       <a href="#contenido" className="skip-link">Saltar al contenido</a>
       <header className="topnav">
         <div className="topnav__inner">
-          <Link to="/" className="brand" aria-label="Opciones, ir al inicio">
-            <span className="brand__logo" aria-hidden="true">
-              <svg viewBox="0 0 32 32" width="28" height="28"><rect width="32" height="32" rx="7" fill="currentColor" /><path d="M6 22l6-7 5 4 9-11" stroke="var(--surface)" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
-            </span>
-            <span className="brand__name">Opciones</span>
+          <Link to="/" className="brand" aria-label="WinOpciones, ir al inicio">
+            <Logo size={32} />
+            <span className="brand__name">WinOpciones</span>
           </Link>
           <nav className="topnav__nav" aria-label="Navegación principal">
             <ul>

@@ -25,8 +25,8 @@ function Confluencia({ conf, eventos, coresActivos }) {
   const recientes = eventos.slice(-6).reverse();
   return (
     <section className="card" aria-labelledby="conf-titulo">
-      <div className="card__header"><div><h3 id="conf-titulo">Confluencia de señales</h3><p className="muted small">Cuántas señales de tendencia (medias y MACD) apuntan en la misma dirección. RSI, estocástico y Bollinger no se cuentan. <Termino id="core">Factores</Termino> activos: {coresActivos.map(c => CORE_LABELS[c]).join(', ') || 'ninguno'}.</p></div></div>
-      {sinCores ? <Empty title="Sin señales que contar">Activa el factor Técnico o Indicadores en «Configurar» y asegúrate de tener al menos 20 velas.</Empty> : (
+      <div className="card__header"><div><h3 id="conf-titulo">Confluencia de señales</h3><p className="muted small">Cuántas señales de tendencia (medias y MACD) apuntan en la misma dirección. RSI, estocástico y Bollinger no se cuentan. <Termino id="core">Cores</Termino> activos: {coresActivos.map(c => CORE_LABELS[c]).join(', ') || 'ninguno'}.</p></div></div>
+      {sinCores ? <Empty title="Sin señales que contar">Activa el core Técnico o Indicadores en «Configurar» y asegúrate de tener al menos 20 velas.</Empty> : (
         <>
           <div className="conf-resumen" role="group" aria-label="Recuento de señales">
             <div className="conf-count conf-count--up"><strong>{conf.alcistas.length}</strong><span>Alcistas</span></div>
@@ -42,7 +42,7 @@ function Confluencia({ conf, eventos, coresActivos }) {
           {conf.coinciden.length > 0 && conf.sesgo !== 'neutral' && (
             <p className="small"><strong>Coinciden:</strong> {conf.coinciden.map(s => s.nombre).join(' · ')}</p>
           )}
-          {conf.excluidas > 0 && <p className="muted small">{conf.excluidas} señales de factores apagados no se cuentan.</p>}
+          {conf.excluidas > 0 && <p className="muted small">{conf.excluidas} señales de cores apagados no se cuentan.</p>}
         </>
       )}
       {recientes.length > 0 && (
@@ -82,7 +82,7 @@ function Indicadores({ estado, resumen, evalIndicadores }) {
         {fila('boll', 'Bollinger (20, 2)', `${f(resumen.bollingerInf)} – ${f(resumen.bollingerSup)} · %B ${f(resumen.bollingerPctB)}`, por('bollinger'))}
         {fila('atr', 'ATR (14)', `${f(resumen.atr)} (${f(resumen.atrPct, 1)} % del precio)`, null, 'Volatilidad diaria típica')}
         {fila('hv', <><Termino id="hv">HV</Termino> 20 / 60 días</>, `${isNum(resumen.hv20) ? fmtPct(resumen.hv20, 1) : '—'} / ${isNum(resumen.hv60) ? fmtPct(resumen.hv60, 1) : '—'}`, null, 'Volatilidad histórica anualizada')}
-        {fila('iv', <><Termino id="iv">IV</Termino> promedio</>, isNum(iv) ? fmtPct(iv, 1) : '—', null, isNum(iv) ? (isNum(ivHv) ? `IV/HV20 = ${fmtNum(ivHv, 2)}` : '') : 'Requiere el factor Indicadores y contratos de opciones')}
+        {fila('iv', <><Termino id="iv">IV</Termino> promedio</>, isNum(iv) ? fmtPct(iv, 1) : '—', null, isNum(iv) ? (isNum(ivHv) ? `IV/HV20 = ${fmtNum(ivHv, 2)}` : '') : 'Requiere el core Indicadores y contratos de opciones')}
       </ul>
     </section>
   );

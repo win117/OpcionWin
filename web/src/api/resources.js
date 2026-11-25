@@ -99,6 +99,7 @@ export const mercado = {
   traerCadena: (simbolo, vencimiento) => api.post(`/mercado/opciones/cadena/${sym(simbolo)}`, { vencimiento }),
   cotizacionesOpciones: occs => api.get('/mercado/opciones/cotizaciones' + qs({ contratos: occs.join(',') })),
   estado: () => api.get('/mercado/estado'),
+  panorama: () => api.get('/mercado/panorama'),
   mapa: () => api.get('/mercado/mapa'),
   movimientos: () => api.get('/mercado/movimientos'),
   tasa: () => api.get('/mercado/tasa'),

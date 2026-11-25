@@ -1,5 +1,5 @@
 // Gráfica avanzada de TradingView. Va en un marco aislado (iframe): su código no puede leer la sesión ni los datos de la aplicación.
-// Es solo para mirar: con retraso y sin relación con los factores, niveles y señales propios. La atribución es obligatoria (términos de TradingView).
+// Es solo para mirar: con retraso y sin relación con los cores, niveles y señales propios. La atribución es obligatoria (términos de TradingView).
 import { useEffect, useMemo, useState } from 'react';
 
 const ORIGEN = 'https://www.tradingview-widget.com';

@@ -208,8 +208,9 @@ test('broker webull: disponibles, conexión, ticket, resumen, cancelación y cie
   const e=await entorno();
   try{
     const d=await e.call('GET','/brokers/disponibles');
-    assert.deepEqual(d.items.map(i=>i.codigo),['alpaca','webull']);
-    assert.ok(d.items.every(i=>i.configurado&&i.operativo&&i.entornos.length===1&&i.entornos[0]==='paper'));
+    assert.deepEqual(d.items.map(i=>i.codigo),['alpaca','webull','ibkr']);
+    assert.equal(d.items[2].operativo,false); assert.match(d.items[2].mensaje,/IBKR_GATEWAY_URL/);
+    assert.ok(d.items.slice(0,2).every(i=>i.configurado&&i.operativo&&i.entornos.length===1&&i.entornos[0]==='paper'));
     await e.call('POST','/broker/paper/conexion',{broker:'otro'},400);
     const a=await e.call('POST','/broker/paper/conexion');
     const w=await e.call('POST','/broker/paper/conexion',{broker:'webull'});

@@ -90,6 +90,9 @@ export const GLOSARIO = {
   debito: { grupo: 'Estrategias', nombre: 'Débito', texto: 'Pagas para abrir la operación. Es lo habitual al comprar opciones.' },
   credito: { grupo: 'Estrategias', nombre: 'Crédito', texto: 'Cobras al abrir la operación, a cambio de asumir una obligación. Es lo habitual en un Iron Condor.' },
   spread: { grupo: 'Órdenes', nombre: 'Spread (diferencia bid/ask)', texto: 'Distancia entre lo que pagan (bid) y lo que piden (ask). Si es grande, entrar y salir cuesta más y el precio es poco fiable.' },
+  sesgo: { grupo: 'Cómo lee la app una empresa', nombre: 'Sesgo', texto: 'Hacia dónde apuntan los cores en conjunto, de −1 (todo bajista) a +1 (todo alcista). Es su promedio; pesa más el core con más confianza.' },
+  acuerdo: { grupo: 'Cómo lee la app una empresa', nombre: 'Acuerdo entre cores', texto: 'Qué tan parecido opinan. 100 % es que todos dicen lo mismo; si se contradicen baja y acerca el puntaje a 50.' },
+  volumen_inusual: { grupo: 'Cómo lee la app una empresa', nombre: 'Volumen inusual', texto: 'Acciones negociadas hoy frente al promedio de los días anteriores. 3× lo normal quiere decir el triple. Avisa de que algo llama la atención, no hacia dónde irá el precio.' },
   ultimo: { grupo: 'Opciones', nombre: 'Último precio', texto: 'Precio de la operación más reciente de ese contrato. Puede ser de hace días si casi nadie lo negocia; un vencimiento recién listado todavía no tiene.' },
   interes_abierto: { grupo: 'Opciones', nombre: 'Interés abierto', texto: 'Contratos de esa opción que siguen vivos. Si son pocos, cuesta encontrar con quién comprar o vender. Lo publica el proveedor con un día o más de retraso.' },
   resultados: { grupo: 'Opciones', nombre: 'Reporte de resultados', texto: 'Cada trimestre la empresa publica cuánto ganó. El precio puede saltar y la volatilidad implícita caer de golpe. La fecha que ves es una estimación a partir de reportes anteriores registrados en la SEC.' },
@@ -97,13 +100,13 @@ export const GLOSARIO = {
   tasa: { grupo: 'Griegas y volatilidad', nombre: 'Tasa libre de riesgo', texto: 'Lo que paga prestarle al gobierno de EE. UU. por el mismo plazo que tu opción. Se obtiene cada día del Tesoro y se usa para calcular probabilidades.' },
   gtc: { grupo: 'Órdenes', nombre: 'GTC y Day', texto: 'Vigencia de la orden. Day se cancela al cierre del día; GTC sigue activa hasta que se ejecuta o la cancelas.' },
   paper: { grupo: 'Órdenes', nombre: 'Paper (simulado)', texto: 'Cuenta de práctica con dinero ficticio. Esta aplicación solo opera en paper.' },
-  core: { grupo: 'Cómo lee la app una empresa', nombre: 'Core o factor', texto: 'Cada punto de vista del análisis: técnico, fundamental, institucional, indicadores y noticias. Cada uno da un puntaje de 0 a 100.' },
+  core: { grupo: 'Cómo lee la app una empresa', nombre: 'Core', texto: 'Cada punto de vista del análisis: técnico, fundamental, institucional, indicadores y noticias. Cada uno da un puntaje de 0 a 100.' },
   confianza: { grupo: 'Cómo lee la app una empresa', nombre: 'Confianza', texto: 'Qué tan de acuerdo están las señales y qué tan completos son los datos. Con confianza baja, el puntaje vale menos.' },
-  compatibilidad: { grupo: 'Cómo lee la app una empresa', nombre: 'Puntaje de compatibilidad', texto: 'Mide de 0 a 100 qué tan alineados están hoy los factores con una estrategia. No es la probabilidad de ganar: en una prueba con casi 49 mil casos de 2018 a 2026 (con tres de los cinco factores) no mostró capacidad de predecir el resultado, y en otra con 2,856 casos y precios reales de opciones (con cuatro) tampoco.' },
+  compatibilidad: { grupo: 'Cómo lee la app una empresa', nombre: 'Puntaje de compatibilidad', texto: 'Mide de 0 a 100 qué tan alineados están hoy los cores con una estrategia. No es la probabilidad de ganar: en una prueba con casi 49 mil casos de 2018 a 2026 (con tres de los cinco cores) no mostró capacidad de predecir el resultado, y en otra con 2,856 casos y precios reales de opciones (con cuatro) tampoco.' },
   cobertura: { grupo: 'Cómo lee la app una empresa', nombre: 'Cobertura', texto: 'Parte de los datos necesarios que sí se encontró. 100 % significa que no faltó ninguno.' },
   dispersion: { grupo: 'Cómo lee la app una empresa', nombre: 'Dispersión', texto: 'Cuánto difieren los cores entre sí. Si es alta, unos ven subida y otros bajada: conviene ir con cautela.' },
 };
 export const DISCLAIMER = 'Este análisis es informativo y educativo: no es garantía de rentabilidad ni una recomendación de inversión.';
 
 /** Se muestra junto a cada puntaje. */
-export const NOTA_PUNTAJE = 'Mide qué tan alineados están hoy los factores; no es la probabilidad de ganar.';
+export const NOTA_PUNTAJE = 'Mide qué tan alineados están hoy los cores; no es la probabilidad de ganar.';

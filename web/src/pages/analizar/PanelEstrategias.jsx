@@ -59,17 +59,17 @@ function Veredicto({ empresa, datos, pos, onContratos }) {
         <p className="small nota-puntaje"><Termino id="compatibilidad">Puntaje</Termino>: {NOTA_PUNTAJE[0].toLowerCase() + NOTA_PUNTAJE.slice(1)}</p>
         <p>{e.detalle}</p>
         {voto.completo
-          ? <p className="small muted">Decisión de los {voto.total} factores.</p>
-          : <p className="small veredicto__parcial"><strong>Parcial: opinan {voto.opinan} de {voto.total} factores.</strong> Falta {voto.faltan.map(f => `${CORE_LABELS[f.core]} (${f.motivo})`).join(', ')}.</p>}
+          ? <p className="small muted">Decisión de los {voto.total} cores.</p>
+          : <p className="small veredicto__parcial"><strong>Parcial: opinan {voto.opinan} de {voto.total} cores.</strong> Falta {voto.faltan.map(f => `${CORE_LABELS[f.core]} (${f.motivo})`).join(', ')}.</p>}
         {activa !== mejor && <p className="small">La mejor clasificada es {nombre(mejor.codigo)}. <button type="button" className="enlace" onClick={pos.irAMejor}>Ver {nombre(mejor.codigo)}</button></p>}
         {activa === mejor && e.tono !== 'success' && <p className="small">Ninguna estrategia encaja bien por ahora. No operar también es una opción.</p>}
       </div>
       <ul className="veredicto__razones">
         {r.favor.map(x => <Razon key={x.titulo} tipo="favor"><Frase r={x} /></Razon>)}
-        {!r.favor.length && <Razon tipo="favor">Ningún factor la apoya con claridad.</Razon>}
-        {r.contra ? <Razon tipo="contra"><Frase r={r.contra} /></Razon> : <Razon tipo="contra">Ningún factor va claramente en contra.</Razon>}
+        {!r.favor.length && <Razon tipo="favor">Ningún core la apoya con claridad.</Razon>}
+        {r.contra ? <Razon tipo="contra"><Frase r={r.contra} /></Razon> : <Razon tipo="contra">Ningún core va claramente en contra.</Razon>}
       </ul>
-      {r.contradiccion && <p className="veredicto__choque"><strong>Los factores se contradicen:</strong> {r.contradiccion}. Por eso la <Termino id="confianza">confianza</Termino> baja.</p>}
+      {r.contradiccion && <p className="veredicto__choque"><strong>Los cores se contradicen:</strong> {r.contradiccion}. Por eso la <Termino id="confianza">confianza</Termino> baja.</p>}
       <dl className="veredicto__cifras">
         <div><dt><Termino id="confianza">Confianza</Termino></dt><dd>{detalle?.est ? fmtPct(detalle.est.confianza) : '—'}</dd></div>
         <div><dt><Termino id="vencimiento">Vencimiento</Termino></dt><dd>{chain?.vencimiento ? <>{fmtDate(chain.vencimiento)}<small>{diasHasta(chain.vencimiento)} días</small></> : nulo}</dd></div>

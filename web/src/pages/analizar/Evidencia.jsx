@@ -12,7 +12,7 @@ import CompararStrikes from './TablaStrikes';
 
 export const TABS = [
   { value: 'grafica', label: 'Gráfica' },
-  { value: 'factores', label: 'Factores' },
+  { value: 'cores', label: 'Cores' },
   { value: 'cadena', label: 'Cadena' },
   { value: 'fundamentales', label: 'Fundamentales' },
   { value: 'noticias', label: 'Noticias' },
@@ -25,7 +25,7 @@ export default function Evidencia({ tab, onTab, empresa, simbolo, mercado, vivo,
       <Tabs tabs={TABS} value={tab} onChange={onTab} label="Evidencia del análisis" />
       <div role="tabpanel" aria-label={TABS.find(t => t.value === tab).label} className="evidencia__panel stack">
         {tab === 'grafica' && <AnalisisTecnico simbolo={simbolo} mercado={mercado} vivo={vivo} registrada={Boolean(empresa)} velas={velas} coresActivos={coresActivos} evalIndicadores={datos?.evaluaciones?.indicadores} onCambio={onCambio} />}
-        {tab === 'factores' && (datos ? (
+        {tab === 'cores' && (datos ? (
           <>
             <LecturaCores evaluaciones={datos.evaluaciones} coresActivos={coresActivos} analizados={datos.seleccion?.coresSeleccionados} />
             {pos.activa && <Desglose fila={pos.activa} datos={datos} detalle={pos.detalle} config={config} />}

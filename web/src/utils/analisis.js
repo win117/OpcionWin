@@ -7,16 +7,16 @@ const isNum = v => typeof v === 'number' && Number.isFinite(v);
 export function encaje(puntaje) {
   const p = puntaje1(puntaje);
   if (p == null) return { texto: 'Sin datos', tono: 'neutral', detalle: 'No hay datos suficientes para opinar.' };
-  if (p >= 60) return { texto: 'Encaja bien', tono: 'success', detalle: 'La mayoría de los factores apunta en la dirección que necesita esta estrategia.' };
+  if (p >= 60) return { texto: 'Encaja bien', tono: 'success', detalle: 'La mayoría de los cores apunta en la dirección que necesita esta estrategia.' };
   if (p >= 40) return { texto: 'A medias', tono: 'warning', detalle: 'Las señales están mezcladas: hay tanto a favor como en contra.' };
-  return { texto: 'No encaja', tono: 'danger', detalle: 'Los factores apuntan en otra dirección que la que necesita esta estrategia.' };
+  return { texto: 'No encaja', tono: 'danger', detalle: 'Los cores apuntan en otra dirección que la que necesita esta estrategia.' };
 }
 
 const LECTURA = { up: 'alcista', down: 'bajista', flat: 'en rango', neutral: 'sin datos' };
 const A_FAVOR = /\b(crecen|sobre|positivo|positiva|dorado|aumentan)\b/i;
 const EN_CONTRA = /\b(caen|bajo|negativo|negativa|muerte|disminuyen)\b/i;
 
-/** Primer motivo guardado que va en la misma dirección que la lectura del factor; null si ninguno lo hace con claridad. */
+/** Primer motivo guardado que va en la misma dirección que la lectura del core; null si ninguno lo hace con claridad. */
 export function motivoClaro(ev) {
   const tono = direccion(ev?.puntaje).tono;
   if (tono !== 'up' && tono !== 'down') return null;
@@ -30,7 +30,7 @@ export function motivoClaro(ev) {
 
 const nombrar = (core, ev) => `${CORE_LABELS[core] || core} ${textoPuntaje(ev.puntaje)} ${LECTURA[direccion(ev.puntaje).tono]}`;
 
-/** Frase con los dos factores que más se oponen (uno alcista y otro bajista); null si ninguno se opone. */
+/** Frase con los dos cores que más se oponen (uno alcista y otro bajista); null si ninguno se opone. */
 export function contradiccion(cores, evaluaciones = {}) {
   const lista = cores.map(core => ({ core, ev: evaluaciones[core] })).filter(x => isNum(x.ev?.puntaje)).sort((a, b) => b.ev.puntaje - a.ev.puntaje);
   const alto = lista[0], bajo = lista.at(-1);
@@ -46,7 +46,7 @@ export function razones(codigo, { cores = [], evaluaciones = {}, pesos = [], pun
   const lista = cores.map(core => {
     const ev = evaluaciones[core];
     const calif = calificacionPara(codigo, ev?.puntaje);
-    // Un factor en la zona media (40 a 60) ni apoya ni se opone: no se presenta como razón.
+    // Un core en la zona media (40 a 60) ni apoya ni se opone: no se presenta como razón.
     const c1 = puntaje1(calif);
     if (!isNum(calif) || (c1 > 40 && c1 < 60)) return null;
     const peso = pesos.find(p => p.core === core)?.peso;
@@ -118,7 +118,7 @@ export function recursosAlDia(sincronizaciones = [], simbolo, { diasMin, diasMax
 }
 
 /**
- * Qué factores opinaron en un análisis: { total, opinan, faltan: [{ core, motivo }], completo }.
+ * Qué cores opinaron en un análisis: { total, opinan, faltan: [{ core, motivo }], completo }.
  * `cores` = los que se pidieron; uno pedido sin puntaje no tuvo datos, y uno no pedido lo quitó el usuario.
  */
 export function participacion(cores = [], evaluaciones = {}) {

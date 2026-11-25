@@ -1,5 +1,5 @@
-// Lectura direccional de cada factor activo: Alcista / En rango / Bajista, con puntaje, confianza y motivos principales.
-// El factor Fundamental va primero y destacado: es la tesis de fondo sobre la que se elige la estrategia.
+// Lectura direccional de cada core activo: Alcista / En rango / Bajista, con puntaje, confianza y motivos principales.
+// El core Fundamental va primero y destacado: es la tesis de fondo sobre la que se elige la estrategia.
 import { direccion, ScoreBar } from '../../components/Gauge';
 import { Empty } from '../../components/States';
 import { Termino } from '../../components/Termino';
@@ -16,9 +16,9 @@ const QUE_SIGNIFICA = {
   neutral: 'Sin datos suficientes para una lectura.',
 };
 
-/** Por qué un factor activo no tiene lectura. */
+/** Por qué un core activo no tiene lectura. */
 function sinLectura(core, analizados) {
-  if (!analizados) return 'Pulsa «Analizar» para evaluar este factor.';
+  if (!analizados) return 'Pulsa «Analizar» para evaluar este core.';
   return 'No entró en el último análisis. Vuelve a analizar para incluirlo.';
 }
 
@@ -59,7 +59,7 @@ export default function LecturaCores({ evaluaciones, coresActivos, analizados })
     <section className="card" aria-labelledby="lectura-titulo">
       <div className="card__header">
         <div>
-          <h2 id="lectura-titulo">Lectura por <Termino id="core">factor</Termino></h2>
+          <h2 id="lectura-titulo">Lectura por <Termino id="core">core</Termino></h2>
           <p className="muted small">De 0 a 40 bajista, de 40 a 60 en rango y de 60 a 100 alcista.</p>
         </div>
         {isNum(media) && (
@@ -70,7 +70,7 @@ export default function LecturaCores({ evaluaciones, coresActivos, analizados })
         )}
       </div>
       {!orden.length
-        ? <Empty title="Sin factores activos">Activa al menos uno en «Configurar».</Empty>
+        ? <Empty title="Sin cores activos">Activa al menos uno en «Configurar».</Empty>
         : <ul className="lectura-grid">{orden.map(c => <TarjetaCore key={c} core={c} ev={evaluaciones?.[c]} destacado={c === 'fundamental'} analizados={analizados} />)}</ul>}
     </section>
   );

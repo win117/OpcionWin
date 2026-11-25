@@ -83,7 +83,7 @@ export default function FichaEmpresa({ simbolo, vivo, onCerrar }) {
         )) : <p className="muted small">Se está calculando; aparece en unos segundos.</p>}
         {d.cores && (
           <>
-            <h4>Qué dice cada factor</h4>
+            <h4>Qué dice cada core</h4>
             <ul className="ficha__factores">
               {d.cores.map(c => (
                 <li key={c.core}>
@@ -94,7 +94,7 @@ export default function FichaEmpresa({ simbolo, vivo, onCerrar }) {
             </ul>
           </>
         )}
-        <p className="muted small">{d.cores?.some(c => c.estado === 'pendiente') ? 'Preliminar: aún faltan factores por evaluar.' : 'Combina los cinco factores.'} «Analizar y operar» lo detalla y agrega tus pesos.</p>
+        <p className="muted small">{d.cores?.some(c => c.estado === 'pendiente') ? 'Preliminar: aún faltan cores por evaluar.' : 'Combina los cinco cores.'} «Analizar y operar» lo detalla y agrega tus pesos.</p>
       </div>
     </div>
   );

@@ -66,16 +66,16 @@ function llenar(lista, resto, x, y, w, h, valorResto) {
 function llenarSector(items, x, y, w, h, maximo) {
   let lista = [...items].sort((a, b) => b.valor - a.valor);
   const resto = lista.splice(maximo);
-  let factor = 1, r;
+  let core = 1, r;
   for (let intento = 0; intento < 60; intento += 1) {
-    const suma = lista.reduce((s, i) => s + i.valor, 0), fraccion = Math.min(0.3, (AREA_RESTO * factor) / Math.max(1, w * h));
+    const suma = lista.reduce((s, i) => s + i.valor, 0), fraccion = Math.min(0.3, (AREA_RESTO * core) / Math.max(1, w * h));
     r = llenar(lista, resto, x, y, w, h, (suma * fraccion) / (1 - fraccion));
     const chicos = r.cuadros.filter(c => c.w < MIN_ANCHO || c.h < MIN_ALTO);
     if (!chicos.length) break;
     // Salen primero los más chicos; al quedar espacio, los demás pueden caber.
     const fuera = new Set(chicos.filter(c => !c.resto).sort((a, b) => a.w * a.h - b.w * b.h).slice(0, Math.max(1, Math.floor(chicos.length / 4))).map(c => c.simbolo));
     if (fuera.size && lista.length > 1) { resto.push(...lista.filter(i => fuera.has(i.simbolo))); lista = lista.filter(i => !fuera.has(i.simbolo)); }
-    else if (chicos.some(c => c.resto) && factor < 3) factor += 0.5;
+    else if (chicos.some(c => c.resto) && core < 3) core += 0.5;
     else break;
   }
   return r;

@@ -188,7 +188,7 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
   if (analisis?.sinAnalisis) advertencias.push('Opera sin análisis: no hay una selección completada para esta empresa.');
   if (analisis && !analisis.sinAnalisis && analisis.antiguo) advertencias.push('El análisis tiene más de 24 horas; el mercado pudo cambiar. Considera volver a analizar.');
   if (analisis && !analisis.sinAnalisis && !analisis.esTop) advertencias.push(`La estrategia elegida no es la mejor clasificada (la más compatible es ${ESTRATEGIA_LABELS[analisis.topCodigo] || analisis.topCodigo}).`);
-  if (analisis?.contradiccion) advertencias.push('Los factores se contradicen: la neutralidad puede ser desacuerdo, no rango lateral.');
+  if (analisis?.contradiccion) advertencias.push('Los cores se contradicen: la neutralidad puede ser desacuerdo, no rango lateral.');
   if (isNum(metricas.creditoAncho) && metricas.creditoAncho < CREDITO_ANCHO_MINIMO) advertencias.push(`El crédito es solo ${fmtPct(metricas.creditoAncho, 0)} del ancho de las alas (menos de ${fmtPct(CREDITO_ANCHO_MINIMO, 0)}): arriesgas mucho para ganar poco.`);
 
   const setPata = (id, cambios) => { setLegs(ls => ls.map(l => (l.id === id ? { ...l, ...cambios } : l))); setLimiteTocado(false); };
@@ -293,7 +293,7 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
 
         {analisis && !analisis.sinAnalisis && (
           <div className="ticket__analisis small" role="note">
-            <strong>Análisis de origen:</strong> {ESTRATEGIA_LABELS[analisis.codigo] || analisis.codigo} {textoPuntaje(analisis.puntaje)} de 100, <Termino id="confianza">confianza</Termino> {analisis.est ? fmtPct(analisis.est.confianza) : '—'}, <Termino id="dispersion">dispersión</Termino> {analisis.est ? analisis.est.dispersion.toFixed(2) : '—'}, <Termino id="cobertura">cobertura</Termino> {isNum(analisis.cobertura) ? fmtPct(analisis.cobertura) : '—'}. {fmtDateTime(analisis.fecha)}, <Termino id="core">factores</Termino>: {analisis.cores.map(c => CORE_LABELS[c] || c).join(', ') || '—'}
+            <strong>Análisis de origen:</strong> {ESTRATEGIA_LABELS[analisis.codigo] || analisis.codigo} {textoPuntaje(analisis.puntaje)} de 100, <Termino id="confianza">confianza</Termino> {analisis.est ? fmtPct(analisis.est.confianza) : '—'}, <Termino id="dispersion">dispersión</Termino> {analisis.est ? analisis.est.dispersion.toFixed(2) : '—'}, <Termino id="cobertura">cobertura</Termino> {isNum(analisis.cobertura) ? fmtPct(analisis.cobertura) : '—'}. {fmtDateTime(analisis.fecha)}, <Termino id="core">cores</Termino>: {analisis.cores.map(c => CORE_LABELS[c] || c).join(', ') || '—'}
             <span className="small"> {NOTA_PUNTAJE}</span>
           </div>
         )}
