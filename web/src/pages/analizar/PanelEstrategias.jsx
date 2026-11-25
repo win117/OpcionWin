@@ -7,9 +7,10 @@ import { Empty, ErrorMessage, Notice } from '../../components/States';
 import { Select } from '../../components/Field';
 import { Termino } from '../../components/Termino';
 import BotonOperar from '../../components/BotonOperar';
+import SinPrecios, { etiquetaVencimiento } from '../../components/SinPrecios';
 import { participacion, encaje, razones, titular } from '../../utils/analisis';
 import { NOTA_PUNTAJE, CORE_LABELS, ESTRATEGIA_LABELS } from '../../utils/constants';
-import { candidatosStrike, diasHasta, mid, SPREAD_AVISO, spreadPct, textoPuntaje, vencimientosVigentes } from '../../utils/estrategiasOrden';
+import { candidatosStrike, diasHasta, mid, sinPrecios, SPREAD_AVISO, spreadPct, textoPuntaje, vencimientosVigentes } from '../../utils/estrategiasOrden';
 import { fmtDate, fmtDateTime, fmtFixed, fmtMoney, fmtPct, isNum } from '../../utils/format';
 
 const DIA_MS = 24 * 3600000;
@@ -141,9 +142,10 @@ function Contratos({ empresa, datos, pos, config, onComparar }) {
         <>
           {vencs.length > 0 && (
             <label className="field"><span className="field__label">Vencimiento</span>
-              <Select value={chain.vencimiento || ''} onChange={pos.cambiarVencimiento} options={vencs.map(v => ({ value: v, label: `${fmtDate(v)}, ${diasHasta(v)} días` }))} />
+              <Select value={chain.vencimiento || ''} onChange={pos.cambiarVencimiento} options={vencs.map(v => ({ value: v, label: etiquetaVencimiento(v, chain.detalleVencimientos) }))} />
             </label>
           )}
+          <SinPrecios chain={chain} onCambiar={pos.cambiarVencimiento} />
           {fueraRango && <Notice tone="warning">Vence en {dias} días, fuera de tu rango ({config.diasMin}–{config.diasMax}). Amplía el rango y vuelve a analizar.</Notice>}
           {pos.aviso && <Notice>{pos.aviso}</Notice>}
           {op?.error && <Notice tone="warning" title="No se pudo armar la estrategia.">{op.error} Activa «Traer contratos de opciones» y vuelve a analizar.</Notice>}
@@ -153,8 +155,9 @@ function Contratos({ empresa, datos, pos, config, onComparar }) {
           {op?.patas && (
             <>
               {op.riesgo && op.riesgo.maxPerdida == null && <Notice tone="danger" title="Pérdida ilimitada.">Esta combinación no tiene tope de pérdida.</Notice>}
-              {op.liq.sinCotizacion > 0 && <Notice tone="warning">{op.liq.sinCotizacion} {op.liq.sinCotizacion === 1 ? 'pata no tiene' : 'patas no tienen'} cotización válida{op.payoff ? '; se usa el último precio operado, que puede estar desfasado' : ': no se calculan ganancia, pérdida ni gráfica'}.</Notice>}
-              {op.liq.avisar && <Notice tone="warning">Spread de hasta {fmtPct(op.liq.peorSpread, 0)} del precio{op.liq.insuficiente ? ': sin liquidez suficiente' : ''}.</Notice>}
+              {op.liq.sinCotizacion > 0 && !sinPrecios(chain.items) && <Notice tone="warning">{op.liq.sinCotizacion} {op.liq.sinCotizacion === 1 ? 'pata no tiene' : 'patas no tienen'} cotización válida{op.payoff ? '; se usa el último precio operado, que puede estar desfasado' : ': no se calculan ganancia, pérdida ni gráfica'}.</Notice>}
+              {op.liq.fueraDeHorario && <Notice tone="warning">Cotización tomada fuera de horario, con mucha distancia entre compra y venta: se usa el último precio operado. Se actualiza con el mercado abierto.</Notice>}
+              {op.liq.avisar && !op.liq.fueraDeHorario && <Notice tone="warning">Spread de hasta {fmtPct(op.liq.peorSpread, 0)} del precio{op.liq.insuficiente ? ': sin liquidez suficiente' : ''}.</Notice>}
               <dl className="veredicto__cifras">
                 <div><dt>Ganancia máxima</dt><dd>{op.riesgo ? dinero(op.riesgo.maxGanancia) : '—'}</dd></div>
                 <div><dt><Termino id="breakeven">{op.riesgo?.breakevens.length > 1 ? 'Puntos de equilibrio' : 'Punto de equilibrio'}</Termino></dt><dd>{op.riesgo?.breakevens.map(b => fmtMoney(b)).join(' / ') || '—'}</dd></div>

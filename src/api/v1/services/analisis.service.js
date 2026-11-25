@@ -28,8 +28,19 @@ const DIA = 86400000;
 const positivo = v => Number.isFinite(v) && v > 0;
 /** Misma regla que la web: bid > 0 y ask >= bid. 0/0 o bid 0 es «sin cotización», no precio 0. */
 export const cotizacionValida = s => positivo(s?.bid) && Number.isFinite(s?.ask) && s.ask >= s.bid;
-/** Prima por acción: punto medio de una cotización válida; si no, último precio > 0; si no, undefined (falta el dato). */
-export const primaDe = s => (cotizacionValida(s) ? (s.bid + s.ask) / 2 : positivo(s?.ultimo) ? s.ultimo : undefined);
+// Sesión regular de opciones en Nueva York (9:30 a 16:15, lunes a viernes). Antes de abrir se publican cotizaciones amplísimas que no se pueden operar.
+const formatoHoraNY = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+export function enSesion(fechaDato) {
+  const t = new Date(fechaDato ?? NaN);
+  if (!Number.isFinite(t.getTime())) return true; // sin fecha no se puede descartar
+  const p = Object.fromEntries(formatoHoraNY.formatToParts(t).map(x => [x.type, x.value])), min = Number(p.hour) * 60 + Number(p.minute);
+  return !['Sat', 'Sun'].includes(p.weekday) && min >= 570 && min <= 975;
+}
+const SPREAD_MAXIMO = 0.25, DIAS_ULTIMO = 7;
+const cotizacionFiable = s => cotizacionValida(s) && (enSesion(s.fuente?.fechaDato ?? s.fechaDato) || (s.ask - s.bid) / ((s.ask + s.bid) / 2) <= SPREAD_MAXIMO);
+const ultimoReciente = s => positivo(s?.ultimo) && (!s.ultimoFecha || Date.now() - fecha(s.ultimoFecha) <= DIAS_ULTIMO * DIA);
+/** Prima por acción: punto medio de una cotización fiable; si no, último precio de los últimos 7 días; si no, undefined (falta el dato). */
+export const primaDe = s => (cotizacionFiable(s) ? (s.bid + s.ask) / 2 : ultimoReciente(s) ? s.ultimo : undefined);
 
 // Antigüedad de los snapshots de opciones, en días naturales de Nueva York: 2, o 4 si en medio hay fin de semana o feriado.
 // Los feriados de NYSE que no están aquí caen siempre junto a un fin de semana, que ya amplía el plazo.

@@ -88,6 +88,7 @@ export const GLOSARIO = {
   debito: { grupo: 'Estrategias', nombre: 'Débito', texto: 'Pagas para abrir la operación. Es lo habitual al comprar opciones.' },
   credito: { grupo: 'Estrategias', nombre: 'Crédito', texto: 'Cobras al abrir la operación, a cambio de asumir una obligación. Es lo habitual en un Iron Condor.' },
   spread: { grupo: 'Órdenes', nombre: 'Spread (diferencia bid/ask)', texto: 'Distancia entre lo que pagan (bid) y lo que piden (ask). Si es grande, entrar y salir cuesta más y el precio es poco fiable.' },
+  ultimo: { grupo: 'Opciones', nombre: 'Último precio', texto: 'Precio de la operación más reciente de ese contrato. Puede ser de hace días si casi nadie lo negocia; un vencimiento recién listado todavía no tiene.' },
   interes_abierto: { grupo: 'Opciones', nombre: 'Interés abierto', texto: 'Contratos de esa opción que siguen vivos. Si son pocos, cuesta encontrar con quién comprar o vender. Lo publica el proveedor con un día o más de retraso.' },
   resultados: { grupo: 'Opciones', nombre: 'Reporte de resultados', texto: 'Cada trimestre la empresa publica cuánto ganó. El precio puede saltar y la volatilidad implícita caer de golpe. La fecha que ves es una estimación a partir de reportes anteriores registrados en la SEC.' },
   dividendo: { grupo: 'Opciones', nombre: 'Dividendo y fecha ex', texto: 'Pago en efectivo por acción. Quien tiene la acción antes de la fecha ex lo cobra, por eso quien compró un call puede ejercerlo el día anterior.' },

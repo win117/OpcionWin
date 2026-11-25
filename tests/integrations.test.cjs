@@ -89,7 +89,7 @@ test('Alpaca: contratos y snapshots de opciones normalizados', async () => {
   assert.equal(s.url.searchParams.get('feed'), 'indicative');
   assert.equal(s.url.searchParams.get('expiration_date'), '2026-01-16');
   assert.deepEqual(snaps[0], {
-    contratoExternoId: 'AAPL260116C00200000', bid: 1.1, ask: 1.3, ultimo: 1.2, volatilidadImplicita: 0.31,
+    contratoExternoId: 'AAPL260116C00200000', bid: 1.1, ask: 1.3, ultimo: 1.2, ultimoFecha: '2026-01-05T14:59:00Z', volatilidadImplicita: 0.31,
     griegas: { delta: 0.45, gamma: 0.02, theta: -0.05, vega: 0.1, rho: 0.01 }, fechaDato: '2026-01-05T15:00:00Z',
   });
   await cliente.snapshotsOpciones(['AAPL260116C00200000', 'AAPL260116P00200000']);

@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { Badge } from '../../components/Badge';
 import { Termino } from '../../components/Termino';
-import { candidatosStrike, mid, SPREAD_AVISO, spreadPct } from '../../utils/estrategiasOrden';
+import { candidatosStrike, cotizacionFiable, mid, sinPrecios, SPREAD_AVISO, spreadPct } from '../../utils/estrategiasOrden';
 import { fmtFixed, fmtPct, isNum } from '../../utils/format';
 
 const VISIBLES = 5;
@@ -27,7 +27,7 @@ function TablaStrikes({ rol, cands, elegido, precio, onElegir, nombreGrupo }) {
     <fieldset className="strikes">
       <legend id={nombreGrupo + '-t'}><Badge tone={rol.accion === 'sell' ? 'warning' : 'info'}>{rol.accion === 'sell' ? 'Vender' : 'Comprar'}</Badge> {rol.etiqueta.replace(/^(Comprar|Vender) /, '')}</legend>
       <p className="muted small strikes__ayuda">{rol.ayuda}</p>
-      {cands.length > 0 && !cands[0].recomendable && <p className="small aviso-texto">Sin recomendación: ningún strike adecuado tiene cotización con spread de 25 % o menos.</p>}
+      {cands.length > 0 && !cands[0].recomendable && <p className="small aviso-texto">{sinPrecios(cands.map(c => c.item)) ? 'Sin recomendación: este vencimiento todavía no tiene precios.' : 'Sin recomendación: ningún strike adecuado tiene cotización con spread de 25 % o menos.'}</p>}
       {!cands.length ? <p className="small aviso-texto">No hay strikes válidos para esta pata en el vencimiento elegido.</p> : (
         <div className="table-wrap">
           <table className="table table--dense" aria-labelledby={nombreGrupo + '-t'}>
@@ -45,7 +45,7 @@ function TablaStrikes({ rol, cands, elegido, precio, onElegir, nombreGrupo }) {
                     <td className="num"><label htmlFor={id}><strong>{fmtFixed(it.strike, 2)}</strong></label></td>
                     <td>{dinero(it, precio)}</td>
                     <td className="num">{isNum(it.griegas?.delta) ? fmtFixed(it.griegas.delta, 2) : '—'}</td>
-                    <td className="num">{isNum(mid(it)) ? fmtFixed(mid(it), 2) : '—'}</td>
+                    <td className="num">{isNum(mid(it)) ? <>{fmtFixed(mid(it), 2)}{!cotizacionFiable(it) && <abbr title="Último precio operado">*</abbr>}</> : '—'}</td>
                     <td className={'num' + (sp > SPREAD_AVISO ? ' aviso-texto' : '')}>{isNum(sp) ? fmtPct(sp, 0) : '—'}</td>
                     <td className="num">{isNum(it.volatilidadImplicita) ? fmtPct(it.volatilidadImplicita, 1) : '—'}</td>
                     <td className="strikes__idon" title={c.motivo}>

@@ -7,6 +7,7 @@ import { Badge } from './Badge';
 import { Checkbox, Field } from './Field';
 import { Spinner } from './States';
 import { Termino } from './Termino';
+import SinPrecios from './SinPrecios';
 import { useBroker } from '../context/BrokerContext';
 import { acciones, mercado, operacion } from '../api/resources';
 import { useAsync } from '../hooks/useAsync';
@@ -14,8 +15,8 @@ import { ESTADOS_TERMINALES, useSeguimientoOrden } from '../hooks/useSeguimiento
 import { NOTA_PUNTAJE, CORE_LABELS, ESTRATEGIA_LABELS } from '../utils/constants';
 import { fmtDate, fmtDateTime, fmtFixed, fmtMoney, fmtPct, isNum } from '../utils/format';
 import {
-  antiguedadCotizacion, avisosEventos, INTERES_MINIMO, precioInmediato, camposPrecio, costoSpread, cotizacionValida, CREDITO_ANCHO_MINIMO, diasHasta, intencionPara, liquidez, metricasOrden, mid, netoMid, nombreConContexto,
-  nombreOrden, notasVencimiento, reconstruirPatas, redondearPrecio, signoNeto, SPREAD_AVISO, spreadPct, textoPuntaje, validarPatas, vencimientosVigentes,
+  antiguedadCotizacion, avisosEventos, INTERES_MINIMO, precioInmediato, camposPrecio, costoSpread, cotizacionFiable, CREDITO_ANCHO_MINIMO, diasHasta, intencionPara, liquidez, metricasOrden, mid, netoMid, nombreConContexto,
+  nombreOrden, notasVencimiento, reconstruirPatas, redondearPrecio, signoNeto, sinPrecios, SPREAD_AVISO, spreadPct, textoPuntaje, validarPatas, vencimientosVigentes,
 } from '../utils/estrategiasOrden';
 import { uuid } from '../utils/objects';
 
@@ -138,12 +139,13 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
   if (tipo === 'market' && sinMercado) problemas.push('Webull no admite estructuras de varias patas a mercado: usa una orden límite.');
   if (tipo === 'market' && liq.sinCotizacion > 0) problemas.push('Sin cotización bid/ask válida: usa una orden límite.');
   const advertencias = [];
-  if (liq.sinCotizacion > 0) advertencias.push(`${liq.sinCotizacion} de ${patas.length} patas sin cotización bid/ask válida: el precio estimado usa el último operado y puede no ser real.`);
-  if (liq.avisar) advertencias.push(`Spread de hasta ${fmtPct(liq.peorSpread, 0)} del precio${liq.insuficiente ? ' (sin liquidez suficiente)' : ''}: ${tipo === 'market' ? 'una orden de mercado puede ejecutarse a un precio mucho peor; considera una límite.' : 'puede que no se ejecute en el punto medio.'}`);
+  if (liq.sinCotizacion > 0 && !sinPrecios(items)) advertencias.push(`${liq.sinCotizacion} de ${patas.length} patas sin cotización bid/ask válida: el precio estimado usa el último operado y puede no ser real.`);
+  if (liq.fueraDeHorario) advertencias.push('Cotización tomada fuera de horario, con mucha distancia entre compra y venta: se usa el último precio operado. Se actualiza con el mercado abierto.');
+  else if (liq.avisar) advertencias.push(`Spread de hasta ${fmtPct(liq.peorSpread, 0)} del precio${liq.insuficiente ? ' (sin liquidez suficiente)' : ''}: ${tipo === 'market' ? 'una orden de mercado puede ejecutarse a un precio mucho peor; considera una límite.' : 'puede que no se ejecute en el punto medio.'}`);
   if (liq.pocoInteres) advertencias.push(`Una de las patas tiene solo ${liq.interesMinimo} contratos vivos (menos de ${INTERES_MINIMO}): puede costar entrar o salir.`);
   advertencias.push(...avisosEventos(patas, precioSub, chain?.vencimiento, eventos.data, fmtDate).map(a => a.texto));
   if (edad && edad.horas > 24) advertencias.push(`La cotización es de ${edad.texto}: el precio actual puede ser distinto. Sincroniza los contratos.`);
-  if (!edad && patas.length) advertencias.push('No se conoce la fecha de las cotizaciones.');
+  if (!edad && patas.length && !sinPrecios(items)) advertencias.push('No se conoce la fecha de las cotizaciones.');
   if (!estrategiaCodigo && legs.length > 1 && legs.length < 4) advertencias.push('El servidor solo registra órdenes de una pata o iron condor de cuatro: puede rechazar esta combinación.');
   if (perfil && perfil.maxGanancia != null && perfil.maxGanancia <= 0) advertencias.push('Con este precio la combinación no puede ganar dinero al vencimiento.');
   if (isNum(requerido) && isNum(poder) && requerido > poder) advertencias.push(`Poder de compra insuficiente: se requieren ${fmtMoney(requerido)} y hay ${fmtMoney(poder)}.`);
@@ -263,7 +265,7 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
               <div className="ticket__venc" aria-live="polite">
                 <Field label="Vencimiento">
                   <select value={vencSel} onChange={e => cambiarVencimiento(e.target.value)} disabled={bloqueado || cargaV.loading}>
-                    {vencimientos.map(v => <option key={v} value={v}>{v}, {diasTxt(diasHasta(v))}</option>)}
+                    {vencimientos.map(v => <option key={v} value={v}>{v}, {diasTxt(diasHasta(v))}{(chain?.detalleVencimientos || []).some(d => d.vencimiento === v && d.conPrecio === 0) ? ', sin precios' : ''}</option>)}
                   </select>
                 </Field>
                 {cargaV.loading && <span className="muted small"><Spinner small /> Cargando cadena…</span>}
@@ -275,6 +277,7 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
                 )}
               </div>
             )}
+            <SinPrecios chain={chain} onCambiar={bloqueado || cargaV.loading ? null : cambiarVencimiento} />
             {avisoVenc && <div className="alert alert--info" role="status">{avisoVenc}</div>}
             <ul className="ticket__patas" aria-label="Patas de la orden">
               {patas.map((l, i) => {
@@ -295,7 +298,8 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
                     <dl className="ticket__pata-datos">
                       <div><dt>Bid</dt><dd>{isNum(it?.bid) ? fmtFixed(it.bid) : '—'}</dd></div>
                       <div><dt>Ask</dt><dd>{isNum(it?.ask) ? fmtFixed(it.ask) : '—'}</dd></div>
-                      <div><dt>Medio</dt><dd>{isNum(mid(it)) ? <>{fmtFixed(mid(it))}{!cotizacionValida(it) && <abbr title="Último precio operado: no hay cotización bid/ask válida">*</abbr>}</> : '—'}</dd></div>
+                      <div><dt>Medio</dt><dd>{isNum(mid(it)) ? <>{fmtFixed(mid(it))}{!cotizacionFiable(it) && <abbr title="Último precio operado: no hay cotización bid/ask que se pueda usar">*</abbr>}</> : '—'}</dd></div>
+                      <div><dt>Último</dt><dd>{isNum(it?.ultimo) ? <>{fmtFixed(it.ultimo)}{it.ultimoFecha && <small className="muted"> {fmtDate(it.ultimoFecha)}</small>}</> : '—'}</dd></div>
                       <div><dt><Termino id="spread">Spread</Termino></dt><dd className={(spreadPct(it) ?? 0) > SPREAD_AVISO ? 'aviso-texto' : undefined}>{isNum(spreadPct(it)) ? fmtPct(spreadPct(it), 0) : '—'}</dd></div>
                       <div><dt><Termino id="interes_abierto">Interés abierto</Termino></dt><dd className={isNum(it?.interesAbierto) && it.interesAbierto < INTERES_MINIMO ? 'aviso-texto' : undefined}>{isNum(it?.interesAbierto) ? it.interesAbierto.toLocaleString('es-MX') : '—'}</dd></div>
                       <div><dt><Termino id="iv">IV</Termino></dt><dd>{isNum(it?.volatilidadImplicita) ? fmtPct(it.volatilidadImplicita, 1) : '—'}</dd></div>
@@ -306,7 +310,7 @@ export default function TicketOrden({ open = true, onClose, empresa, chain: chai
                 );
               })}
             </ul>
-            <p className="muted small">Cotización {edad ? `${edad.texto} (${fmtDateTime(edad.fecha)})` : 'de fecha desconocida'}. Cruzar el <Termino id="spread">spread</Termino> cuesta {isNum(costo) ? `${fmtMoney(costo)} al entrar (y otro tanto, aproximadamente, al salir)` : '—'}.</p>
+            {!sinPrecios(items) && <p className="muted small">Cotización {edad ? `${edad.texto} (${fmtDateTime(edad.fecha)})` : 'de fecha desconocida'}. Cruzar el <Termino id="spread">spread</Termino> cuesta {isNum(costo) ? `${fmtMoney(costo)} al entrar (y otro tanto, aproximadamente, al salir)` : '—'}.</p>}
             {legs.length < 4 && <div><button type="button" className="btn btn--sm" onClick={agregar}>+ Añadir pata</button></div>}
 
             <div className="ticket__form">

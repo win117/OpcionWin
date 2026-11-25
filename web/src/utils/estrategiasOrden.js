@@ -16,15 +16,37 @@ export const INTERES_MINIMO = 100;
 /** Única definición de cotización válida: hay comprador (bid > 0) y el ask no está cruzado. */
 export const cotizacionValida = item => isNum(item?.bid) && isNum(item?.ask) && item.bid > 0 && item.ask >= item.bid;
 
-/** Punto medio de una cotización válida; si no la hay, el último precio operado; si no, null. */
-export function mid(item) {
-  if (cotizacionValida(item)) return (item.bid + item.ask) / 2;
-  return isNum(item?.ultimo) && item.ultimo > 0 ? item.ultimo : null;
+/** Spread relativo (ask-bid)/punto medio; null sin cotización válida. */
+export function spreadPct(item) {
+  return cotizacionValida(item) ? (item.ask - item.bid) / ((item.ask + item.bid) / 2) : null;
 }
 
-/** Spread relativo (ask-bid)/mid; null sin cotización válida. */
-export function spreadPct(item) {
-  return cotizacionValida(item) ? (item.ask - item.bid) / mid(item) : null;
+// Sesión regular de opciones en Nueva York (9:30 a 16:15, lunes a viernes); misma regla que el servidor.
+const formatoHoraNY = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+export function enSesion(fechaDato) {
+  const t = new Date(fechaDato ?? NaN);
+  if (!Number.isFinite(t.getTime())) return true;
+  const p = Object.fromEntries(formatoHoraNY.formatToParts(t).map(x => [x.type, x.value])), min = Number(p.hour) * 60 + Number(p.minute);
+  return !['Sat', 'Sun'].includes(p.weekday) && min >= 570 && min <= 975;
+}
+/** Cotización que sirve para estimar un precio: válida y, si se tomó fuera de horario, sin un spread desmedido. */
+export const cotizacionFiable = item => cotizacionValida(item) && (enSesion(item.fechaDato) || spreadPct(item) <= SPREAD_MAXIMO);
+
+const DIAS_ULTIMO = 7; // un último precio más viejo ya no estima nada
+const ultimoReciente = item => isNum(item?.ultimo) && item.ultimo > 0 && (!item.ultimoFecha || Date.now() - Date.parse(item.ultimoFecha) <= DIAS_ULTIMO * DAY);
+
+/** Punto medio de una cotización fiable; si no la hay, el último precio operado en los últimos 7 días; si no, null. */
+export function mid(item) {
+  if (cotizacionFiable(item)) return (item.bid + item.ask) / 2;
+  return ultimoReciente(item) ? item.ultimo : null;
+}
+
+/** La cadena tiene contratos, pero ninguno con un precio que mostrar (vencimiento recién listado). */
+export const sinPrecios = (items = []) => items.length > 0 && !items.some(i => i.bid > 0 || i.ultimo > 0);
+/** Vencimientos que sí tienen precios según `detalle` [{ vencimiento, conPrecio, conInteres }]; sin detalle, todos. */
+export function vencimientosConPrecio(vencimientos = [], detalle = []) {
+  const vacios = new Set(detalle.filter(d => d.conPrecio === 0).map(d => d.vencimiento));
+  return vencimientos.filter(v => !vacios.has(v));
 }
 
 // Centavos válidos para una opción (0.05 desde 3.00), hacia el lado que facilita la ejecución: más al pagar, menos al cobrar.
@@ -34,7 +56,7 @@ const alTick = (x, paga) => { const t = Math.abs(x) >= 3 ? 0.05 : 0.01; return M
  * null si falta una cotización válida o si a ese precio la orden cambiaría de signo (un crédito que pasaría a costar).
  */
 export function precioInmediato(patas, credito) {
-  if (!patas.length || patas.some(p => !cotizacionValida(p.item))) return null;
+  if (!patas.length || patas.some(p => !cotizacionFiable(p.item))) return null;
   const neto = patas.reduce((n, p) => n + (p.accion === 'sell' ? p.item.bid : -p.item.ask) * (p.proporcion || 1), 0);
   return (neto > 0) === Boolean(credito) && Math.abs(neto) >= 0.01 ? alTick(Math.abs(neto), !credito) : null;
 }
@@ -43,7 +65,7 @@ export const cederPrecio = (precio, fraccion, cobra) => alTick(precio * (cobra ?
 
 /** Costo en dólares de cruzar el spread (del punto medio al bid/ask) en todas las patas; null si alguna no tiene cotización válida. */
 export function costoSpread(patas, cantidad = 1) {
-  if (!patas.length || !patas.every(p => cotizacionValida(p.item))) return null;
+  if (!patas.length || !patas.every(p => cotizacionFiable(p.item))) return null;
   return patas.reduce((a, p) => a + ((p.item.ask - p.item.bid) / 2) * (p.proporcion || 1), 0) * MULTIPLICADOR * cantidad;
 }
 
@@ -53,7 +75,7 @@ export function liquidez(patas) {
   const peorSpread = Math.max(0, ...patas.map(p => spreadPct(p.item) ?? 0));
   const intereses = patas.map(p => p.item?.interesAbierto).filter(isNum), interesMinimo = intereses.length ? Math.min(...intereses) : null;
   return {
-    sinCotizacion, peorSpread, interesMinimo, pocoInteres: interesMinimo != null && interesMinimo < INTERES_MINIMO,
+    sinCotizacion, peorSpread, interesMinimo, fueraDeHorario: patas.some(p => cotizacionValida(p.item) && !cotizacionFiable(p.item)), pocoInteres: interesMinimo != null && interesMinimo < INTERES_MINIMO,
     avisar: peorSpread > SPREAD_AVISO,
     confirmar: sinCotizacion > 0 || peorSpread > SPREAD_CONFIRMAR,
     insuficiente: sinCotizacion > 0 || peorSpread > SPREAD_MAXIMO,
@@ -101,6 +123,7 @@ export function vencimientosVigentes(vencimientos = [], hoy = new Date()) {
 
 // Liquidez esperable por tipo de vencimiento, en días de «distancia» que se le suman: el mensual (tercer viernes) es el más negociado,
 // luego los demás viernes; los de entre semana tienen spreads mucho mayores.
+const RECARGO_SIN_INTERES = 10; // vencimiento recién listado: cotiza, pero nadie tiene contratos abiertos
 const recargoLiquidez = v => {
   const d = new Date(v + 'T00:00:00Z');
   if (d.getUTCDay() !== 5) return 6;
@@ -110,15 +133,18 @@ const recargoLiquidez = v => {
 /**
  * Vencimiento sugerido para una estrategia: el más cercano a su objetivo de días dentro de [minDias, maxDias], prefiriendo los líquidos;
  * si ninguno cae en el rango, el futuro más cercano al objetivo. Nunca uno vencido: null si no queda ninguno.
+ * Con `detalle` descarta los que no tienen ni un precio (salvo que ninguno tenga) y deja al final los que nadie ha negociado.
  */
-export function elegirVencimiento(vencimientos = [], hoy = new Date(), minDias = 7, maxDias = null, codigo = null) {
+export function elegirVencimiento(todos = [], hoy = new Date(), minDias = 7, maxDias = null, codigo = null, detalle = []) {
+  const conPrecio = vencimientosConPrecio(todos, detalle), vencimientos = vencimientosVigentes(conPrecio, hoy).length ? conPrecio : todos;
+  const hayInteres = detalle.some(d => d.conInteres > 0), nuevos = new Set(detalle.filter(d => hayInteres && d.conInteres === 0).map(d => d.vencimiento));
   const objetivo = DIAS_OBJETIVO[codigo] ?? DIAS_OBJETIVO_DEFECTO;
   const vigentes = vencimientosVigentes(vencimientos, hoy);
   const enRango = vigentes.filter(v => diasHasta(v, hoy) >= minDias && (!isNum(maxDias) || diasHasta(v, hoy) <= maxDias));
   // El que vence hoy solo se propone si no hay otro.
   const futuros = vigentes.filter(v => diasHasta(v, hoy) > 0);
   const lista = enRango.length ? enRango : futuros.length ? futuros : vigentes;
-  return cercano(lista, objetivo, (v, o) => Math.abs(diasHasta(v, hoy) - o) + recargoLiquidez(v));
+  return cercano(lista, objetivo, (v, o) => Math.abs(diasHasta(v, hoy) - o) + recargoLiquidez(v) + (nuevos.has(v) ? RECARGO_SIN_INTERES : 0));
 }
 
 const delta = it => it?.griegas?.delta;

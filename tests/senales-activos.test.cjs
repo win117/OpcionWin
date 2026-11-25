@@ -153,6 +153,7 @@ test('HTTP: catálogo de cores, búsqueda, resumen de opciones y pesos en selecc
     assert.equal(r.precioSubyacente, 229.1);
     assert.deepEqual(r.vencimientos, [integraciones.venc]); assert.equal(r.vencimiento, integraciones.venc);
     assert.equal(r.total, 3);
+    assert.deepEqual(r.detalleVencimientos, [{ vencimiento: integraciones.venc, contratos: 3, conPrecio: 3, conInteres: 0 }]);
     assert.deepEqual(r.items.map(i => [i.strike, i.tipo]), [[110, 'call'], [120, 'call'], [120, 'put']]);
     const it = r.items[2];
     assert.equal(it.contratoId, idDeterminista(userId, 'contrato', 'alpaca', integraciones.occ));

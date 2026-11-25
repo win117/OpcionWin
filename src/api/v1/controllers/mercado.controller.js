@@ -87,15 +87,21 @@ export default (factory, integraciones, universo, { tasa = createTasa({ integrac
       const items = contratos.filter(c => dia(c) === elegido).map(c => {
         const s = snaps.get(c._id);
         return { contratoId: c._id, simbolo: c.simbolo, tipo: c.tipo, strike: c.strike, vencimiento: dia(c),
-          bid: s?.bid ?? null, ask: s?.ask ?? null, ultimo: s?.ultimo ?? null, volatilidadImplicita: s?.volatilidadImplicita ?? null,
+          bid: s?.bid ?? null, ask: s?.ask ?? null, ultimo: s?.ultimo ?? null, ultimoFecha: s?.ultimoFecha ?? null, volatilidadImplicita: s?.volatilidadImplicita ?? null,
           interesAbierto: c.interesAbierto ?? null, interesAbiertoFecha: c.interesAbiertoFecha ? new Date(c.interesAbiertoFecha).toISOString().slice(0, 10) : null, griegas: s?.griegas ?? null, fechaDato: s?.fuente?.fechaDato ?? null };
       }).sort((a, b) => a.strike - b.strike || String(a.tipo).localeCompare(String(b.tipo)));
+      // Cuánto se sabe de cada vencimiento: los recién listados existen, pero nadie los ha cotizado ni negociado todavía.
+      const detalle = new Map(vencimientos.map(v => [v, { vencimiento: v, contratos: 0, conPrecio: 0, conInteres: 0 }]));
+      for (const c of contratos) {
+        const d = detalle.get(dia(c)), s = snaps.get(c._id);
+        d.contratos += 1; d.conPrecio += s?.bid > 0 || s?.ultimo > 0 ? 1 : 0; d.conInteres += c.interesAbierto > 0 ? 1 : 0;
+      }
       // Precio del subyacente: última cotización guardada; si no hay, cierre de la última vela.
       const ultima = lista => lista.sort((a, b) => fecha(b.fuente.fechaDato) - fecha(a.fuente.fechaDato))[0];
       const cot = ultima((await todos('datos-mercado', req.context, { empresaId: empresa._id, tipo: 'cotizacion' }, factory)).filter(q => q.ultimo != null && q.fuente?.fechaDato));
       const vela = cot ? null : ultima((await todos('datos-mercado', req.context, { empresaId: empresa._id, tipo: 'vela' }, factory)).filter(v => v.cierre != null && v.fuente?.fechaDato));
       respond(res, { empresa: { _id: empresa._id, simbolo: empresa.simbolo, nombre: empresa.nombre }, precioSubyacente: cot?.ultimo ?? vela?.cierre ?? null,
-        vencimientos, vencimiento: elegido, items, total: items.length,
+        vencimientos, detalleVencimientos: [...detalle.values()], vencimiento: elegido, items, total: items.length,
         fechaDato: items.reduce((max, i) => (i.fechaDato && (!max || fecha(i.fechaDato) > fecha(max)) ? i.fechaDato : max), null) });
     }),
     // Consultas directas al proveedor (no se guardan; para guardar usar /sincronizaciones/ejecuciones).

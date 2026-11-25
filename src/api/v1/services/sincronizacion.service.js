@@ -3,6 +3,7 @@
 import boom from '@hapi/boom';
 import { repository } from '../../../repositories';
 import { adaptadorDe, createBroker, ESTADOS_TERMINALES } from './broker.service';
+import { enSesion, snapshotVigente } from './analisis.service';
 import { idDeterminista, todos, guardar, guardarLote, obtener, parchar } from './registros';
 
 const DIA = 86400000;
@@ -85,12 +86,16 @@ export function createSincronizador({ integraciones, factory = repository }) {
         ...(c.interesAbierto != null ? { interesAbierto: c.interesAbierto, ...(c.interesAbiertoFecha ? { interesAbiertoFecha: c.interesAbiertoFecha } : {}) } : {}) } })), factory);
       // Snapshot (cotización, IV y griegas indicativas): uno vigente por contrato, se sobrescribe (evita crecimiento ilimitado).
       const snaps = lista.length ? await alpaca.snapshotsOpciones(empresa.simbolo, filtros) : [];
-      await guardarLote('datos-mercado', ctx, snaps.filter(s => ids.has(s.contratoExternoId) && s.fechaDato).map(s => {
-        const contratoId = ids.get(s.contratoExternoId);
+      // Fuera de horario se conservan cotización, IV y griegas de la última sesión: las de antes de abrir no se pueden operar.
+      const previos = new Map(snaps.some(s => !enSesion(s.fechaDato)) ? (await todos('datos-mercado', ctx, { empresaId: empresa._id, tipo: 'snapshot_opcion' }, factory)).map(p => [p._id, p]) : []);
+      const deSesion = (s, p) => (p && !enSesion(s.fechaDato) && enSesion(p.fuente?.fechaDato) && snapshotVigente(p.fuente?.fechaDato) && p.bid != null
+        ? { ...s, bid: p.bid, ask: p.ask, volatilidadImplicita: p.volatilidadImplicita, griegas: p.griegas, fechaDato: p.fuente.fechaDato } : s);
+      await guardarLote('datos-mercado', ctx, snaps.filter(s => ids.has(s.contratoExternoId) && s.fechaDato).map(x => {
+        const contratoId = ids.get(x.contratoExternoId), s = deSesion(x, previos.get(idDeterminista(contratoId, 'snapshot')));
         const bid = s.bid, ask = s.ask != null && bid != null && s.ask < bid ? undefined : s.ask;
         return { id: idDeterminista(contratoId, 'snapshot'), datos: {
           empresaId: empresa._id, contratoId, tipo: 'snapshot_opcion',
-          ...(bid != null ? { bid } : {}), ...(ask != null ? { ask } : {}), ...(s.ultimo != null ? { ultimo: s.ultimo } : {}),
+          ...(bid != null ? { bid } : {}), ...(ask != null ? { ask } : {}), ...(s.ultimo != null ? { ultimo: s.ultimo, ...(s.ultimoFecha ? { ultimoFecha: s.ultimoFecha } : {}) } : {}),
           ...(s.volatilidadImplicita != null ? { volatilidadImplicita: s.volatilidadImplicita } : {}),
           ...(s.griegas ? { griegas: s.griegas } : {}),
           fuente: { proveedor: 'alpaca', fechaDato: s.fechaDato, feed: 'indicative', referencia: s.contratoExternoId } } };
