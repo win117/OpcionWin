@@ -96,7 +96,7 @@ export const GLOSARIO = {
   paper: { grupo: 'Órdenes', nombre: 'Paper (simulado)', texto: 'Cuenta de práctica con dinero ficticio. Esta aplicación solo opera en paper.' },
   core: { grupo: 'Cómo lee la app una empresa', nombre: 'Core o factor', texto: 'Cada punto de vista del análisis: técnico, fundamental, institucional, indicadores y noticias. Cada uno da un puntaje de 0 a 100.' },
   confianza: { grupo: 'Cómo lee la app una empresa', nombre: 'Confianza', texto: 'Qué tan de acuerdo están las señales y qué tan completos son los datos. Con confianza baja, el puntaje vale menos.' },
-  compatibilidad: { grupo: 'Cómo lee la app una empresa', nombre: 'Puntaje de compatibilidad', texto: 'Mide de 0 a 100 qué tan alineados están hoy los factores con una estrategia. No es la probabilidad de ganar: en una prueba con casi 49 mil casos de 2018 a 2026 (con tres de los cinco factores) no mostró capacidad de predecir el resultado.' },
+  compatibilidad: { grupo: 'Cómo lee la app una empresa', nombre: 'Puntaje de compatibilidad', texto: 'Mide de 0 a 100 qué tan alineados están hoy los factores con una estrategia. No es la probabilidad de ganar: en una prueba con casi 49 mil casos de 2018 a 2026 (con tres de los cinco factores) no mostró capacidad de predecir el resultado, y en otra con 2,856 casos y precios reales de opciones (con cuatro) tampoco.' },
   cobertura: { grupo: 'Cómo lee la app una empresa', nombre: 'Cobertura', texto: 'Parte de los datos necesarios que sí se encontró. 100 % significa que no faltó ninguno.' },
   dispersion: { grupo: 'Cómo lee la app una empresa', nombre: 'Dispersión', texto: 'Cuánto difieren los cores entre sí. Si es alta, unos ven subida y otros bajada: conviene ir con cautela.' },
 };

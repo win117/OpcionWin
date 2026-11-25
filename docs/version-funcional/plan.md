@@ -215,4 +215,5 @@ La propuesta no mejora la predicción frente a la fórmula vigente y no se aplic
 - Fase 2 (ADR-016): tasa del Tesoro, dividendos, resultados estimados, interés abierto e historial de precios de contratos.
 - Fase 3 (ADR-017): esquemas Zod, rutas por tema, servicios por módulo en uso, contrato de brokers y pruebas de estructura.
 - Fase 4 (ADR-018): seguimiento en vivo. Probado en Alpaca paper: una cancelación hecha en el broker llegó a la app en 1.5 s. Gráfica del valor de la cuenta.
-- Fase 5 (ADR-019): TradingView; Webull explica en español que está fuera de horario.
+- Fase 5 (ADR-019): TradingView; Webull explica en español que está fuera de horario.- Gráfica sobre el motor de TradingView: patrones de velas, paneles, vela en vivo; sus números coinciden con los de TradingView en NVDA.
+- Backtest con precios reales de opciones (ADR-020): los puntajes no anticiparon la ganancia; no se cambian.

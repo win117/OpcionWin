@@ -172,3 +172,19 @@ streaming y no `EventSource`, porque el token va en una cabecera. Si no hay SSE,
 **Decisión.** Se ofrece su gráfica avanzada en Análisis, a elección del usuario, en un `iframe` aislado (`frame-src`): no se carga ningún script suyo en nuestra página, donde vive el
 token. Se conserva la atribución que exigen sus términos. No alimenta cálculos: es de solo visualización y con retraso (15 min).
 **Consecuencias.** Al abrirla, TradingView recibe el símbolo y la IP; se avisa y solo se carga si se elige. El uso comercial requeriría licencia.
+
+## ADR-020 · Prueba con precios reales de opciones: los puntajes no anticipan el resultado
+**Contexto.** ADR-014 midió el movimiento de la acción, sin precios de opciones. Alpaca da contratos vencidos con precios desde 2024-02.
+**Prueba** (`scripts/backtest/opciones.cjs`, reproducible). Las 100 mayores empresas del universo, 30 vencimientos mensuales (2024-04 a 2026-11), 2 856 casos. Entrada ~37 días antes al
+último precio operado de contratos negociados ese día; salida al vencer. Cuatro cores evaluados solo con lo conocido (técnico, indicadores, fundamental, noticias) y la IV del momento.
+El error se calcula entre vencimientos, porque las empresas de un mismo mes se mueven juntas.
+- Long Call: siempre +15.1 % (±16.5); con puntaje ≥ 60, +14.6 % (±18.6). Correlación puntaje-resultado −0.023 (t = −0.7). Gana el 38 % de las veces.
+- Long Put: siempre −19.3 % (±16.4); con puntaje ≥ 60, −45.5 % (±21.7). Correlación +0.022 (t = 0.7). Gana el 29 %.
+- Iron Condor: siempre −0.9 % (±4.6) del riesgo; con puntaje ≥ 60, −3.1 % (±6.0). Correlación **−0.090 (t = −4.9)**, igual en las dos mitades (−0.090 y −0.090). Gana el 67 %.
+- Elegir la mejor estrategia con puntaje ≥ 60: −0.4 % (±12.1).
+**Lectura.** Ningún puntaje anticipó la ganancia. El de Iron Condor ordena ligeramente al revés: dentro de cada mes favorece empresas tranquilas, que ganan un poco más a menudo
+(+0.04, t = 2.4) pero pagan menos crédito respecto al ancho (−0.118, t = −6.1), y el saldo es algo peor. La razón IV/HV no mostró relación con el resultado (−0.005).
+**Límites.** Precios operados, no cotizaciones: sin spread ni comisiones (lo real sería peor). Empresas grandes de hoy (sesgo de supervivencia) en un mercado alcista, que favorece a los
+calls. Sin 13F. Se mantiene hasta vencer: no mide salidas anticipadas. 18 cóndores tienen un crédito atípico; sin ellos el resultado es el mismo.
+**Decisión.** No se cambian los puntajes con una sola prueba: ajustar a estos datos sería sobreajuste. Se mantiene la nota «no es la probabilidad de ganar».
+**A debate.** Ordenar Iron Condor por crédito respecto al ancho y probabilidad, en vez de por neutralidad, y probarlo con datos que no se usaron para diseñarlo.
