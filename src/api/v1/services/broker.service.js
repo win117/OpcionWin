@@ -6,11 +6,10 @@ import { obtener, parchar } from './registros';
 export const BROKERS = {
   alpaca: { codigo: 'alpaca', nombre: 'Alpaca', ref: 'env:ALPACA' },
   webull: { codigo: 'webull', nombre: 'Webull', ref: 'env:WEBULL' },
-  ibkr: { codigo: 'ibkr', nombre: 'Interactive Brokers', ref: 'env:IBKR' },
 };
 
 // Mapa de adaptadores por código de broker (los fakes de prueba pueden omitir alguno).
-export const adaptadoresDe = integraciones => ({ alpaca: integraciones.alpaca, webull: integraciones.webull, ibkr: integraciones.ibkr });
+export const adaptadoresDe = integraciones => ({ alpaca: integraciones.alpaca, webull: integraciones.webull });
 export function adaptadorDe(integraciones, codigo) {
   const a = adaptadoresDe(integraciones)[codigo];
   if (!a) throw boom.notImplemented('Broker ' + codigo + ' sin adaptador operativo (ADR-004).');

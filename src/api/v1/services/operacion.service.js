@@ -200,8 +200,7 @@ export function createOperacion({ integraciones, factory = repository, cola, aho
 
     // 0) GET /brokers/disponibles
     async disponibles() {
-      // Interactive Brokers solo aparece si está configurado.
-      return { items: Object.values(BROKERS).filter(m => m.codigo !== 'ibkr' || integraciones.ibkr?.configurado).map(m => {
+      return { items: Object.values(BROKERS).map(m => {
         const a = integraciones[m.codigo];
         const configurado = Boolean(a?.configurado);
         return { codigo: m.codigo, nombre: m.nombre, configurado, operativo: configurado, entornos: ['paper'],
