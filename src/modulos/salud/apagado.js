@@ -15,7 +15,9 @@ export function crearApagado({ server, cola, alApagar = [], cerrarBase = async (
       let espera;
       const vencio = await Promise.race([
         Promise.resolve(cola?.vaciar?.()).then(() => false),
-        new Promise(resolver => { espera = setTimeout(() => resolver(true), drenadoMs); espera.unref?.(); }),
+        // Sin unref: esta espera debe mantener vivo el proceso (se cancela en cuanto los trabajos terminan). Solo el tope de
+        // seguridad lleva unref, para no retrasar una salida que ya ocurrió por otra vía.
+        new Promise(resolver => { espera = setTimeout(() => resolver(true), drenadoMs); }),
       ]);
       clearTimeout(espera);
       if (vencio) avisar(`Apagado: pasaron ${drenadoMs / 1000} s y quedan trabajos en curso; se marcarán como fallidos al consultarse.`);
