@@ -1,0 +1,64 @@
+schema: spec-driven
+
+context: |
+  Language: es
+  All artifacts must be written in es.
+  Keep OpenSpec structural headings and SHALL/MUST keywords in English.
+
+  ## Proyecto
+  AppRESTOpciones: plataforma académica (Laboratorio de Servicios Web, TecNM Tepic, Equipo 9) para analizar y
+  operar en papel (paper trading) tres estrategias de opciones: LONG_CALL, LONG_PUT e IRON_CONDOR.
+  La app YA FUNCIONA y está desplegada en Render; todo cambio debe ser incremental y no romper lo existente.
+
+  ## Stack
+  - Backend: Node.js + Express 5 (CommonJS, compilado con Babel de src/ a dist/), Zod 4 para validar y generar OpenAPI
+    (Swagger UI), @hapi/boom para errores, morgan para bitácora.
+  - Persistencia dual: MongoDB (mongoose) o Supabase, elegida por sesión; acceso solo vía src/repositories/.
+  - Frontend: React + Vite en web/ (SPA servida por Express en producción). Aún NO es PWA (manifest y service worker pendientes).
+  - Pruebas: node --test sobre tests/*.test.cjs (tras npm run build). Lint: ESLint.
+
+  ## Estructura (capas)
+  - src/api/v1/routes → controllers → services → src/repositories (nunca saltarse capas).
+  - src/api/v1/schemas: esquemas Zod (validación + documentación OpenAPI); src/api/v1/models: modelos de recurso.
+  - src/cores: funciones puras evaluar(input) → resultado, sin I/O (técnico, indicadores, fundamental, institucional,
+    noticias, confluencia, Black-Scholes). Reproducibles; declaran datosFaltantes en vez de inventar datos.
+  - src/integrations: clientes externos (Alpaca datos+trading paper, Webull sandbox, SEC EDGAR, Tesoro). Todo adaptador
+    de broker cumple contrato-broker.js.
+  - src/jobs/cola.js: trabajos asíncronos en proceso (POST responde 202 + consulta de estado).
+  - src/middlewares: auth, validación, errores, límites, gzip, cabeceras.
+  - Decisiones técnicas en docs/decisiones/README.md (ADR-001..). Un cambio de arquitectura requiere ADR nueva.
+
+  ## Reglas que no se negocian
+  - Solo paper trading (ADR-005): nunca habilitar URLs live.
+  - Credenciales por referencia (ADR-006): las claves viven en variables del servidor; nunca en la base, el código ni el navegador.
+  - Órdenes con Idempotency-Key. Respuestas de error con Boom y el formato existente.
+  - Interactive Brokers está retirado (etiqueta git respaldo-ibkr); no reintroducirlo salvo que se pida.
+  - No es asesoría financiera: el puntaje 0–100 no es probabilidad de ganancia.
+  - Nunca commitear .env, private/ ni backups/.
+
+  ## Estructura propuesta por la IA
+  Si al analizar un cambio la estructura actual no es la óptima, proponer en design.md la estructura alternativa
+  (con justificación, impacto y plan de migración) en lugar de solo seguir la existente; la migración se hace
+  como change separado y sin romper los endpoints actuales (/api/v1).
+
+rules:
+  proposal:
+    - Indicar explícitamente qué queda fuera del alcance.
+    - Señalar qué endpoints, pantallas o datos existentes se ven afectados y confirmar compatibilidad hacia atrás.
+  design:
+    - Explicar a qué capa pertenece cada pieza (route, controller, service, repository, core, integration, web).
+    - Si la estructura actual no es óptima para el cambio, proponer la estructura alternativa y justificarla.
+  specs:
+    - Cada requisito con al menos un escenario GIVEN/WHEN/THEN verificable con una prueba.
+  tasks:
+    - Incluir tareas de pruebas (tests/*.test.cjs) y de documentación (docs/ o ADR) cuando aplique.
+    - "Última tarea siempre: ejecutar npm run verificar (lint + pruebas + build del frontend) y que pase."
+
+operations:
+  apply:
+    guidance:
+      - Antes de cambiar código, confirmar que npm run verificar pasa; al terminar, volver a ejecutarlo.
+      - Cambios pequeños y en orden; no modificar contratos HTTP existentes sin versionarlos.
+  archive:
+    guidance:
+      - Antes de archivar, confirmar que las pruebas pasan y que las specs principales quedaron sincronizadas.
