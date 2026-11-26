@@ -1,0 +1,8 @@
+{
+  "name": "entrega-docx",
+  "private": true,
+  "description": "Genera el .docx de la entrega a partir de entrega.html (ver docs/guia-opciones/README.md). No es dependencia de la app.",
+  "dependencies": {
+    "docx": "9.5.1"
+  }
+}
