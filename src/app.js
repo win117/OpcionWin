@@ -14,6 +14,9 @@ import { limiteOperaciones } from './middlewares/limites.handler';
 import { cabecerasSeguridad } from './middlewares/cabeceras.handler';
 import { comprimir, assetsComprimidos } from './middlewares/gzip.handler';
 import { registrarError } from './middlewares/errores.handler';
+import { createIntegrations } from './integrations';
+import { montarSalud } from './modulos/salud';
+import { crearMonitoreo, rutaDe } from './modulos/monitoreo';
 export function createApp(options = {}) {
   if (!Number.isSafeInteger(config.SESSION_TTL_SECONDS) || config.SESSION_TTL_SECONDS < 60 || config.SESSION_TTL_SECONDS > 86400) throw new Error('SESSION_TTL_SECONDS debe estar entre 60 y 86400.');
   const saltos=options.trustProxy ?? config.TRUST_PROXY;
@@ -21,20 +24,28 @@ export function createApp(options = {}) {
   const app=express();
   app.disable('x-powered-by');
   app.set('trust proxy',saltos); // req.ip y req.secure: solo se creen los últimos `saltos` de X-Forwarded-*
-  app.locals.limiteOperaciones=limiteOperaciones({cola:options.cola ?? colaGlobal}); // lo aplica authenticate
+  // Una sola instancia de integraciones y de cola para las APIs y la readiness: así /health/listo ve los mismos circuitos.
+  const integraciones=options.integraciones ?? createIntegrations(process.env), cola=options.cola ?? colaGlobal;
+  app.locals.limiteOperaciones=limiteOperaciones({cola}); // lo aplica authenticate
   app.set('port',config.PORT);
   app.use(cors({origin:config.CORS_ORIGINS.length ? config.CORS_ORIGINS : false, exposedHeaders:['ETag','X-Request-Id']}));
   app.use((req,res,next)=>{ req.requestId=randomUUID();res.set('X-Request-Id',req.requestId);next(); });
+  // Monitoreo (src/modulos/monitoreo): instrumentación de TODA solicitud (métricas, uso, log JSON, Server-Timing).
+  const monitoreo=crearMonitoreo({integraciones,cola,...(options.monitoreo||{})});
+  app.locals.monitoreo=monitoreo.servicio;
+  app.use(monitoreo.instrumentar);
   app.use(cabecerasSeguridad);
   if (!options.quiet) app.use(morgan('dev'));
   app.use(comprimir);
   app.use(express.json({limit:'1mb'}));
   app.use(express.urlencoded({extended:false,limit:'1mb'}));
-  app.get('/health',(_req,res)=>res.json({status:'ok'}));
+  app.get('/health',(_req,res)=>res.json({status:'ok'})); // liveness: sin dependencias
+  app.locals.salud=montarSalud(app,{integraciones,cola,...(options.salud||{})}); // readiness: /health/listo (src/modulos/salud)
+  app.use(monitoreo.rutas); // /metrics y /monitoreo/* (token de operación; sin MONITOREO_TOKEN no existen)
   app.get(config.API_URL,(_req,res)=>res.json({success:true,message:'RESTful API de opciones',docs:config.API_URL+'/api-docs'}));
   app.get(config.API_URL+'/openapi.json',(_req,res)=>res.json(openapi()));
   app.use(config.API_URL+'/api-docs',swaggerUi.serve,swaggerUi.setup(openapi(),{swaggerOptions:{docExpansion:'none'}}));
-  routeAPI(app,options);
+  routeAPI(app,{...options,integraciones,cola});
   // Frontend compilado (ADR-007): web/dist en la raíz del proyecto, con respaldo SPA.
   const web = options.webDir ?? path.resolve(__dirname, '..', 'web', 'dist');
   if (web && existsSync(path.join(web, 'index.html'))) {
@@ -54,14 +65,17 @@ export function createApp(options = {}) {
     else if(['ValidationError','StrictModeError','CastError'].includes(error.name)) handled=boom.badRequest(error.message);
     else if(error.code===11000 || error.code==='23505') handled=boom.conflict('Registro duplicado.');
     else if(error.name==='IntegrationError') {
-      const status={SIN_CREDENCIALES:503,LIMITE:429,NO_ENCONTRADO:404,NO_IMPLEMENTADO:501,VALIDACION:400,NO_PERMITIDO:403,PROVEEDOR:502,RED:502}[error.codigo]||502;
+      const status={SIN_CREDENCIALES:503,LIMITE:429,NO_ENCONTRADO:404,NO_IMPLEMENTADO:501,VALIDACION:400,NO_PERMITIDO:403,PROVEEDOR:502,RED:502,CIRCUITO_ABIERTO:503}[error.codigo]||502;
       handled=new boom.Boom('['+(error.proveedor||'proveedor')+'] '+(error.mensaje||'Error del proveedor externo.'),{statusCode:status});
+      // Circuito abierto (resiliencia-proveedores): el cliente sabe cuándo volver a intentar.
+      if(error.codigo==='CIRCUITO_ABIERTO') handled.output.headers['Retry-After']=String(Math.max(1,Math.ceil((error.reintentoEnMs||30000)/1000)));
     }
     else if(error.name==='URIError') handled=boom.badRequest('La URL está mal codificada.');
     // Errores 4xx de Express (body-parser, send): se conserva el código, sin su mensaje interno.
     else if(!boom.isBoom(error) && error.expose && error.statusCode>=400 && error.statusCode<500) handled=new boom.Boom(undefined,{statusCode:error.statusCode});
     if(!boom.isBoom(handled)){
       registrarError(error,{requestId:req.requestId,metodo:req.method,ruta:req.originalUrl.split('?')[0]});
+      monitoreo.servicio.capturarError(error,{ruta:req.rutaMonitoreo||rutaDe(req),requestId:req.requestId}); // errores agrupados (+ Sentry)
       handled=boom.internal();
     }
     const {output}=handled;

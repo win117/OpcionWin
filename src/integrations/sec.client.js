@@ -437,5 +437,5 @@ export const createSecClient = ({
       }));
   };
 
-  return { proveedor: PROVEEDOR, configurado, cikDeSimbolo, fundamentales, tenencias13F, cargarTenencias13F, tickers: listaTickers, marco, perfil, reportesResultados };
+  return { proveedor: PROVEEDOR, circuito: http.circuito, configurado, cikDeSimbolo, fundamentales, tenencias13F, cargarTenencias13F, tickers: listaTickers, marco, perfil, reportesResultados };
 };

@@ -32,5 +32,5 @@ export const createTesoroClient = ({ fetch: fetchFn = globalThis.fetch, timeoutM
     if (!r) throw new IntegrationError({ proveedor: PROVEEDOR, codigo: 'PROVEEDOR', mensaje: 'El Tesoro de EE. UU. no entregó las tasas en un formato reconocido.' });
     return r;
   };
-  return { proveedor: PROVEEDOR, configurado: true, curva };
+  return { proveedor: PROVEEDOR, circuito: http.circuito, configurado: true, curva };
 };

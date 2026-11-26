@@ -14,7 +14,7 @@ const reglas = {
 };
 
 export default [
-  { ignores: ['**/dist/**', 'node_modules/**', 'web/node_modules/**', 'backups/**', 'output/**', 'private/**', '.agents/**', '.claude/**'] },
+  { ignores: ['**/dist/**', '**/node_modules/**', 'backups/**', 'output/**', 'private/**', '.agents/**', '.claude/**'] },
   { files: ['src/**/*.js'], languageOptions: { ecmaVersion: 'latest', sourceType: 'module', globals: { ...globals.node } }, rules: reglas },
   { files: ['tests/**/*.cjs', 'scripts/**/*.cjs'], languageOptions: { ecmaVersion: 'latest', sourceType: 'commonjs', globals: { ...globals.node } }, rules: { ...reglas, 'no-unused-vars': 'off', 'prefer-const': 'off' } },
   {

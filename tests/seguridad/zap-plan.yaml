@@ -1,0 +1,60 @@
+# Plan de OWASP ZAP (Automation Framework) para la API. Lo ejecuta scripts/zap.cjs, que define BASE_URL, TOKEN y REPORTES.
+# 1) importa las 167 rutas desde OpenAPI; 2) escaneo pasivo + activo AUTENTICADO; 3) reportes HTML y JSON.
+# La autenticación la pone ZAP en cada solicitud con ZAP_AUTH_HEADER / ZAP_AUTH_HEADER_VALUE (las define scripts/zap.cjs).
+# /api/v1/sesiones se excluye: el escaneo activo probaría DELETE /sesiones/actual y revocaría el token a mitad del escaneo
+# (login y sesión tienen sus propias pruebas en tests/seguridad.test.cjs). Se ejecuta contra el servidor de pruebas: nunca
+# contra producción.
+env:
+  contexts:
+    - name: api
+      urls:
+        - ${BASE_URL}
+      includePaths:
+        - ${BASE_URL}/.*
+      excludePaths:
+        - ${BASE_URL}/api/v1/sesiones.*
+  parameters:
+    failOnError: true
+    failOnWarning: false
+    progressToStdout: true
+jobs:
+  # Triage documentado (docs/guia-opciones/08-pruebas-y-monitoreo.md):
+  # 40045 Spring4Shell = falso positivo. CVE-2022-22965 es del classloader de Java/Spring; esta API es Node.js/Express.
+  # ZAP lo marca porque el cuerpo `class.module.classLoader...=nonsense` recibe 400, que es la validación rechazando
+  # el campo («Campo no editable: class.module.classLoader.DefaultAssertionStatus»).
+  - type: alertFilter
+    alertFilters:
+      - ruleId: 40045
+        newRisk: False Positive
+        context: api
+  - type: openapi
+    name: importar-openapi
+    parameters:
+      apiUrl: ${BASE_URL}/api/v1/openapi.json
+      targetUrl: ${BASE_URL}/api/v1
+      context: api
+  - type: passiveScan-wait
+    parameters:
+      maxDuration: 5
+  - type: activeScan
+    name: escaneo-activo
+    parameters:
+      context: api
+      maxScanDurationInMins: 10
+      maxRuleDurationInMins: 2
+  - type: passiveScan-wait
+    parameters:
+      maxDuration: 5
+  - type: report
+    name: reporte-html
+    parameters:
+      template: traditional-html
+      reportDir: ${REPORTES}
+      reportFile: zap-api
+      reportTitle: AppRESTOpciones · OWASP ZAP
+  - type: report
+    name: reporte-json
+    parameters:
+      template: traditional-json
+      reportDir: ${REPORTES}
+      reportFile: zap-api

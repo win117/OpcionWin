@@ -22,7 +22,12 @@
     "smoke:real": "npm run build && node scripts/smoke-real.cjs",
     "smoke:orden": "npm run build && node scripts/smoke-orden-paper.cjs",
     "smoke:ejecucion": "npm run build && node scripts/smoke-orden-ejecucion.cjs",
-    "exportar:usuarios": "node scripts/exportar-usuarios.cjs"
+    "exportar:usuarios": "node scripts/exportar-usuarios.cjs",
+    "test:e2e": "npm run build && node scripts/con-servidor-pruebas.cjs npx -y newman@6.2.3 run tests/e2e/AppRESTOpciones.postman_collection.json -e tests/e2e/local.postman_environment.json --reporters cli,json --reporter-json-export output/pruebas/e2e-newman.json",
+    "test:carga": "npm run build && node scripts/con-servidor-pruebas.cjs k6 run tests/carga/carga.k6.js --summary-export output/pruebas/k6-resumen.json",
+    "test:seguridad": "npm run build && node scripts/con-servidor-pruebas.cjs node scripts/zap.cjs",
+    "smoke:despliegue": "node scripts/smoke-despliegue.cjs",
+    "test:smoke-local": "npm run build && node scripts/con-servidor-pruebas.cjs node scripts/smoke-despliegue.cjs http://127.0.0.1:3040"
   },
   "keywords": [],
   "author": "",

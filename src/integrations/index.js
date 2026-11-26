@@ -18,11 +18,12 @@ export const createIntegrations = (env = process.env, fetch = globalThis.fetch) 
   const webull = exigirContratoBroker(createWebullClient({ appKey: limpio(env.WEBULL_APP_KEY), appSecret: limpio(env.WEBULL_APP_SECRET), accountId: limpio(env.WEBULL_ACCOUNT_ID),
     entorno: limpio(env.WEBULL_ENTORNO) || 'paper', baseUrl: limpio(env.WEBULL_BASE_URL), accessToken: limpio(env.WEBULL_ACCESS_TOKEN), fetch }));
   const tesoro = createTesoroClient({ fetch });
+  // `circuito`: estado del circuit breaker de cada proveedor (openspec: resiliencia-proveedores); nunca incluye credenciales.
   const estado = () => ({
-    alpaca: { configurado: alpaca.configurado, feed, opcionesFeed: alpaca.opcionesFeed, entorno: 'paper' },
-    sec: { configurado: sec.configurado },
-    webull: { configurado: webull.configurado },
-    tesoro: { configurado: tesoro.configurado },
+    alpaca: { configurado: alpaca.configurado, feed, opcionesFeed: alpaca.opcionesFeed, entorno: 'paper', circuito: alpaca.circuito() },
+    sec: { configurado: sec.configurado, circuito: sec.circuito() },
+    webull: { configurado: webull.configurado, circuito: webull.circuito() },
+    tesoro: { configurado: tesoro.configurado, circuito: tesoro.circuito() },
   });
   return { alpaca, sec, webull, tesoro, estado };
 };

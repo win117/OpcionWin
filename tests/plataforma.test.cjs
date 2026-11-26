@@ -118,6 +118,23 @@ test('Cola por HTTP: el trabajo se atribuye al usuario y el exceso no crea regis
   assert.equal((await crear()).status,202); await cola.vaciar();
 });
 
+test('Drenado: con la cola drenando los trabajos nuevos reciben 503 + Retry-After sin registro; el que corría termina',async t=>{
+  // Comprobación de base simulada: las pruebas nunca se conectan a la base real del .env.
+  const cola=createCola({concurrencia:1}), s=await levantar(t,{cola,salud:{comprobaciones:{mongodb:async()=>{}}}}), Authorization=await s.token();
+  let soltar, termino=false; const espera=new Promise(r=>{soltar=r;});
+  cola.encolar('en-curso',()=>espera.then(()=>{termino=true;}));
+  assert.equal(cola.enCurso(),1); assert.equal(cola.aceptando(),true);
+  cola.drenar();
+  const r=await s.pedir('POST','/sincronizaciones/ejecuciones',{recurso:'empresas',simbolos:[]},{Authorization});
+  assert.equal(r.status,503); assert.equal(r.headers.get('retry-after'),'10'); assert.match((await r.json()).message,/reiniciando/);
+  assert.equal((await (await s.pedir('GET','/sincronizaciones',undefined,{Authorization})).json()).data.total,0,'no se creó el registro');
+  assert.equal((await s.pedir('GET','/empresas',undefined,{Authorization})).status,200,'lo que no encola sigue atendiéndose');
+  const listo=await (await fetch(s.base+'/health/listo')).json();
+  assert.equal(listo.estado,'no_listo'); assert.equal(listo.motivo,'apagando');
+  soltar(); await cola.vaciar();
+  assert.equal(termino,true); assert.equal(cola.enCurso(),0);
+});
+
 test('Inyección de operadores: los ids de un lote deben ser texto',async t=>{
   const s=await levantar(t), Authorization=await s.token();
   const e=(await (await s.pedir('POST','/empresas',{simbolo:'A',nombre:'A',mercado:'T'},{Authorization})).json()).data;

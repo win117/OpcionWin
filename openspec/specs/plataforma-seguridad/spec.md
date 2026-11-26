@@ -76,3 +76,29 @@ se sirve desde el mismo origen en producción (ADR-007): toda ruta que no sea `/
 #### Scenario: Arranque en Render
 - **WHEN** se ejecuta `npm start` tras `npm run build:all`
 - **THEN** `GET /health` responde 200 y `/` entrega la web
+
+### Requirement: Módulos por dominio vigilados
+El código nuevo MAY organizarse en módulos por dominio en `src/modulos/<dominio>/`, con un archivo por capa
+(`*.schema.js`, `*.routes.js`, `*.controller.js`, `*.service.js`). Esos módulos MUST cumplir las mismas reglas de capas
+que `src/api/v1/` y la prueba automática de estructura MUST vigilarlos igual.
+
+#### Scenario: Servicio de un módulo que conoce HTTP
+- **WHEN** un archivo `src/modulos/<dominio>/*.service.js` usa `req` o `res` de Express
+- **THEN** `tests/estructura.test.cjs` falla
+
+#### Scenario: Ruta de un módulo con lógica
+- **WHEN** un archivo `src/modulos/<dominio>/*.routes.js` importa un servicio o un repositorio
+- **THEN** `tests/estructura.test.cjs` falla
+
+#### Scenario: Módulo incompleto
+- **WHEN** un módulo tiene `*.routes.js` pero le falta su `*.schema.js`, `*.controller.js` o `*.service.js`
+- **THEN** `tests/estructura.test.cjs` falla
+
+### Requirement: Datos de operación sin secretos ni datos personales
+Las métricas, los logs estructurados, los errores agrupados y la analítica SHALL identificar al usuario solo por un
+seudónimo (hash recortado y con sal del servidor) y MUST NOT contener tokens, contraseñas, cuerpos, consultas, correos
+ni valores de variables secretas.
+
+#### Scenario: Analítica sin identidad real
+- **WHEN** un usuario con correo `ana@local` usa la API y se pide `/monitoreo/uso`
+- **THEN** la respuesta no contiene `ana@local` ni su id real, solo un seudónimo estable

@@ -63,7 +63,7 @@ async function entorno(){
   };
   await mk('c100','call',100); await mk('p90','put',90); await mk('p85','put',85); await mk('c110','call',110); await mk('c115','call',115); await mk('ajeno','call',100,otra);
   const k=()=>'key-'+randomUUID();
-  return {call,integraciones,contratos,emp,k,factory,ctx:{userId,database:'mongodb'},cerrar:()=>server.close()};
+  return {call,integraciones,contratos,emp,k,factory,ctx:{userId,database:'mongodb'},cerrar:()=>server.close(),base,get headers(){return {Authorization:'Bearer '+token};}};
 }
 const pata=(c,accion,extra={})=>({contratoId:c._id,accion,...extra});
 
@@ -326,6 +326,16 @@ test('rechazo definitivo (4xx) → rechazada; credenciales o límite → sigue p
     await post(key,429); assert.equal((await ordenDe(e,key)).estado,'pendiente');
     f.alpaca.enviarOrden=enviar;
     assert.equal((await post(key,200)).orden.estado,'aceptada');
+    // Circuito del broker abierto (resiliencia-proveedores): no llegó → 'error_previo' (no 'error_envio', que es el incierto),
+    // pendiente y reintentable. El reintento consulta antes al broker como en todo reintento (salvaguarda existente).
+    const keyC=e.k();
+    f.alpaca.enviarOrden=async()=>{throw Object.assign(err('CIRCUITO_ABIERTO',null,'pausado'),{reintentoEnMs:12000});};
+    const r=await fetch(e.base+'/ordenes/ticket',{method:'POST',headers:{...e.headers,'Content-Type':'application/json','Idempotency-Key':keyC},body:JSON.stringify(ticketDe(e))});
+    assert.equal(r.status,503); assert.equal(r.headers.get('retry-after'),'12');
+    const oc=await ordenDe(e,keyC); assert.equal(oc.estado,'pendiente'); assert.equal(oc.eventos.at(-1).tipo,'error_previo');
+    f.alpaca.enviarOrden=enviar;
+    assert.notEqual(oc.eventos.at(-1).tipo,'error_envio','no queda como envío incierto');
+    assert.equal((await post(keyC,200)).orden.estado,'aceptada');
   } finally{e.cerrar();}
 });
 

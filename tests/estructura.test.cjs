@@ -2,7 +2,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { once } = require('node:events');
-const { readFileSync, readdirSync } = require('node:fs');
+const { readFileSync, readdirSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } = require('node:fs');
+const { tmpdir } = require('node:os');
 const { join } = require('node:path');
 const { randomUUID, scryptSync } = require('node:crypto');
 const { memoryFactory } = require('./helpers/memory.cjs');
@@ -61,6 +62,46 @@ test('las rutas solo conectan: sin reglas, sin base de datos y sin verbos suelto
   for (const n of archivos('api/v1/controllers')) assert.doesNotMatch(lee('api/v1/controllers/' + n), /mongoose|\.collection\(|fetch\(/, n);
   for (const n of archivos('api/v1/services')) assert.doesNotMatch(lee('api/v1/services/' + n), /\breq\.|\bres\.(status|json|set|send)|from 'express'/, n + ' no debe conocer HTTP');
   for (const n of archivos('cores')) assert.doesNotMatch(lee('cores/' + n), /fetch\(|from '\.\.|from 'express'|process\.env|Date\.now\(\)/, n + ' debe ser puro');
+});
+
+// Módulos por dominio (src/modulos/<dominio>/, openspec: plataforma-seguridad «Módulos por dominio vigilados»):
+// las mismas reglas de capas que src/api/v1, por archivo. compartido/ solo admite piezas puras.
+function revisarModulos(raiz) {
+  const fallas = [];
+  if (!existsSync(raiz)) return fallas;
+  for (const dominio of readdirSync(raiz, { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name)) {
+    const dir = join(raiz, dominio), js = readdirSync(dir).filter(n => n.endsWith('.js'));
+    const t = n => readFileSync(join(dir, n), 'utf8');
+    if (dominio === 'compartido') {
+      for (const n of js) if (/from 'express'|fetch\(|process\.env|\breq\.|\bres\./.test(t(n))) fallas.push(`${dominio}/${n}: compartido debe ser puro`);
+      continue;
+    }
+    for (const n of js) {
+      if (n.endsWith('.routes.js')) {
+        if (/router\.(get|post|put|delete|patch)\(/.test(t(n))) fallas.push(`${dominio}/${n}: usa registrar()`);
+        if (/\.service'|repositories|factory\(/.test(t(n))) fallas.push(`${dominio}/${n}: la ruta no habla con servicios ni con la base`);
+        const base = n.slice(0, -'.routes.js'.length);
+        for (const capa of ['schema', 'controller', 'service']) if (!js.includes(`${base}.${capa}.js`)) fallas.push(`${dominio}/${n}: falta ${base}.${capa}.js`);
+      }
+      if (n.endsWith('.service.js') && /\breq\.|\bres\.(status|json|set|send)|from 'express'/.test(t(n))) fallas.push(`${dominio}/${n}: el servicio no debe conocer HTTP`);
+      if (n.endsWith('.controller.js') && /mongoose|\.collection\(|fetch\(/.test(t(n))) fallas.push(`${dominio}/${n}: el controlador no habla con la base ni con la red`);
+    }
+  }
+  return fallas;
+}
+
+test('módulos por dominio: cumplen las mismas reglas de capas que src/api/v1', () => {
+  assert.deepEqual(revisarModulos(join(SRC, 'modulos')), []);
+});
+
+test('módulos por dominio: la revisión detecta un módulo que rompe las reglas', t => {
+  const raiz = mkdtempSync(join(tmpdir(), 'modulos-')); t.after(() => rmSync(raiz, { recursive: true, force: true }));
+  mkdirSync(join(raiz, 'roto')); mkdirSync(join(raiz, 'compartido'));
+  writeFileSync(join(raiz, 'roto', 'roto.routes.js'), "import { x } from './roto.service';\nrouter.get('/', x);");
+  writeFileSync(join(raiz, 'roto', 'roto.service.js'), 'export const x = (req, res) => res.json({});');
+  writeFileSync(join(raiz, 'compartido', 'util.js'), 'export const v = process.env.X;');
+  const fallas = revisarModulos(raiz).join('\n');
+  for (const p of [/usa registrar/, /no habla con servicios/, /falta roto\.schema\.js/, /falta roto\.controller\.js/, /no debe conocer HTTP/, /compartido debe ser puro/]) assert.match(fallas, p);
 });
 
 test('cada módulo CRUD tiene su modelo, servicio, controlador y ruta, y se usan', () => {

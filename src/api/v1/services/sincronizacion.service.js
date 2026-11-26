@@ -76,7 +76,7 @@ export function createSincronizador({ integraciones, factory = repository }) {
       // Consolidado de todas las bolsas (desde 2016; el plan gratuito lo da con 15 min de retraso). Si no está disponible, IEX (desde 2020).
       const pedir = (feed, hastaMs) => alpaca.velas(empresa.simbolo, { intervalo, desde: iso(desde), hasta: iso(hastaMs), limite: 10000, feed }).then(velas => ({ velas, feed }));
       const { velas, feed } = await pedir('sip', Math.min(new Date(hasta).getTime(), Date.now() - RETRASO_SIP_MS)).catch(e => {
-        if (e?.codigo === 'LIMITE' || e?.codigo === 'RED') throw e;
+        if (['LIMITE', 'RED', 'CIRCUITO_ABIERTO'].includes(e?.codigo)) throw e; // el mismo proveedor: IEX fallaría igual
         return pedir(alpaca.feed || 'iex', hasta);
       });
       return guardarLote('datos-mercado', ctx, velas.map(v => ({ id: idDeterminista(empresa._id, 'vela', intervalo, iso(v.fecha)), datos: {

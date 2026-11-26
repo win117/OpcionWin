@@ -530,6 +530,7 @@ export const createAlpacaClient = ({
 
   return {
     proveedor: PROVEEDOR,
+    circuito: http.circuito,
     entorno: 'paper',
     feed,
     opcionesFeed,

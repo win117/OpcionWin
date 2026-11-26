@@ -1,0 +1,44 @@
+# Monitoreo sintético (openspec: monitoreo-servicio): cada 15 minutos ejecuta el smoke post-despliegue contra la app
+# publicada, desde fuera de Render. Si algo esencial falla, el flujo termina en error y GitHub avisa por correo.
+# Configuración (Settings → Secrets and variables → Actions):
+#   Variable  URL_PRODUCCION   p. ej. https://<tu-app>.onrender.com   (sin ella, el flujo se omite sin fallar)
+#   Secretos  SMOKE_EMAIL / SMOKE_PASSWORD  (opcionales: además prueba una sesión real)
+name: Monitoreo sintético
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: monitoreo-sintetico
+  cancel-in-progress: false
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: ¿Hay URL configurada?
+        id: url
+        run: |
+          if [ -z "${{ vars.URL_PRODUCCION }}" ]; then
+            echo "::notice::Define la variable URL_PRODUCCION para activar el monitoreo sintético."
+            echo "activo=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "activo=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.url.outputs.activo == 'true'
+        with:
+          sparse-checkout: scripts/smoke-despliegue.cjs
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@v4
+        if: steps.url.outputs.activo == 'true'
+        with:
+          node-version: 22
+      - name: Smoke contra producción
+        if: steps.url.outputs.activo == 'true'
+        env:
+          SMOKE_EMAIL: ${{ secrets.SMOKE_EMAIL }}
+          SMOKE_PASSWORD: ${{ secrets.SMOKE_PASSWORD }}
+        run: node scripts/smoke-despliegue.cjs "${{ vars.URL_PRODUCCION }}"

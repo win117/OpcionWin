@@ -7,6 +7,7 @@ export function createCola({ concurrencia = 2, maxPorUsuario = 60 } = {}) {
   const activos = new Set();
   const porUsuario = new Map(); // en espera + en ejecución
   let corriendo = 0;
+  let aceptando = true; // false durante el drenado al apagar (openspec: salud-servicio)
   const ociosos = [];
   const contar = (usuario, cambio) => {
     if (!usuario) return;
@@ -35,6 +36,10 @@ export function createCola({ concurrencia = 2, maxPorUsuario = 60 } = {}) {
     activo: id => activos.has(id),
     // Para pruebas y apagado ordenado.
     vaciar: () => (!corriendo && !espera.length) ? Promise.resolve() : new Promise(r => ociosos.push(r)),
+    // Drenado: deja de aceptar trabajos nuevos (limiteOperaciones responde 503); los encolados siguen hasta terminar.
+    drenar: () => { aceptando = false; },
+    aceptando: () => aceptando,
+    enCurso: () => corriendo + espera.length,
   };
 }
 export const colaGlobal = createCola();

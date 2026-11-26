@@ -390,5 +390,5 @@ export const createWebullClient = ({
     return lista.flatMap(normalizarPosiciones);
   };
 
-  return { proveedor: PROVEEDOR, configurado, entorno: 'paper', cuenta, enviarOrden, consultarOrden, consultarPorClientOrderId, cancelarOrden, ordenesAbiertas, posiciones };
+  return { proveedor: PROVEEDOR, circuito: http.circuito, configurado, entorno: 'paper', cuenta, enviarOrden, consultarOrden, consultarPorClientOrderId, cancelarOrden, ordenesAbiertas, posiciones };
 };

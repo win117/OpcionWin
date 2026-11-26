@@ -1,7 +1,9 @@
 // Cliente HTTP mínimo sobre fetch: tiempo límite (cabeceras y cuerpo), reintentos con espera exponencial
 // para 429/5xx, limitador de ritmo (intervalo mínimo entre solicitudes) y
-// traducción de fallos a IntegrationError. No registra encabezados ni cuerpos.
+// traducción de fallos a IntegrationError y circuit breaker por proveedor (openspec: resiliencia-proveedores).
+// No registra encabezados ni cuerpos.
 import { IntegrationError, redactar } from './errors';
+import { createCircuito } from '../modulos/compartido/circuito';
 
 // Sin unref: la espera debe mantener vivo el proceso (scripts, trabajos en segundo plano).
 const esperarPorDefecto = ms => new Promise(resolve => { setTimeout(resolve, ms); });
@@ -51,9 +53,12 @@ export const createHttp = ({
   ahora = () => Date.now(),
   secretos = [],
   headers: headersBase = {},
+  umbralCircuito = 5,
+  esperaCircuitoMs = 30000,
 } = {}) => {
   if (typeof fetchFn !== 'function') throw new IntegrationError({ proveedor, codigo: 'RED', mensaje: 'No hay implementación de fetch disponible.' });
   let siguienteTurno = 0;
+  const circuito = createCircuito({ umbral: umbralCircuito, esperaMs: esperaCircuitoMs, ahora });
 
   // Reserva sincrónica del turno: seguro ante llamadas concurrentes.
   const turno = async () => {
@@ -118,7 +123,7 @@ export const createHttp = ({
 
   // timeoutMs: espera de cabeceras. timeoutCuerpoMs: descarga del cuerpo; por defecto 4 veces más
   // (8 si es texto: las tablas 13F de la SEC llegan a ~23 MB).
-  const request = async ({ url, method = 'GET', query, headers = {}, body, respuesta = 'json', reintentarServidor,
+  const solicitar = async ({ url, method = 'GET', query, headers = {}, body, respuesta = 'json', reintentarServidor,
     timeoutMs: limiteMs = timeoutMs, timeoutCuerpoMs: limiteCuerpoMs = limiteMs * (respuesta === 'text' ? 8 : 4) } = {}) => {
     const destino = `${url}${construirQuery(query)}`;
     const cabeceras = { Accept: respuesta === 'json' ? 'application/json' : '*/*', ...headersBase, ...headers };
@@ -148,5 +153,28 @@ export const createHttp = ({
     }
   };
 
-  return { request };
+  // Solo la falta de disponibilidad (red, tiempo agotado, 5xx tras los reintentos) cuenta para abrir el circuito.
+  // Cualquier otra respuesta, incluidos 4xx y 429, demuestra que el proveedor está respondiendo.
+  const sinDisponibilidad = e => e instanceof IntegrationError && (e.codigo === 'RED' || (e.status != null && e.status >= 500));
+
+  const request = async (opciones = {}) => {
+    const turnoCircuito = circuito.permitir();
+    if (!turnoCircuito.permitido) {
+      const segundos = Math.max(1, Math.ceil(turnoCircuito.reintentoEnMs / 1000));
+      throw new IntegrationError({
+        proveedor, codigo: 'CIRCUITO_ABIERTO', reintentoEnMs: turnoCircuito.reintentoEnMs,
+        mensaje: `El proveedor no está disponible: se pausaron las consultas tras varios fallos seguidos. Reintenta en ${segundos} s.`,
+      });
+    }
+    try {
+      const resultado = await solicitar(opciones);
+      circuito.exito();
+      return resultado;
+    } catch (e) {
+      if (sinDisponibilidad(e)) circuito.fallo(); else circuito.exito();
+      throw e;
+    }
+  };
+
+  return { request, circuito: () => circuito.estado() };
 };

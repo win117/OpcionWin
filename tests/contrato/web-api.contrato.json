@@ -1,0 +1,82 @@
+{
+  "consumidor": "web (React, web/src)",
+  "proveedor": "API AppRESTOpciones (/api/v1)",
+  "descripcion": "Contrato dirigido por el consumidor (estilo Pact): lo que la interfaz web necesita de cada respuesta. tests/contrato.test.cjs lo verifica contra el proveedor real. Comparadores: string, number, boolean, array, object, uuid, iso-date, ausente, {oneOf}, {regex}, {cadaElemento}.",
+  "interacciones": [
+    {
+      "descripcion": "iniciar sesión devuelve el token y la base elegida",
+      "usadoEn": "web/src/context/AuthContext.jsx",
+      "solicitud": { "metodo": "POST", "ruta": "/sesiones", "cuerpo": { "email": "{{email}}", "password": "{{password}}", "baseDatos": "mongodb" } },
+      "respuesta": { "status": 200, "cuerpo": { "success": true, "data": { "token": { "regex": "^(mongodb|supabase)\\.[a-f0-9-]{36}\\.[a-f0-9-]{36}\\.[a-f0-9]{64}$" }, "tokenType": "Bearer", "usuarioId": "uuid", "baseDatos": { "oneOf": ["mongodb", "supabase"] }, "expiraEn": "iso-date" } } },
+      "guardar": { "token": "data.token" }
+    },
+    {
+      "descripcion": "la sesión vigente se puede consultar",
+      "usadoEn": "web/src/context/AuthContext.jsx",
+      "solicitud": { "metodo": "GET", "ruta": "/sesiones/actual", "sesion": true },
+      "respuesta": { "status": 200, "cuerpo": { "data": { "usuarioId": "uuid", "baseDatos": "mongodb", "expiraEn": "iso-date" } } }
+    },
+    {
+      "descripcion": "sin token: 401 con mensaje (la web cierra la sesión)",
+      "usadoEn": "web/src/api/client.js",
+      "solicitud": { "metodo": "GET", "ruta": "/empresas" },
+      "respuesta": { "status": 401, "cuerpo": { "success": false, "message": "string", "requestId": "uuid" } }
+    },
+    {
+      "descripcion": "error de validación: 400 con mensaje legible",
+      "usadoEn": "web/src/api/client.js",
+      "solicitud": { "metodo": "POST", "ruta": "/empresas", "sesion": true, "cuerpo": { "simbolo": 123 } },
+      "respuesta": { "status": 400, "cuerpo": { "success": false, "message": "string" } }
+    },
+    {
+      "descripcion": "crear un registro devuelve 201, su id, su revisión y ETag",
+      "usadoEn": "web/src/components/ResourceManager.jsx",
+      "solicitud": { "metodo": "POST", "ruta": "/empresas", "sesion": true, "cuerpo": { "simbolo": "PACT", "nombre": "Contrato", "mercado": "NASDAQ" } },
+      "respuesta": { "status": 201, "headers": { "etag": "string" }, "cuerpo": { "data": { "_id": "uuid", "_revision": "number", "simbolo": "PACT", "usuarioId": "ausente" } } },
+      "guardar": { "empresaId": "data._id" }
+    },
+    {
+      "descripcion": "listar devuelve la forma paginada",
+      "usadoEn": "web/src/components/ResourceManager.jsx",
+      "solicitud": { "metodo": "GET", "ruta": "/empresas?page=1&limit=10", "sesion": true },
+      "respuesta": { "status": 200, "cuerpo": { "data": { "items": { "cadaElemento": { "_id": "uuid", "_revision": "number" } }, "page": "number", "limit": "number", "total": "number" } } }
+    },
+    {
+      "descripcion": "lanzar un trabajo largo responde 202 con id y estado",
+      "usadoEn": "web/src/hooks/useJob.js",
+      "solicitud": { "metodo": "POST", "ruta": "/sincronizaciones/ejecuciones", "sesion": true, "cuerpo": { "recurso": "empresas", "simbolos": [] } },
+      "respuesta": { "status": 202, "cuerpo": { "data": { "_id": "uuid", "estado": { "oneOf": ["pendiente", "procesando", "completada", "fallida"] } } } },
+      "guardar": { "trabajoId": "data._id" }
+    },
+    {
+      "descripcion": "consultar el trabajo devuelve su estado",
+      "usadoEn": "web/src/hooks/useJob.js",
+      "solicitud": { "metodo": "GET", "ruta": "/sincronizaciones/{{trabajoId}}", "sesion": true },
+      "respuesta": { "status": 200, "cuerpo": { "data": { "_id": "uuid", "estado": { "oneOf": ["pendiente", "procesando", "completada", "fallida"] } } } }
+    },
+    {
+      "descripcion": "estado de integraciones: configurado por proveedor",
+      "usadoEn": "web/src/components/IntegrationStatus.jsx",
+      "solicitud": { "metodo": "GET", "ruta": "/integraciones/estado", "sesion": true },
+      "respuesta": { "status": 200, "cuerpo": { "data": { "alpaca": { "configurado": "boolean", "entorno": "paper" }, "sec": { "configurado": "boolean" }, "webull": { "configurado": "boolean" }, "tesoro": { "configurado": "boolean" } } } }
+    },
+    {
+      "descripcion": "brokers disponibles para el selector",
+      "usadoEn": "web/src/context/BrokerContext.jsx",
+      "solicitud": { "metodo": "GET", "ruta": "/brokers/disponibles", "sesion": true },
+      "respuesta": { "status": 200, "cuerpo": { "data": { "items": { "cadaElemento": { "codigo": { "oneOf": ["alpaca", "webull"] }, "nombre": "string", "configurado": "boolean", "operativo": "boolean", "entornos": "array" } } } } }
+    },
+    {
+      "descripcion": "readiness para el monitor de disponibilidad",
+      "usadoEn": "monitor externo (UptimeRobot / sintético)",
+      "solicitud": { "metodo": "GET", "ruta": "/health/listo", "fueraDeApi": true },
+      "respuesta": { "status": 200, "cuerpo": { "estado": "listo", "degradado": "boolean", "dependencias": "object", "proveedores": "object", "cola": { "aceptando": "boolean" }, "verificadoEn": "iso-date" } }
+    },
+    {
+      "descripcion": "cerrar sesión: 204 sin cuerpo",
+      "usadoEn": "web/src/context/AuthContext.jsx",
+      "solicitud": { "metodo": "DELETE", "ruta": "/sesiones/actual", "sesion": true },
+      "respuesta": { "status": 204 }
+    }
+  ]
+}

@@ -10,3 +10,17 @@ private/
 
 web/node_modules/
 web/dist/
+
+# Fuera de la versión final (ver docs/guia-opciones/README.md, «Qué queda fuera»)
+# Configuración personal del editor y espacios de trabajo
+.vscode/
+*.code-workspace
+# Copias de skills que ya viven en .claude/skills (las de OpenSpec en .agents/ sí se versionan)
+.agents/skills/frontend-design/
+.agents/skills/verificar-opciones/
+.agents/skills/webapp-testing/
+# Documento de entrega: el HTML intermedio se regenera; las versiones parciales (solo inciso A) se reemplazaron
+docs/guia-opciones/entrega/entrega.html
+docs/guia-opciones/entrega/*_IncisoA.*
+docs/guia-opciones/entrega/docx/node_modules/
+docs/guia-opciones/entrega/docx/out/

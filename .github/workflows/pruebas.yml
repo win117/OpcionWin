@@ -27,5 +27,8 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm --prefix web run build
+      # Regresión funcional E2E: la colección de Postman con Newman contra el servidor de pruebas (base en memoria).
+      - name: E2E (Newman)
+        run: mkdir -p output/pruebas && npm run test:e2e
       - name: Vulnerabilidades altas en lo que se publica
         run: npm audit --omit=dev --audit-level=high && npm --prefix web audit --omit=dev --audit-level=high

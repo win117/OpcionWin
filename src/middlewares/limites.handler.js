@@ -5,6 +5,11 @@ const demasiadas = (mensaje, segundos) => {
   error.output.headers['Retry-After'] = String(segundos);
   return error;
 };
+const noDisponible = (mensaje, segundos) => {
+  const error = boom.serverUnavailable(mensaje);
+  error.output.headers['Retry-After'] = String(segundos);
+  return error;
+};
 // Inicio de sesión: 10 intentos por minuto y dirección, y 10 fallidos cada 15 minutos por correo (un acierto lo reinicia).
 export function loginLimit() {
   const porIp = createLimitador({ max: 10, ventanaMs: 60000 });
@@ -33,6 +38,8 @@ export function limiteOperaciones({ cola, max = 120, ventanaMs = 60000 } = {}) {
     const espera = porUsuario.sumar(usuario);
     if (espera) throw demasiadas('Demasiadas operaciones seguidas. Espera un momento.', espera);
     if (!cola?.pendientes || !ENCOLA.test(ruta)) return;
+    // Apagado en curso: no se crea el registro del trabajo; el cliente reintenta contra la instancia nueva.
+    if (cola.aceptando && !cola.aceptando()) throw noDisponible('El servicio se está reiniciando. Intenta de nuevo en unos segundos.', 10);
     const actuales = enVuelo.get(usuario) || 0;
     if (cola.pendientes(usuario) + actuales >= cola.maxPorUsuario) throw demasiadas('Tienes ' + cola.maxPorUsuario + ' trabajos en espera. Deja que terminen antes de lanzar más.', 30);
     enVuelo.set(usuario, actuales + 1);

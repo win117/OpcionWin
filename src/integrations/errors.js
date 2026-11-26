@@ -10,16 +10,18 @@ export const CODIGOS = Object.freeze([
   'VALIDACION', // parámetros inválidos detectados antes de llamar (extensión)
   'NO_PERMITIDO', // operación bloqueada por política, p. ej. trading live (extensión, ADR-005)
   'NO_IMPLEMENTADO', // adaptador pendiente (extensión, ADR-004)
+  'CIRCUITO_ABIERTO', // el proveedor falló varias veces seguidas: se responde al instante sin red (resiliencia-proveedores)
 ]);
 
 export class IntegrationError extends Error {
-  constructor({ proveedor, status = null, codigo = 'PROVEEDOR', mensaje = 'Error de integración.' } = {}) {
+  constructor({ proveedor, status = null, codigo = 'PROVEEDOR', mensaje = 'Error de integración.', reintentoEnMs } = {}) {
     super(mensaje);
     this.name = 'IntegrationError';
     this.proveedor = proveedor;
     this.status = status;
     this.codigo = CODIGOS.includes(codigo) ? codigo : 'PROVEEDOR';
     this.mensaje = mensaje;
+    if (reintentoEnMs != null) this.reintentoEnMs = reintentoEnMs; // CIRCUITO_ABIERTO: cuánto falta para la prueba
   }
 
   toJSON() {

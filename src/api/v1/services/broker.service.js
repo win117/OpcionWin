@@ -21,7 +21,8 @@ export const ESTADOS_TERMINALES = ['ejecutada', 'cancelada', 'rechazada', 'expir
 const envioAmbiguo = orden => ['envio', 'error_envio'].includes(orden.eventos?.at(-1)?.tipo);
 // Error al enviar → 'error_previo' (no llegó; se puede reintentar), 'rechazada' (definitivo) o 'error_envio' (ambiguo).
 function clasificarErrorEnvio({ codigo, status } = {}) {
-  if (['SIN_CREDENCIALES', 'LIMITE'].includes(codigo)) return 'error_previo';
+  // CIRCUITO_ABIERTO: el circuito del broker respondió sin salir a la red, así que la orden no llegó (resiliencia-proveedores).
+  if (['SIN_CREDENCIALES', 'LIMITE', 'CIRCUITO_ABIERTO'].includes(codigo)) return 'error_previo';
   if (['VALIDACION', 'NO_PERMITIDO', 'NO_IMPLEMENTADO'].includes(codigo)) return 'rechazada';
   if (status >= 400 && status < 500 && ![408, 409, 425].includes(status)) return 'rechazada';
   return 'error_envio';

@@ -18,6 +18,16 @@ Para debatir una decisión: cambiar su estado a Propuesta, anotar el argumento e
 | 010 | Selección de señales por core y pesos en selección | Aceptada |
 | 011 | Ticket de órdenes en un paso y cierre de posiciones (paper) | Aceptada |
 | 012 | Desacuerdo entre cores en la confluencia (dispersión y neutralidad media) | Aceptada |
+| 013 | Universo obtenido de los proveedores y calculado por el servidor | Aceptada |
+| 014 | Calibración de los puntajes de compatibilidad | Propuesta (sin aplicar) |
+| 015 | El ranking y el análisis deciden con los cinco cores | Aceptada |
+| 016 | Tasa, dividendos, resultados e interés abierto se obtienen de su fuente | Aceptada |
+| 017 | Una sola definición por ruta (Zod) y capas vigiladas por pruebas | Aceptada |
+| 018 | Seguimiento de órdenes en vivo | Aceptada |
+| 019 | TradingView como vista, no como fuente | Aceptada |
+| 020 | Prueba con precios reales de opciones: los puntajes no anticipan el resultado | Aceptada |
+| 021 | Operar como en un broker: todos los vencimientos, precios al día y horario | Aceptada |
+| 022 | Módulos por dominio y resiliencia ante proveedores (primer cambio hecho con OpenSpec) | Aceptada |
 
 ---
 
@@ -199,3 +209,22 @@ calls. Sin 13F. Se mantiene hasta vencer: no mide salidas anticipadas. 18 cóndo
 - Con el mercado cerrado se ven los precios de la última sesión, se puede preparar y revisar, y **no se puede enviar** desde la pantalla hasta que abra. Es una regla de la interfaz: la API la acepta o rechaza el broker.
 - Las cotizaciones tomadas fuera de 9:30–16:15 de Nueva York no reemplazan a las de la sesión, y con un spread mayor a 25 % no fijan precios. Un último precio de más de 7 días se muestra, pero no se usa para calcular.
 **Límites.** Datos indicativos de Alpaca (no son la cotización consolidada). Las órdenes son límite o mercado; no hay stop.
+
+## ADR-022 · Módulos por dominio y resiliencia ante proveedores
+**Estado.** Aceptada (2026-11-26). Cambio de OpenSpec `optimizar-microservicios-apis`, primero del proyecto hecho con SDD.
+**Contexto.** La estructura por capas técnicas (`src/api/v1/{routes,controllers,services,models,schemas}`) se construyó sin SDD y sus reglas están
+vigiladas por pruebas (ADR-017), pero reparte cada funcionalidad: el screener vive en 7 archivos de 5 carpetas y su definición y su controlador están
+en archivos de otro dominio. Además, con un proveedor caído cada solicitud esperaba hasta 15 s más los reintentos; no había forma de saber si el
+servicio podía atender (solo `/health`) y un despliegue cortaba los trabajos 202 en curso.
+**Decisión.**
+1. El código nuevo se organiza por dominio en `src/modulos/<dominio>/` (un archivo por capa + `index.js` como única frontera, con dependencias
+   inyectadas). `src/modulos/compartido/` solo admite piezas puras. `tests/estructura.test.cjs` aplica ahí las mismas reglas de capas.
+2. Circuit breaker por proveedor (`modulos/compartido/circuito.js`, usado por `integrations/http.js`): 5 fallos de disponibilidad seguidos lo abren,
+   30 s de fallo rápido (503 + `Retry-After`, código `CIRCUITO_ABIERTO`), luego una sola solicitud de prueba. Los 4xx no lo abren.
+3. Readiness `GET /health/listo` (módulo `salud`) separado de la liveness `GET /health`; Render sigue usando `/health`.
+4. Apagado con drenado (`modulos/salud/apagado.js`): la cola deja de aceptar (503), espera hasta 8 s a los trabajos en curso y luego cierra.
+**Alternativas.** Migrar todos los módulos ahora (mayor riesgo, va en un cambio aparte); librería de circuit breaker como `opossum` (dependencia
+para ~40 líneas puras); que `/health` revise dependencias (Render reiniciaría el servicio ante un corte breve de la base).
+**Consecuencias.** Conviven dos estructuras hasta migrar el resto, un dominio por vez (cambio sugerido `migrar-a-modulos-por-dominio`). Los circuitos
+viven en memoria de una instancia (ADR-003). Un circuito abierto deja una orden como `error_previo` (no llegó), nunca como envío incierto.
+
