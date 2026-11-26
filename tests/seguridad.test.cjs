@@ -22,9 +22,23 @@ async function levantar(t) {
     headers: { ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: 'Bearer ' + token } : {}), ...headers },
     body: body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body) });
   const login = async email => (await (await pedir('POST', '/sesiones', { body: { email, password: 'clave', baseDatos: 'mongodb' } })).json()).data.token;
-  return { pedir, login };
+  return { pedir, login, base };
 }
 const empresa = { simbolo: 'SEG', nombre: 'Seguridad', mercado: 'NASDAQ' };
+
+// Cuerpo de más de 1 MB: el servidor responde 413 en cuanto lee Content-Length, sin consumir el cuerpo, y según el
+// sistema operativo puede cortar la conexión mientras el cliente aún envía (EPIPE/ECONNRESET). Se toma la respuesta
+// en cuanto llega y se ignora el corte posterior del envío.
+function enviarGrande(url, token, cuerpo) {
+  return new Promise((resolver, rechazar) => {
+    let listo = false;
+    const req = require('node:http').request(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(cuerpo), Authorization: 'Bearer ' + token } }, res => {
+      listo = true; res.resume(); resolver(res.statusCode);
+    });
+    req.on('error', e => { if (!listo) rechazar(e); });
+    req.end(cuerpo);
+  });
+}
 
 test('API1 Autorización a nivel de objeto (BOLA): un usuario no lee, cambia ni borra registros de otro', async t => {
   const s = await levantar(t), ana = await s.login('ana@local'), beto = await s.login('beto@local');
@@ -63,8 +77,7 @@ test('API3 Autorización a nivel de propiedad: no se asigna el dueño ni campos 
 
 test('API4 Consumo de recursos: cuerpo > 1 MB → 413 y páginas de más de 100 → 400', async t => {
   const s = await levantar(t), ana = await s.login('ana@local');
-  const grande = JSON.stringify({ ...empresa, nombre: 'x'.repeat(1_100_000) });
-  assert.equal((await s.pedir('POST', '/empresas', { token: ana, body: grande })).status, 413);
+  assert.equal(await enviarGrande(s.base + '/empresas', ana, JSON.stringify({ ...empresa, nombre: 'x'.repeat(1_100_000) })), 413);
   assert.equal((await s.pedir('GET', '/empresas?limit=500', { token: ana })).status, 400);
   assert.equal((await s.pedir('POST', '/empresas/lote', { token: ana, body: { items: Array(101).fill(empresa) } })).status, 400);
 });

@@ -26,6 +26,13 @@ jobs:
       - run: npm --prefix web ci
       - run: npm run lint
       - run: npm test
+      # Si alguna prueba falla, su nombre y el detalle del error quedan como anotaciones visibles en el resumen
+      # de la ejecución (sin tener que abrir el registro completo).
+      - name: Detalle de las pruebas fallidas
+        if: failure()
+        run: |
+          node --test --test-reporter=tap scripts/check-models.cjs "tests/*.test.cjs" > tap.txt 2>&1 || true
+          grep -E "^\s*not ok|^\s+(error|expected|actual|code|failureType|location):" tap.txt | head -40 | while IFS= read -r linea; do echo "::error::$linea"; done
       - run: npm --prefix web run build
       # Regresión funcional E2E: la colección de Postman con Newman contra el servidor de pruebas (base en memoria).
       - name: E2E (Newman)
