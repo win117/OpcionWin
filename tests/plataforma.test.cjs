@@ -184,6 +184,19 @@ test('Archivos web: assets inmutables, index sin caché y gzip opcional',async t
   assert.match((await crudo(s.puerto,'/robots.txt')).headers['cache-control'],/max-age=3600/);
   for(const r of ['/assets/no-existe.js','/assets/..%2f..%2fpackage.json','/assets/%E0%A4%A']) { const x=await crudo(s.puerto,r,{'Accept-Encoding':'gzip'}); assert.ok([400,403,404].includes(x.status),r+' '+x.status); assert.doesNotMatch(x.headers['cache-control']||'',/immutable/); }
 });
+test('PWA: sw.js siempre revalidado y manifest con su tipo; la CSP no cambia',async t=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'web-')); t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+  fs.writeFileSync(path.join(dir,'index.html'),'<!doctype html><title>x</title>');
+  fs.writeFileSync(path.join(dir,'sw.js'),'self.addEventListener("fetch",()=>{});');
+  fs.writeFileSync(path.join(dir,'manifest.webmanifest'),'{"name":"WinOpciones"}');
+  const s=await levantar(t,{webDir:dir});
+  const sw=await crudo(s.puerto,'/sw.js');
+  assert.equal(sw.status,200); assert.equal(sw.headers['cache-control'],'no-cache'); assert.match(sw.headers['content-type'],/javascript/);
+  assert.equal(sw.cuerpo.toString(),'self.addEventListener("fetch",()=>{});','no es el index.html de respaldo');
+  const m=await crudo(s.puerto,'/manifest.webmanifest');
+  assert.equal(m.status,200); assert.match(m.headers['content-type'],/^application\/manifest\+json/);
+  assert.match(m.headers['content-security-policy'],/default-src 'self'.*script-src 'self'/);
+});
 test('JSON: gzip solo si el cliente lo acepta y supera 1 KB; conserva ETag de revisión',async t=>{
   const s=await levantar(t), Authorization=await s.token();
   const spec=await crudo(s.puerto,API+'/openapi.json',{'Accept-Encoding':'gzip'});

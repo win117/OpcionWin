@@ -357,6 +357,10 @@ input:disabled, select:disabled { opacity: .65; }
 .alert--warning { background: var(--warning-bg); color: var(--warning-fg); }
 .alert--success { background: var(--success-bg); color: var(--success-fg); }
 .alert--info { background: var(--info-bg); color: var(--info-fg); }
+/* PWA: avisos de versión nueva y sin conexión, entre la barra superior y el contenido. */
+.avisos-pwa { display: grid; gap: 8px; max-width: 1600px; width: 100%; margin: 0 auto; padding: 12px 24px 0; }
+.avisos-pwa .alert { align-items: center; }
+@media (max-width: 640px) { .avisos-pwa { padding: 10px 16px 0; } }
 .state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 28px 16px; text-align: center; color: var(--text-muted); }
 .state--loading { flex-direction: row; }
 .state--empty strong { color: var(--text); }

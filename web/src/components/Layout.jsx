@@ -10,6 +10,7 @@ import { BuscadorTicker } from './BuscadorTicker';
 import Logo from './Logo';
 import { MenuCuenta } from './MenuCuenta';
 import { MercadoEstado } from './MercadoEstado';
+import { AvisosPwa } from './AvisosPwa';
 import { tituloDeRuta } from '../utils/constants';
 
 // `icono`: trazo de 24×24, solo se ve en la barra inferior.
@@ -116,6 +117,7 @@ export function Layout() {
           )}
         </div>
       </header>
+      <AvisosPwa />
       <main id="contenido" className="content" tabIndex={-1}>
         <Suspense fallback={<Loading text="Cargando…" />}><Outlet context={{ integraciones, mercado }} /></Suspense>
       </main>

@@ -41,7 +41,8 @@ export function createApp(options = {}) {
     // /assets: nombres con hash, caché de un año. index.html: siempre se revalida para tomar el despliegue nuevo.
     const assets = path.join(web, 'assets');
     app.use('/assets', assetsComprimidos(assets), express.static(assets, { index: false, maxAge: '1y', immutable: true }));
-    app.use(express.static(web, { index: false, maxAge: '1h', setHeaders: (res, archivo) => { if (archivo.endsWith('.html')) res.set('Cache-Control', 'no-cache'); } }));
+    // sw.js (PWA) también sin caché: así cada despliegue se detecta como versión nueva del service worker.
+    app.use(express.static(web, { index: false, maxAge: '1h', setHeaders: (res, archivo) => { if (archivo.endsWith('.html') || path.basename(archivo) === 'sw.js') res.set('Cache-Control', 'no-cache'); } }));
     app.get(/^\/(?!api\/|health$|assets\/).*/, (_req, res) => res.sendFile('index.html', { root: web, cacheControl: false, headers: { 'Cache-Control': 'no-cache' } }));
   }
   app.use((_req,_res,next)=>next(boom.notFound('Ruta no encontrada.')));
